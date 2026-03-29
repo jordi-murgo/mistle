@@ -768,8 +768,6 @@ export type RuntimeArtifactLifecycleBuilder = (input: {
 
 type RuntimeArtifactLifecycle<THook> = {
   install: THook;
-  update?: THook;
-  remove: THook;
 };
 
 export type RuntimeArtifactSpec = {

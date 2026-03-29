@@ -17,8 +17,6 @@ const SandboxPaths = {
 
 function resolveArtifactLifecycleCommands(artifact: RuntimeArtifactSpec): {
   install: ReadonlyArray<RuntimeArtifactCommand>;
-  update?: ReadonlyArray<RuntimeArtifactCommand>;
-  remove: ReadonlyArray<RuntimeArtifactCommand>;
 } {
   const refs = {
     command: {
@@ -55,21 +53,8 @@ function resolveArtifactLifecycleCommands(artifact: RuntimeArtifactSpec): {
     typeof artifact.lifecycle.install === "function"
       ? artifact.lifecycle.install({ refs })
       : artifact.lifecycle.install;
-  const update =
-    artifact.lifecycle.update === undefined
-      ? undefined
-      : typeof artifact.lifecycle.update === "function"
-        ? artifact.lifecycle.update({ refs })
-        : artifact.lifecycle.update;
-  const remove =
-    typeof artifact.lifecycle.remove === "function"
-      ? artifact.lifecycle.remove({ refs })
-      : artifact.lifecycle.remove;
-
   return {
     install,
-    ...(update === undefined ? {} : { update }),
-    remove,
   };
 }
 
@@ -169,21 +154,6 @@ describe("compileGitHubEnterpriseServerBinding", () => {
             expect.stringContaining("https://github.com/cli/cli/releases/latest"),
           ],
           timeoutMs: 120_000,
-        },
-      ],
-      update: [
-        {
-          args: [
-            "sh",
-            "-euc",
-            expect.stringContaining("https://github.com/cli/cli/releases/latest"),
-          ],
-          timeoutMs: 120_000,
-        },
-      ],
-      remove: [
-        {
-          args: ["rm", "-f", "/usr/local/bin/gh"],
         },
       ],
     });
