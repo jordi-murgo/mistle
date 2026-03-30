@@ -99,15 +99,15 @@ export function resolveSessionHeaderStatusUi(input: {
 
 export function hasSessionTopAlert(input: {
   hasSandboxStatusError: boolean;
+  lifecycleErrorMessage: string | null;
   reconnectMessage: string | null;
-  startErrorMessage: string | null;
   sandboxFailureMessage: string | null;
   stoppedSessionMessage: string | null;
 }): boolean {
   return (
     input.hasSandboxStatusError ||
+    input.lifecycleErrorMessage !== null ||
     input.reconnectMessage !== null ||
-    input.startErrorMessage !== null ||
     input.sandboxFailureMessage !== null ||
     input.stoppedSessionMessage !== null
   );

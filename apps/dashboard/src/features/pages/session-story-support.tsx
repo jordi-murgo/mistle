@@ -1,8 +1,9 @@
 import { Badge } from "@mistle/ui";
 
+import type { ChatComposerStatusMessage } from "../chat/components/chat-composer.js";
 import { noop, noopRespondToServerRequest } from "../chat/components/chat-story-support.js";
 import {
-  CodexFixtureSessionComposerProps,
+  SessionComposerFixtureProps,
   CodexFixtureSessionEntriesWithExploringGroup,
   CodexFixtureSessionServerRequests,
 } from "../session-agents/codex/fixtures/session-fixtures.js";
@@ -28,20 +29,27 @@ export type SessionConversationStoryArgs = {
   serverRequestPanelEntries: React.ComponentProps<
     typeof SessionConversationMainContent
   >["serverRequestPanelEntries"];
+  sessionStatusMessage: ChatComposerStatusMessage | null;
 };
 
 export const StorySessionConversationPaneArgs = {
   chatEntries: CodexFixtureSessionEntriesWithExploringGroup,
-  composerProps: CodexFixtureSessionComposerProps,
+  composerProps: SessionComposerFixtureProps,
   isRespondingToServerRequest: false,
   onRespondToServerRequest: noopRespondToServerRequest,
   serverRequestPanelEntries: CodexFixtureSessionServerRequests,
+  sessionStatusMessage: null,
 } satisfies SessionConversationStoryArgs;
 
 export function createStorySessionMainContent(
   overrides?: Partial<SessionConversationStoryArgs>,
 ): React.JSX.Element {
-  return <SessionConversationMainContent {...StorySessionConversationPaneArgs} {...overrides} />;
+  const { sessionStatusMessage: _sessionStatusMessage, ...mainContentProps } = {
+    ...StorySessionConversationPaneArgs,
+    ...overrides,
+  };
+
+  return <SessionConversationMainContent {...mainContentProps} />;
 }
 
 export function createStorySessionBottomPanel(

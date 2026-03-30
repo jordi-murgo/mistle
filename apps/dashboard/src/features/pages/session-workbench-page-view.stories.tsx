@@ -2,6 +2,14 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { noop } from "../chat/components/chat-story-support.js";
 import {
+  SessionComposerFixturePropsForLoadingModel,
+  SessionComposerFixturePropsForNonImageCapableModel,
+  SessionComposerFixturePropsForUnavailableModel,
+  SessionComposerFixtureStatusMessageForLoadingModel,
+  SessionComposerFixtureStatusMessageForNonImageCapableModel,
+  SessionComposerFixtureStatusMessageForUnavailableModel,
+} from "../session-agents/codex/fixtures/session-fixtures.js";
+import {
   createStorySessionBottomPanel,
   createStorySessionMainContent,
   SessionWorkbenchStoryChrome,
@@ -61,6 +69,33 @@ export const WithAlerts: Story = {
 export const WithSecondaryPane: Story = {
   args: {
     isSecondaryPanelVisible: true,
+  },
+};
+
+export const WithNonImageCapableModelWarning: Story = {
+  args: {
+    primaryBottomPanel: createStorySessionBottomPanel({
+      composerProps: SessionComposerFixturePropsForNonImageCapableModel,
+      sessionStatusMessage: SessionComposerFixtureStatusMessageForNonImageCapableModel,
+    }),
+  },
+};
+
+export const WithUnavailableModelAlert: Story = {
+  args: {
+    primaryBottomPanel: createStorySessionBottomPanel({
+      composerProps: SessionComposerFixturePropsForUnavailableModel,
+      sessionStatusMessage: SessionComposerFixtureStatusMessageForUnavailableModel,
+    }),
+  },
+};
+
+export const WithLoadingSelectedModelAlert: Story = {
+  args: {
+    primaryBottomPanel: createStorySessionBottomPanel({
+      composerProps: SessionComposerFixturePropsForLoadingModel,
+      sessionStatusMessage: SessionComposerFixtureStatusMessageForLoadingModel,
+    }),
   },
 };
 

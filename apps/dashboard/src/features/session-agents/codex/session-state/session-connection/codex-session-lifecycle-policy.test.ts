@@ -6,7 +6,7 @@ import {
 } from "./codex-session-lifecycle-policy.js";
 
 describe("codex session lifecycle policy", () => {
-  it("resets session state when the transport closes or errors", () => {
+  it("disconnects the transport when the connection closes or errors", () => {
     expect(
       resolveCodexConnectionStateTransition({
         hasConnectedSession: false,
@@ -14,9 +14,9 @@ describe("codex session lifecycle policy", () => {
         errorMessage: null,
       }),
     ).toEqual({
+      shouldDisconnectSession: true,
+      lifecycleErrorMessage: "The Codex session connection closed.",
       recoverableDisconnectMessage: null,
-      shouldResetSession: true,
-      startErrorMessage: "The Codex session connection closed.",
     });
 
     expect(
@@ -26,13 +26,13 @@ describe("codex session lifecycle policy", () => {
         errorMessage: "Socket failed.",
       }),
     ).toEqual({
+      shouldDisconnectSession: true,
+      lifecycleErrorMessage: "Socket failed.",
       recoverableDisconnectMessage: null,
-      shouldResetSession: true,
-      startErrorMessage: "Socket failed.",
     });
   });
 
-  it("surfaces connected-session transport loss as recoverable disconnect", () => {
+  it("surfaces connected-session transport loss as a recoverable disconnect", () => {
     expect(
       resolveCodexConnectionStateTransition({
         hasConnectedSession: true,
@@ -40,13 +40,13 @@ describe("codex session lifecycle policy", () => {
         errorMessage: "Stream dropped.",
       }),
     ).toEqual({
+      shouldDisconnectSession: true,
+      lifecycleErrorMessage: null,
       recoverableDisconnectMessage: "Stream dropped.",
-      shouldResetSession: true,
-      startErrorMessage: null,
     });
   });
 
-  it("does not reset session state for non-terminal transport states", () => {
+  it("does not disconnect the transport for non-terminal transport states", () => {
     expect(
       resolveCodexConnectionStateTransition({
         hasConnectedSession: false,
@@ -54,9 +54,9 @@ describe("codex session lifecycle policy", () => {
         errorMessage: null,
       }),
     ).toEqual({
+      shouldDisconnectSession: false,
+      lifecycleErrorMessage: null,
       recoverableDisconnectMessage: null,
-      shouldResetSession: false,
-      startErrorMessage: null,
     });
   });
 

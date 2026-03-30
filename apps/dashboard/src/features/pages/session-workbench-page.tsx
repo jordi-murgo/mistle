@@ -6,6 +6,7 @@ import { useLocation, useParams } from "react-router";
 import { useAppShellHeaderActions } from "../shell/app-shell-header-actions.js";
 import {
   SessionConversationBottomPanel,
+  SessionConversationBottomPanelController,
   SessionConversationMainContent,
   type SessionConversationComposerProps,
 } from "./session-conversation-pane.js";
@@ -146,10 +147,10 @@ function SessionWorkbenchPageContent(input: {
           : "Could not load sandbox status.",
     });
   }
-  if (workbench.startErrorMessage !== null) {
+  if (workbench.lifecycleErrorMessage !== null) {
     alerts.push({
       title: "Session connection error",
-      description: workbench.startErrorMessage,
+      description: workbench.lifecycleErrorMessage,
     });
   }
   if (workbench.sessionReconnectState.message !== null) {
@@ -182,6 +183,7 @@ function SessionWorkbenchPageContent(input: {
             composerProps={createEmptyComposerProps()}
             isRespondingToServerRequest={false}
             onRespondToServerRequest={function onRespondToServerRequest() {}}
+            sessionStatusMessage={null}
             serverRequestPanelEntries={[]}
           />
         }
@@ -190,7 +192,6 @@ function SessionWorkbenchPageContent(input: {
         mainContent={
           <SessionConversationMainContent
             chatEntries={[]}
-            composerProps={createEmptyComposerProps()}
             isRespondingToServerRequest={false}
             onRespondToServerRequest={function onRespondToServerRequest() {}}
             serverRequestPanelEntries={[]}
@@ -208,7 +209,6 @@ function SessionWorkbenchPageContent(input: {
       mainContent={
         <SessionConversationMainContent
           chatEntries={conversationPane.chatState.entries}
-          composerProps={conversationPane.composerProps}
           isRespondingToServerRequest={
             conversationPane.serverRequestsState.isRespondingToServerRequest
           }
@@ -224,13 +224,14 @@ function SessionWorkbenchPageContent(input: {
               requestStoppedSandboxResume={workbench.requestStoppedSandboxResume}
             />
           ) : null}
-          <SessionConversationBottomPanel
+          <SessionConversationBottomPanelController
             chatEntries={conversationPane.chatState.entries}
-            composerProps={conversationPane.composerProps}
+            composerStateInput={conversationPane.composerStateInput}
             isRespondingToServerRequest={
               conversationPane.serverRequestsState.isRespondingToServerRequest
             }
             onRespondToServerRequest={conversationPane.serverRequestsState.respondToServerRequest}
+            key={input.sandboxInstanceId ?? "missing-session"}
             serverRequestPanelEntries={unmatchedServerRequests}
           />
         </>
@@ -271,16 +272,21 @@ function SessionWorkbenchAutoResumeOnEntry(input: {
 
 function createEmptyComposerProps(): SessionConversationComposerProps {
   return {
-    canInterruptTurn: false,
-    canSteerTurn: false,
-    completedErrorMessage: null,
     composerText: "",
-    isConnected: false,
-    isInterruptingTurn: false,
-    isStartingTurn: false,
-    isSteeringTurn: false,
-    isUploadingAttachments: false,
-    isUpdatingComposerConfig: false,
+    composerUi: {
+      action: {
+        canInterruptTurn: false,
+        canSteerTurn: false,
+        canSubmitTurns: false,
+        isInterruptingTurn: false,
+        isStartingTurn: false,
+        isSteeringTurn: false,
+      },
+      completedErrorMessage: null,
+      isConnected: false,
+      isUpdatingConfig: false,
+      isUploadingAttachments: false,
+    },
     modelOptions: [],
     onComposerTextChange: function onComposerTextChange() {},
     onModelChange: function onModelChange() {},

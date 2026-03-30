@@ -29,22 +29,30 @@ function createPendingTurnId(): string {
 }
 
 function buildTurnRequest(input: {
-  prompt: string;
-  attachments?: readonly CodexTurnInputLocalImageItem[];
+  submittedPrompt: string;
+  submittedAttachments?: readonly CodexTurnInputLocalImageItem[];
+  transcriptPrompt?: string;
+  displayAttachments?: readonly CodexTurnInputLocalImageItem[];
 }): {
-  trimmedPrompt: string;
-  attachments: readonly CodexTurnInputLocalImageItem[];
+  submittedPrompt: string;
+  transcriptPrompt: string;
+  submittedAttachments: readonly CodexTurnInputLocalImageItem[];
+  displayAttachments: readonly CodexTurnInputLocalImageItem[];
   items: ReturnType<typeof buildCodexTurnInputItems>;
 } {
-  const trimmedPrompt = input.prompt.trim();
-  const attachments = input.attachments ?? [];
+  const submittedPrompt = input.submittedPrompt.trim();
+  const transcriptPrompt = (input.transcriptPrompt ?? input.submittedPrompt).trim();
+  const submittedAttachments = input.submittedAttachments ?? [];
+  const displayAttachments = input.displayAttachments ?? submittedAttachments;
 
   return {
-    trimmedPrompt,
-    attachments,
+    submittedPrompt,
+    transcriptPrompt,
+    submittedAttachments,
+    displayAttachments,
     items: buildCodexTurnInputItems({
-      text: trimmedPrompt,
-      attachments,
+      text: submittedPrompt,
+      attachments: submittedAttachments,
     }),
   };
 }
@@ -52,8 +60,7 @@ function buildTurnRequest(input: {
 export function useCodexChatController(input: {
   rpcClientRef: RefObject<CodexJsonRpcClient | null>;
   threadIdRef: RefObject<string | null>;
-  recordRecentResponse: (payload: unknown) => void;
-  setStartErrorMessage: (message: string | null) => void;
+  setSessionErrorMessage: (message: string | null) => void;
 }) {
   const [chatState, dispatchChatAction] = useReducer(
     reduceCodexChatState,
@@ -75,18 +82,18 @@ export function useCodexChatController(input: {
     [],
   );
 
-  const hydrateChatFromThread = useCallback(
+  const hydrateThreadStateFromRead = useCallback(
     async (hydrateInput?: {
       rpcClient?: CodexJsonRpcClient;
       threadId?: string | null;
       generation?: number;
       ensureCurrentGeneration?: (generation: number) => void;
-    }): Promise<void> => {
+    }): Promise<"empty" | "hydrated"> => {
       const rpcClient = hydrateInput?.rpcClient ?? input.rpcClientRef.current;
       const threadId = hydrateInput?.threadId ?? input.threadIdRef.current;
 
       if (rpcClient === null || threadId === null) {
-        return;
+        return "empty";
       }
 
       try {
@@ -105,26 +112,42 @@ export function useCodexChatController(input: {
           type: "hydrate_from_thread_read",
           turns: thread.turns,
         });
-        input.recordRecentResponse(thread.response);
+        return "hydrated";
       } catch (error) {
         if (isThreadNotMaterializedError(error)) {
           dispatchChatAction({ type: "reset" });
-          input.setStartErrorMessage(null);
-          return;
+          input.setSessionErrorMessage(null);
+          return "empty";
         }
 
-        input.setStartErrorMessage(
-          error instanceof Error ? error.message : "Could not read thread.",
-        );
+        throw error;
       }
     },
-    [input],
+    [input.rpcClientRef, input.setSessionErrorMessage, input.threadIdRef],
   );
+
+  const hydrateInitialThread = useCallback(
+    async (hydrateInput?: {
+      rpcClient?: CodexJsonRpcClient;
+      threadId?: string | null;
+      generation?: number;
+      ensureCurrentGeneration?: (generation: number) => void;
+    }): Promise<"empty" | "hydrated"> => {
+      return await hydrateThreadStateFromRead(hydrateInput);
+    },
+    [hydrateThreadStateFromRead],
+  );
+
+  const hydrateChatFromThread = useCallback(async (): Promise<void> => {
+    await hydrateThreadStateFromRead();
+  }, [hydrateThreadStateFromRead]);
 
   const startTurnMutation = useMutation({
     mutationFn: async (turnInput: {
-      prompt: string;
-      attachments?: readonly CodexTurnInputLocalImageItem[];
+      submittedPrompt: string;
+      submittedAttachments?: readonly CodexTurnInputLocalImageItem[];
+      transcriptPrompt?: string;
+      displayAttachments?: readonly CodexTurnInputLocalImageItem[];
     }) => {
       const rpcClient = input.rpcClientRef.current;
       const threadId = input.threadIdRef.current;
@@ -139,8 +162,8 @@ export function useCodexChatController(input: {
       dispatchChatAction({
         type: "start_turn_requested",
         clientTurnId,
-        prompt: turnRequest.trimmedPrompt,
-        attachments: turnRequest.attachments,
+        prompt: turnRequest.transcriptPrompt,
+        attachments: turnRequest.displayAttachments,
       });
 
       try {
@@ -155,7 +178,6 @@ export function useCodexChatController(input: {
           turnId: startedTurn.turnId,
           status: startedTurn.status,
         });
-        input.recordRecentResponse(startedTurn.response);
       } catch (error) {
         dispatchChatAction({
           type: "start_turn_failed",
@@ -164,9 +186,6 @@ export function useCodexChatController(input: {
         throw error;
       }
     },
-    onError: (error) => {
-      input.setStartErrorMessage(error instanceof Error ? error.message : "Could not start turn.");
-    },
   });
 
   const reloadChatMutation = useMutation({
@@ -174,7 +193,9 @@ export function useCodexChatController(input: {
       await hydrateChatFromThread();
     },
     onError: (error) => {
-      input.setStartErrorMessage(error instanceof Error ? error.message : "Could not reload chat.");
+      input.setSessionErrorMessage(
+        error instanceof Error ? error.message : "Could not reload chat.",
+      );
     },
   });
 
@@ -188,16 +209,14 @@ export function useCodexChatController(input: {
         throw new Error("No active turn is available to interrupt.");
       }
 
-      const interruptedTurn = await interruptCodexTurn({
+      await interruptCodexTurn({
         rpcClient,
         threadId,
         turnId,
       });
-
-      input.recordRecentResponse(interruptedTurn.response);
     },
     onError: (error) => {
-      input.setStartErrorMessage(
+      input.setSessionErrorMessage(
         error instanceof Error ? error.message : "Could not interrupt turn.",
       );
     },
@@ -205,8 +224,10 @@ export function useCodexChatController(input: {
 
   const steerTurnMutation = useMutation({
     mutationFn: async (turnInput: {
-      prompt: string;
-      attachments?: readonly CodexTurnInputLocalImageItem[];
+      submittedPrompt: string;
+      submittedAttachments?: readonly CodexTurnInputLocalImageItem[];
+      transcriptPrompt?: string;
+      displayAttachments?: readonly CodexTurnInputLocalImageItem[];
     }) => {
       const rpcClient = input.rpcClientRef.current;
       const threadId = input.threadIdRef.current;
@@ -218,17 +239,12 @@ export function useCodexChatController(input: {
 
       const turnRequest = buildTurnRequest(turnInput);
 
-      const steeredTurn = await steerCodexTurn({
+      await steerCodexTurn({
         rpcClient,
         threadId,
         turnId,
         input: turnRequest.items,
       });
-
-      input.recordRecentResponse(steeredTurn.response);
-    },
-    onError: (error) => {
-      input.setStartErrorMessage(error instanceof Error ? error.message : "Could not steer turn.");
     },
   });
 
@@ -248,6 +264,7 @@ export function useCodexChatController(input: {
     chatState,
     resetChat,
     handleNotificationReceived,
+    hydrateInitialThread,
     hydrateChatFromThread,
     isStartingTurn: startTurnMutation.isPending,
     isReloadingChat: reloadChatMutation.isPending,
@@ -257,8 +274,10 @@ export function useCodexChatController(input: {
     canSteerTurn,
     startTurn: useCallback(
       async (turnInput: {
-        prompt: string;
-        attachments?: readonly CodexTurnInputLocalImageItem[];
+        submittedPrompt: string;
+        submittedAttachments?: readonly CodexTurnInputLocalImageItem[];
+        transcriptPrompt?: string;
+        displayAttachments?: readonly CodexTurnInputLocalImageItem[];
       }): Promise<void> => {
         await startTurnMutation.mutateAsync(turnInput);
       },
@@ -272,8 +291,10 @@ export function useCodexChatController(input: {
     }, [interruptTurnMutation]),
     steerTurn: useCallback(
       async (turnInput: {
-        prompt: string;
-        attachments?: readonly CodexTurnInputLocalImageItem[];
+        submittedPrompt: string;
+        submittedAttachments?: readonly CodexTurnInputLocalImageItem[];
+        transcriptPrompt?: string;
+        displayAttachments?: readonly CodexTurnInputLocalImageItem[];
       }): Promise<void> => {
         await steerTurnMutation.mutateAsync(turnInput);
       },

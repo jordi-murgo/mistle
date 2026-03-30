@@ -108,8 +108,8 @@ describe("hasSessionTopAlert", () => {
       description: "returns false when there are no visible alerts",
       input: {
         hasSandboxStatusError: false,
+        lifecycleErrorMessage: null,
         reconnectMessage: null,
-        startErrorMessage: null,
         sandboxFailureMessage: null,
         stoppedSessionMessage: null,
       },
@@ -119,8 +119,8 @@ describe("hasSessionTopAlert", () => {
       description: "returns true for a connection error",
       input: {
         hasSandboxStatusError: false,
+        lifecycleErrorMessage: "Could not connect.",
         reconnectMessage: null,
-        startErrorMessage: "Could not connect.",
         sandboxFailureMessage: null,
         stoppedSessionMessage: null,
       },
@@ -130,8 +130,8 @@ describe("hasSessionTopAlert", () => {
       description: "returns true for a stopped-session alert",
       input: {
         hasSandboxStatusError: false,
+        lifecycleErrorMessage: null,
         reconnectMessage: null,
-        startErrorMessage: null,
         sandboxFailureMessage: null,
         stoppedSessionMessage: "This sandbox is stopped.",
       },
@@ -141,8 +141,8 @@ describe("hasSessionTopAlert", () => {
       description: "returns true for a reconnecting-session alert",
       input: {
         hasSandboxStatusError: false,
+        lifecycleErrorMessage: null,
         reconnectMessage: "Reconnecting session after stream reset.",
-        startErrorMessage: null,
         sandboxFailureMessage: null,
         stoppedSessionMessage: null,
       },

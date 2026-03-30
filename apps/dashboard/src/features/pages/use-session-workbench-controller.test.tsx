@@ -92,12 +92,14 @@ describe("useSessionWorkbenchController", () => {
     expect(result.current.workbench.ptyState.output.chunks).toEqual([]);
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(false);
     expect(result.current.workbench.terminalPanelState.panelSize).toBe(DEFAULT_TERMINAL_PANEL_SIZE);
-    expect(result.current.workbench.startErrorMessage).toBeNull();
+    expect(result.current.workbench.lifecycleErrorMessage).toBeNull();
     expect(result.current.workbench.sandboxLifecycleStatus).toBeNull();
     expect(result.current.workbench.sandboxFailureMessage).toBeNull();
     expect(result.current.conversationPane.chatState.entries).toEqual([]);
-    expect(result.current.conversationPane.composerProps.isConnected).toBe(false);
-    expect(result.current.conversationPane.composerProps.modelOptions).toEqual([]);
+    expect(result.current.conversationPane.composerStateInput.connectedSession).toBeNull();
+    expect(result.current.conversationPane.composerStateInput.bootstrap.availableModels).toEqual(
+      [],
+    );
     expect(result.current.conversationPane.serverRequestsState.pendingServerRequests).toEqual([]);
   });
 
@@ -129,7 +131,7 @@ describe("useSessionWorkbenchController", () => {
       observation: {
         canConnect: true,
         connected: false,
-        hasStartError: false,
+        hasLifecycleError: false,
         isStartingSession: false,
         isWaitingForAutomationThread: false,
         sandboxInstanceId: "sbi_123",
@@ -187,7 +189,7 @@ describe("useSessionWorkbenchController", () => {
         observation: {
           canConnect: false,
           connected: false,
-          hasStartError: false,
+          hasLifecycleError: false,
           isStartingSession: false,
           isWaitingForAutomationThread: false,
           sandboxInstanceId: "sbi_123",
@@ -202,7 +204,7 @@ describe("useSessionWorkbenchController", () => {
         observation: {
           canConnect: true,
           connected: false,
-          hasStartError: false,
+          hasLifecycleError: false,
           isStartingSession: false,
           isWaitingForAutomationThread: false,
           sandboxInstanceId: "sbi_123",
@@ -232,7 +234,7 @@ describe("useSessionWorkbenchController", () => {
         observation: {
           canConnect: true,
           connected: false,
-          hasStartError: false,
+          hasLifecycleError: false,
           isStartingSession: false,
           isWaitingForAutomationThread: false,
           sandboxInstanceId: "sbi_123",
@@ -260,7 +262,7 @@ describe("useSessionWorkbenchController", () => {
         observation: {
           canConnect: false,
           connected: false,
-          hasStartError: false,
+          hasLifecycleError: false,
           isStartingSession: false,
           isWaitingForAutomationThread: false,
           sandboxInstanceId: "sbi_123",
