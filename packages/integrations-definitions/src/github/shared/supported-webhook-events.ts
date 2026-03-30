@@ -80,6 +80,22 @@ const GitHubIssueCommentTargetParameter: IntegrationWebhookEventParameterDefinit
   placeholder: "Any comment target",
 };
 
+function createGitHubExplicitInvocationParameter(
+  payloadPath: ReadonlyArray<string>,
+): IntegrationWebhookEventParameterDefinition {
+  return {
+    id: "explicitInvocation",
+    label: "explicit mention",
+    kind: "string",
+    payloadPath: [...payloadPath],
+    matchMode: "contains_token",
+    defaultValue: "@mistlebot",
+    defaultEnabled: true,
+    controlVariant: "explicit-invocation",
+    placeholder: 'Require "@mistlebot"',
+  };
+}
+
 const GitHubBaseBranchParameter: IntegrationWebhookEventParameterDefinition = {
   id: "baseBranch",
   label: "base branch",
@@ -144,7 +160,11 @@ export const GitHubSupportedWebhookEvents: readonly IntegrationWebhookEventDefin
       GitHubIssueConversationKeyOption,
       GitHubRepositoryConversationKeyOption,
     ],
-    parameters: [GitHubRepositoryParameter, GitHubAuthorParameter],
+    parameters: [
+      createGitHubExplicitInvocationParameter(["issue", "body"]),
+      GitHubRepositoryParameter,
+      GitHubAuthorParameter,
+    ],
   }),
   createGitHubWebhookEventDefinition({
     eventType: "github.issues.closed",
@@ -178,6 +198,7 @@ export const GitHubSupportedWebhookEvents: readonly IntegrationWebhookEventDefin
       GitHubRepositoryConversationKeyOption,
     ],
     parameters: [
+      createGitHubExplicitInvocationParameter(["comment", "body"]),
       GitHubIssueCommentTargetParameter,
       GitHubRepositoryParameter,
       GitHubCommenterParameter,
@@ -192,7 +213,12 @@ export const GitHubSupportedWebhookEvents: readonly IntegrationWebhookEventDefin
       GitHubPullRequestConversationKeyOption,
       GitHubRepositoryConversationKeyOption,
     ],
-    parameters: [GitHubRepositoryParameter, GitHubAuthorParameter, GitHubBaseBranchParameter],
+    parameters: [
+      createGitHubExplicitInvocationParameter(["pull_request", "body"]),
+      GitHubRepositoryParameter,
+      GitHubAuthorParameter,
+      GitHubBaseBranchParameter,
+    ],
   }),
   createGitHubWebhookEventDefinition({
     eventType: "github.pull_request.closed",
@@ -241,7 +267,12 @@ export const GitHubSupportedWebhookEvents: readonly IntegrationWebhookEventDefin
       GitHubPullRequestConversationKeyOption,
       GitHubRepositoryConversationKeyOption,
     ],
-    parameters: [GitHubRepositoryParameter, GitHubAuthorParameter, GitHubBaseBranchParameter],
+    parameters: [
+      createGitHubExplicitInvocationParameter(["review", "body"]),
+      GitHubRepositoryParameter,
+      GitHubAuthorParameter,
+      GitHubBaseBranchParameter,
+    ],
   }),
   createGitHubWebhookEventDefinition({
     eventType: "github.pull_request_review_comment.created",
@@ -252,7 +283,12 @@ export const GitHubSupportedWebhookEvents: readonly IntegrationWebhookEventDefin
       GitHubPullRequestConversationKeyOption,
       GitHubRepositoryConversationKeyOption,
     ],
-    parameters: [GitHubRepositoryParameter, GitHubCommenterParameter, GitHubBaseBranchParameter],
+    parameters: [
+      createGitHubExplicitInvocationParameter(["comment", "body"]),
+      GitHubRepositoryParameter,
+      GitHubCommenterParameter,
+      GitHubBaseBranchParameter,
+    ],
   }),
   createGitHubWebhookEventDefinition({
     eventType: "github.push.pushed",

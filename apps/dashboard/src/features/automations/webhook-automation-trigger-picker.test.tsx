@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 
@@ -263,14 +263,14 @@ describe("WebhookAutomationTriggerPicker", () => {
 
   it("reuses the trigger validation copy in the empty state and highlights the container", () => {
     const { container: renderContainer } = renderTriggerPicker({
-      error: "Select at least one trigger.",
+      error: "Please add a trigger",
       hasConnectedIntegrations: true,
       selectedConnectionId: "icn_01kkk1g84mfetvga8a4b853k27",
       selectedTriggerIds: [],
       triggerParameterValues: {},
     });
 
-    const errorMessage = screen.getByText("Select at least one trigger.");
+    const errorMessage = screen.getByText("Please add a trigger");
     expect(errorMessage).toBeDefined();
 
     const container = errorMessage.parentElement;
@@ -328,6 +328,65 @@ describe("WebhookAutomationTriggerPicker", () => {
     });
 
     expect(screen.getAllByText("pull request").length).toBeGreaterThan(0);
+  });
+
+  it("renders explicit invocation parameters as an enabled switch", () => {
+    renderTriggerPicker({
+      hasConnectedIntegrations: true,
+      selectedConnectionId: GitHubConnectionId,
+      selectedTriggerIds: [
+        createWebhookAutomationTriggerId({
+          connectionId: GitHubConnectionId,
+          eventType: "github.issue_comment.created",
+        }),
+      ],
+      triggerParameterValues: {
+        [createWebhookAutomationTriggerId({
+          connectionId: GitHubConnectionId,
+          eventType: "github.issue_comment.created",
+        })]: {
+          explicitInvocation: "@mistlebot",
+        },
+      },
+    });
+
+    const toggle = screen
+      .getAllByRole("switch", {
+        name: /Only respond to @mistlebot/,
+      })
+      .find((element) => element.getAttribute("aria-checked") === "true");
+    if (toggle === undefined) {
+      throw new Error("Expected explicit invocation switch to be enabled.");
+    }
+
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("renders the saved explicit invocation value instead of the default", () => {
+    renderTriggerPicker({
+      hasConnectedIntegrations: true,
+      selectedConnectionId: GitHubConnectionId,
+      selectedTriggerIds: [
+        createWebhookAutomationTriggerId({
+          connectionId: GitHubConnectionId,
+          eventType: "github.issue_comment.created",
+        }),
+      ],
+      triggerParameterValues: {
+        [createWebhookAutomationTriggerId({
+          connectionId: GitHubConnectionId,
+          eventType: "github.issue_comment.created",
+        })]: {
+          explicitInvocation: "@review-bot",
+        },
+      },
+    });
+
+    expect(
+      screen.getByRole("switch", {
+        name: /Only respond to @review-bot/,
+      }),
+    ).toBeDefined();
   });
 
   it("renders unset enum-backed trigger parameters as placeholders", () => {
@@ -404,6 +463,60 @@ describe("WebhookAutomationTriggerPicker", () => {
     expect(
       within(container).getByRole("button", { name: "Remove Issue comment created trigger" }),
     ).toBeDefined();
+  });
+
+  it("shows a dialog instead of adding a second trigger", async () => {
+    const { container } = renderTriggerPicker({
+      hasConnectedIntegrations: true,
+      selectedConnectionId: GitHubConnectionId,
+      selectedTriggerIds: [
+        createWebhookAutomationTriggerId({
+          connectionId: GitHubConnectionId,
+          eventType: "github.issue_comment.created",
+        }),
+      ],
+      triggerParameterValues: {},
+      useStatefulSelection: true,
+    });
+
+    const addTriggerButton = container.querySelector('button[data-slot="input-group-button"]');
+    if (addTriggerButton === null) {
+      throw new Error("Expected add trigger button.");
+    }
+
+    fireEvent.click(addTriggerButton);
+    fireEvent.click(screen.getByRole("option", { name: "Pull request opened" }));
+
+    expect(screen.getByText("Only one trigger is supported")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Automations currently support only one trigger. Remove the existing trigger before adding a different one.",
+      ),
+    ).toBeDefined();
+    expect(
+      within(container).queryByRole("button", {
+        hidden: true,
+        name: "Remove Pull request opened trigger",
+      }),
+    ).toBeNull();
+    expect(
+      within(container).getByRole("button", {
+        hidden: true,
+        name: "Remove Issue comment created trigger",
+      }),
+    ).toBeDefined();
+
+    const closeButton = screen
+      .getAllByRole("button", { name: "Close" })
+      .find((element) => element.textContent === "Close");
+    if (closeButton === undefined) {
+      throw new Error("Expected dialog close button.");
+    }
+
+    fireEvent.click(closeButton);
+    await waitFor(() => {
+      expect(screen.queryByText("Only one trigger is supported")).toBeNull();
+    });
   });
 
   it("resets unsaved resource query text when the selected value changes", () => {

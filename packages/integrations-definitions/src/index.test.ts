@@ -58,6 +58,34 @@ describe("integrations-definitions index", () => {
           providerEventType: "issue_comment",
           displayName: "Issue comment created",
           category: "Issues",
+          parameters: expect.arrayContaining([
+            expect.objectContaining({
+              id: "explicitInvocation",
+              kind: "string",
+              payloadPath: ["comment", "body"],
+              matchMode: "contains_token",
+              defaultValue: "@mistlebot",
+              defaultEnabled: true,
+              controlVariant: "explicit-invocation",
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          eventType: "github.pull_request_review.submitted",
+          providerEventType: "pull_request_review",
+          displayName: "Pull request review submitted",
+          category: "Pull requests",
+          parameters: expect.arrayContaining([
+            expect.objectContaining({
+              id: "explicitInvocation",
+              kind: "string",
+              payloadPath: ["review", "body"],
+              matchMode: "contains_token",
+              defaultValue: "@mistlebot",
+              defaultEnabled: true,
+              controlVariant: "explicit-invocation",
+            }),
+          ]),
         }),
       ]),
     );
