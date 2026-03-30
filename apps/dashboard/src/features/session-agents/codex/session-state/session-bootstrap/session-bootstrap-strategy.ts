@@ -1,4 +1,13 @@
-import type { ConnectedCodexSession } from "../codex-session-types.js";
+export type BootstrapConnectionContext = {
+  connectionKey: string;
+  threadId: string;
+};
+
+export type BootstrapConnectionCandidate = {
+  sandboxInstanceId: string;
+  connectedAtIso: string;
+  threadId: string | null;
+};
 
 export type SessionBootstrapPlan = {
   connectionKey: string | null;
@@ -6,15 +15,28 @@ export type SessionBootstrapPlan = {
   threadSyncKey: string | null;
 };
 
-function createConnectionKey(connectedSession: ConnectedCodexSession): string {
-  return `${connectedSession.sandboxInstanceId}:${connectedSession.connectedAtIso}`;
+function createConnectionKey(candidate: BootstrapConnectionCandidate): string {
+  return `${candidate.sandboxInstanceId}:${candidate.connectedAtIso}`;
+}
+
+export function resolveBootstrapConnectionContext(input: {
+  connectionCandidate: BootstrapConnectionCandidate | null;
+}): BootstrapConnectionContext | null {
+  if (input.connectionCandidate === null || input.connectionCandidate.threadId === null) {
+    return null;
+  }
+
+  return {
+    connectionKey: createConnectionKey(input.connectionCandidate),
+    threadId: input.connectionCandidate.threadId,
+  };
 }
 
 export function resolveSessionBootstrapPlan(input: {
-  connectedSession: ConnectedCodexSession | null;
+  bootstrapConnectionContext: BootstrapConnectionContext | null;
   establishedConnectionKey: string | null;
 }): SessionBootstrapPlan {
-  if (input.connectedSession === null || input.connectedSession.threadId === null) {
+  if (input.bootstrapConnectionContext === null) {
     return {
       connectionKey: null,
       shouldLoadBootstrapData: false,
@@ -22,11 +44,11 @@ export function resolveSessionBootstrapPlan(input: {
     };
   }
 
-  const connectionKey = createConnectionKey(input.connectedSession);
+  const connectionKey = input.bootstrapConnectionContext.connectionKey;
 
   return {
     connectionKey,
     shouldLoadBootstrapData: input.establishedConnectionKey !== connectionKey,
-    threadSyncKey: `${connectionKey}:${input.connectedSession.threadId}`,
+    threadSyncKey: `${connectionKey}:${input.bootstrapConnectionContext.threadId}`,
   };
 }

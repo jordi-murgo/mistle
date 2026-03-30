@@ -3,12 +3,12 @@ import { TerminalIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo } from "react";
 import { useLocation, useParams } from "react-router";
 
+import type { ChatComposerViewModel } from "../chat/components/chat-composer.js";
 import { useAppShellHeaderActions } from "../shell/app-shell-header-actions.js";
 import {
   SessionConversationBottomPanel,
   SessionConversationBottomPanelController,
   SessionConversationMainContent,
-  type SessionConversationComposerProps,
 } from "./session-conversation-pane.js";
 import { SessionTerminalPanel } from "./session-terminal-panel.js";
 import {
@@ -180,10 +180,9 @@ function SessionWorkbenchPageContent(input: {
         primaryBottomPanel={
           <SessionConversationBottomPanel
             chatEntries={[]}
-            composerProps={createEmptyComposerProps()}
+            composerViewModel={createEmptyComposerViewModel()}
             isRespondingToServerRequest={false}
             onRespondToServerRequest={function onRespondToServerRequest() {}}
-            sessionStatusMessage={null}
             serverRequestPanelEntries={[]}
           />
         }
@@ -270,32 +269,27 @@ function SessionWorkbenchAutoResumeOnEntry(input: {
   return null;
 }
 
-function createEmptyComposerProps(): SessionConversationComposerProps {
+function createEmptyComposerViewModel(): ChatComposerViewModel {
   return {
     composerText: "",
-    composerUi: {
-      action: {
-        canInterruptTurn: false,
-        canSteerTurn: false,
-        canSubmitTurns: false,
-        isInterruptingTurn: false,
-        isStartingTurn: false,
-        isSteeringTurn: false,
-      },
-      completedErrorMessage: null,
-      isConnected: false,
-      isUpdatingConfig: false,
-      isUploadingAttachments: false,
-    },
-    modelOptions: [],
-    onComposerTextChange: function onComposerTextChange() {},
-    onModelChange: function onModelChange() {},
-    onPendingImageFilesAdded: function onPendingImageFilesAdded() {},
-    onReasoningEffortChange: function onReasoningEffortChange() {},
-    onRemovePendingAttachment: function onRemovePendingAttachment() {},
-    onSubmit: function onSubmit() {},
     pendingAttachments: [],
+    modelOptions: [],
     selectedModel: null,
     selectedReasoningEffort: null,
+    submitMode: "start",
+    submitLabel: "Send",
+    submitDisabled: true,
+    submitDisabledReason: null,
+    canUploadAttachments: false,
+    isUploadingAttachments: false,
+    configControlsDisabled: true,
+    statusMessage: null,
+    completedTurnErrorMessage: null,
+    onComposerTextChange: function onComposerTextChange() {},
+    onSubmit: function onSubmit() {},
+    onModelChange: function onModelChange() {},
+    onReasoningEffortChange: function onReasoningEffortChange() {},
+    onPendingImageFilesAdded: function onPendingImageFilesAdded() {},
+    onRemovePendingAttachment: function onRemovePendingAttachment() {},
   };
 }
