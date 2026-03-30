@@ -86,6 +86,7 @@ describe("handleFileUploadStream", () => {
       void handleFileUploadStream({
         attachmentRootPath: tempRoot,
         messages,
+        signal: new AbortController().signal,
         streamId: 7,
         threadId: "thread_123",
         mimeType: "image/png",
@@ -169,6 +170,7 @@ describe("handleFileUploadStream", () => {
       void handleFileUploadStream({
         attachmentRootPath: tempRoot,
         messages,
+        signal: new AbortController().signal,
         streamId: 9,
         threadId: "thread_window",
         mimeType: "image/png",
@@ -257,6 +259,7 @@ describe("handleFileUploadStream", () => {
       void handleFileUploadStream({
         attachmentRootPath: tempRoot,
         messages,
+        signal: new AbortController().signal,
         streamId: 13,
         threadId: "thread_invalid",
         mimeType: "image/png",
@@ -341,6 +344,7 @@ describe("handleFileUploadStream", () => {
       void handleFileUploadStream({
         attachmentRootPath: tempRoot,
         messages,
+        signal: new AbortController().signal,
         streamId: 15,
         threadId: "thread_mismatch",
         mimeType: "image/jpeg",
@@ -394,6 +398,89 @@ describe("handleFileUploadStream", () => {
       code: FileUploadResetCodes.MIME_TYPE_MISMATCH,
     });
     await expect.poll(async () => await readdir(join(tempRoot, "thread_mismatch"))).toEqual([]);
+
+    await closeClientSocket(clientSocket);
+  });
+
+  it("removes the temp file when aborted after partial bytes were written", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "mistle-file-upload-abort-test-"));
+    const wsServer = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((resolve, reject) => {
+      wsServer.once("listening", () => resolve());
+      wsServer.once("error", (error) => reject(error));
+    });
+    const cleanup = async () => {
+      await new Promise<void>((resolve, reject) => {
+        wsServer.close((error) => {
+          if (error == null) {
+            resolve();
+            return;
+          }
+
+          reject(error);
+        });
+      });
+      await rm(tempRoot, { force: true, recursive: true });
+    };
+    openServers.add({ cleanup, tempRoot });
+
+    const messages = new AsyncQueue<TunnelSocketMessage>();
+    const signalController = new AbortController();
+
+    wsServer.on("connection", (socket) => {
+      void handleFileUploadStream({
+        attachmentRootPath: tempRoot,
+        messages,
+        signal: signalController.signal,
+        streamId: 21,
+        threadId: "thread_abort",
+        mimeType: "image/png",
+        originalFilename: "abort.png",
+        sizeBytes: ImageSignatures.PNG.byteLength,
+        tunnelSocket: socket,
+      }).catch(() => undefined);
+    });
+
+    const address = wsServer.address();
+    if (typeof address !== "object" || address === null) {
+      throw new Error("Expected websocket server to expose a concrete socket address.");
+    }
+
+    const clientSocket = new WebSocket(`ws://127.0.0.1:${String(address.port)}`);
+    const observedMessages: Array<ReturnType<typeof parseStreamControlMessage>> = [];
+    clientSocket.on("message", (message) => {
+      observedMessages.push(parseStreamControlMessage(toText(message)));
+    });
+    await new Promise<void>((resolve, reject) => {
+      clientSocket.once("open", () => resolve());
+      clientSocket.once("error", (error) => reject(error));
+    });
+
+    const partialBytes = ImageSignatures.PNG.subarray(0, 4);
+    messages.push({
+      kind: "binary",
+      payload: encodeDataFrame({
+        streamId: 21,
+        payloadKind: PayloadKindRawBytes,
+        payload: partialBytes,
+      }),
+    });
+
+    await expect
+      .poll(async () => {
+        return observedMessages.some((message) => message?.type === "stream.window");
+      })
+      .toBe(true);
+
+    signalController.abort(new Error("test abort"));
+
+    await expect.poll(async () => await readdir(join(tempRoot, "thread_abort"))).toEqual([]);
+    expect(
+      observedMessages.some(
+        (message) =>
+          message?.type === "stream.event" && message.event.type === "fileUpload.completed",
+      ),
+    ).toBe(false);
 
     await closeClientSocket(clientSocket);
   });
