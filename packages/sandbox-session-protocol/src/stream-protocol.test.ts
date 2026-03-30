@@ -15,6 +15,7 @@ describe("stream control message parser", () => {
         channel: {
           kind: "pty",
           session: "create",
+          ptySessionId: "terminal",
           cols: 120,
           rows: 40,
           cwd: "/workspace/repo",
@@ -29,9 +30,42 @@ describe("stream control message parser", () => {
       channel: {
         kind: "pty",
         session: "create",
+        ptySessionId: "terminal",
         cols: 120,
         rows: 40,
         cwd: "/workspace/repo",
+      },
+    });
+  });
+
+  it("parses pty stream opens with an explicit startup command", () => {
+    const message = parseStreamControlMessage(
+      JSON.stringify({
+        type: "stream.open",
+        streamId: 18,
+        channel: {
+          kind: "pty",
+          session: "create",
+          ptySessionId: "cli",
+          cols: 120,
+          rows: 40,
+          command: "codex",
+          args: ["resume", "--remote", "ws://127.0.0.1:4500", "thread_123"],
+        },
+      }),
+    );
+
+    expect(message).toEqual({
+      type: "stream.open",
+      streamId: 18,
+      channel: {
+        kind: "pty",
+        session: "create",
+        ptySessionId: "cli",
+        cols: 120,
+        rows: 40,
+        command: "codex",
+        args: ["resume", "--remote", "ws://127.0.0.1:4500", "thread_123"],
       },
     });
   });

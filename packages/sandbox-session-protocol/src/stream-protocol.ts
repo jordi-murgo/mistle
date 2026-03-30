@@ -20,9 +20,12 @@ const AgentStreamChannelSchema = z.object({
 const PTYStreamChannelSchema = z.object({
   kind: z.literal("pty"),
   session: z.enum(["create", "attach"]),
+  ptySessionId: NonEmptyStringSchema,
   cols: PositiveIntegerSchema.optional(),
   rows: PositiveIntegerSchema.optional(),
   cwd: NonEmptyStringSchema.optional(),
+  command: NonEmptyStringSchema.optional(),
+  args: z.array(NonEmptyStringSchema).optional(),
 });
 
 const FileUploadStreamChannelSchema = z.object({

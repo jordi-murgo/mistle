@@ -73,15 +73,20 @@ function createPtyOpenMessage(input: {
   options: SandboxPtyOpenOptions;
   streamId: number;
 }): StreamOpen {
+  const args = input.options.args?.filter((value) => value.trim().length > 0);
+
   return {
     type: "stream.open",
     streamId: input.streamId,
     channel: {
       kind: "pty",
       session: "create",
+      ptySessionId: input.options.ptySessionId.trim(),
       cols: input.options.cols,
       rows: input.options.rows,
       ...(input.options.cwd === undefined ? {} : { cwd: input.options.cwd }),
+      ...(input.options.command === undefined ? {} : { command: input.options.command }),
+      ...(args === undefined || args.length === 0 ? {} : { args }),
     },
   };
 }
@@ -281,6 +286,9 @@ export class SandboxPtyClient {
   }
 
   async open(options: SandboxPtyOpenOptions): Promise<void> {
+    if (options.ptySessionId.trim().length === 0) {
+      throw new Error("Sandbox PTY session id is required.");
+    }
     assertValidPtyDimensions(options, "open");
     if (this.#state !== SandboxPtyStates.CONNECTED) {
       throw new Error("Sandbox PTY stream can only open from the connected state.");

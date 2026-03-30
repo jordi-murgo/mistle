@@ -359,10 +359,10 @@ export async function handlePtyConnectRequest(input: {
   tunnelSocket: WebSocket;
   rawPayload: string;
   streamId: number;
-  activePtySession: PtySession | undefined;
+  activePtySessions: Map<string, PtySession>;
   relayResultQueue: AsyncQueue<ActiveTunnelStreamRelayResult>;
 }): Promise<{
-  ptySession?: PtySession;
+  ptySessions: Map<string, PtySession>;
   relay?: ActiveTunnelStreamRelay;
 }> {
   let connectRequest: StreamOpen;
@@ -375,18 +375,15 @@ export async function handlePtyConnectRequest(input: {
       code: CONNECT_ERROR_CODE_INVALID_CONNECT_REQUEST,
       message: error instanceof Error ? error.message : String(error),
     });
-    if (input.activePtySession === undefined) {
-      return {};
-    }
-
-    return { ptySession: input.activePtySession };
+    return { ptySessions: input.activePtySessions };
   }
 
   if (connectRequest.channel.kind !== "pty") {
     throw new Error("pty stream.open request channel.kind must be 'pty'");
   }
 
-  let activePtySession = input.activePtySession;
+  const { ptySessionId } = connectRequest.channel;
+  let activePtySession = input.activePtySessions.get(ptySessionId);
   if (connectRequest.channel.session === "create") {
     if (activePtySession !== undefined && !activePtySession.isExited()) {
       await writeStreamOpenError(input.tunnelSocket, {
@@ -395,11 +392,7 @@ export async function handlePtyConnectRequest(input: {
         code: CONNECT_ERROR_CODE_PTY_SESSION_EXISTS,
         message: "pty session already exists",
       });
-      if (activePtySession === undefined) {
-        return {};
-      }
-
-      return { ptySession: activePtySession };
+      return { ptySessions: input.activePtySessions };
     }
 
     try {
@@ -411,11 +404,7 @@ export async function handlePtyConnectRequest(input: {
         code: CONNECT_ERROR_CODE_PTY_SESSION_CREATE_FAILED,
         message: error instanceof Error ? error.message : String(error),
       });
-      if (input.activePtySession === undefined) {
-        return {};
-      }
-
-      return { ptySession: input.activePtySession };
+      return { ptySessions: input.activePtySessions };
     }
   }
 
@@ -426,11 +415,7 @@ export async function handlePtyConnectRequest(input: {
       code: CONNECT_ERROR_CODE_PTY_SESSION_UNAVAILABLE,
       message: "pty session is not available",
     });
-    if (activePtySession === undefined) {
-      return {};
-    }
-
-    return { ptySession: activePtySession };
+    return { ptySessions: input.activePtySessions };
   }
 
   await writeStreamOpenOk(input.tunnelSocket, {
@@ -442,6 +427,7 @@ export async function handlePtyConnectRequest(input: {
     primaryStreamId: input.streamId,
     channelKind: "pty",
     messages: new AsyncQueue<TunnelSocketMessage>(),
+    ptySessionId,
   };
 
   void relayPtySession({
@@ -454,6 +440,7 @@ export async function handlePtyConnectRequest(input: {
     .then((ptySession) => {
       input.relayResultQueue.push({
         relay,
+        ptySessionId,
         ptySession,
         updatesPtySession: true,
       });
@@ -462,17 +449,16 @@ export async function handlePtyConnectRequest(input: {
       input.relayResultQueue.push({
         relay,
         error: error instanceof Error ? error : new Error(String(error)),
+        ptySessionId,
         ptySession: activePtySession,
         updatesPtySession: true,
       });
     });
 
-  if (activePtySession === undefined) {
-    return { relay };
-  }
+  input.activePtySessions.set(ptySessionId, activePtySession);
 
   return {
-    ptySession: activePtySession,
+    ptySessions: input.activePtySessions,
     relay,
   };
 }

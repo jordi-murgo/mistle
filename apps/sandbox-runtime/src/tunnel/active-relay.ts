@@ -6,6 +6,7 @@ export type ActiveTunnelStreamRelay = {
   primaryStreamId: number;
   channelKind: "agent" | "fileUpload" | "pty";
   messages: AsyncQueue<TunnelSocketMessage>;
+  ptySessionId?: string;
 };
 
 export type ActiveTunnelStreamRelayResult =
@@ -17,27 +18,43 @@ export type ActiveTunnelStreamRelayResult =
   | {
       relay: ActiveTunnelStreamRelay;
       error?: Error;
+      ptySessionId: string;
       ptySession: PtySession | undefined;
       updatesPtySession: true;
     };
 
 export function finishActiveTunnelStreamRelay(
   activeRelaysByStreamId: Map<number, ActiveTunnelStreamRelay>,
-  activePtyRelay: ActiveTunnelStreamRelay | undefined,
-  activePtySession: PtySession | undefined,
+  activePtyRelaysBySessionId: Map<string, ActiveTunnelStreamRelay>,
+  activePtySessionsBySessionId: Map<string, PtySession>,
   result: ActiveTunnelStreamRelayResult,
 ): {
-  activePtyRelay: ActiveTunnelStreamRelay | undefined;
-  activePtySession: PtySession | undefined;
+  activePtyRelaysBySessionId: Map<string, ActiveTunnelStreamRelay>;
+  activePtySessionsBySessionId: Map<string, PtySession>;
 } {
+  const nextActivePtyRelaysBySessionId = new Map(activePtyRelaysBySessionId);
+  const nextActivePtySessionsBySessionId = new Map(activePtySessionsBySessionId);
+
   for (const [streamId, relay] of activeRelaysByStreamId.entries()) {
     if (relay === result.relay) {
       activeRelaysByStreamId.delete(streamId);
     }
   }
 
+  if (result.updatesPtySession) {
+    if (nextActivePtyRelaysBySessionId.get(result.ptySessionId) === result.relay) {
+      nextActivePtyRelaysBySessionId.delete(result.ptySessionId);
+    }
+
+    if (result.ptySession === undefined) {
+      nextActivePtySessionsBySessionId.delete(result.ptySessionId);
+    } else {
+      nextActivePtySessionsBySessionId.set(result.ptySessionId, result.ptySession);
+    }
+  }
+
   return {
-    activePtyRelay: activePtyRelay === result.relay ? undefined : activePtyRelay,
-    activePtySession: result.updatesPtySession ? result.ptySession : activePtySession,
+    activePtyRelaysBySessionId: nextActivePtyRelaysBySessionId,
+    activePtySessionsBySessionId: nextActivePtySessionsBySessionId,
   };
 }

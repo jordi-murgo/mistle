@@ -49,6 +49,7 @@ describe("pty control message parsing", () => {
           channel: {
             kind: "pty",
             session: "create",
+            ptySessionId: "terminal",
             cols: 80,
             rows: 24,
           },
@@ -60,8 +61,41 @@ describe("pty control message parsing", () => {
       channel: {
         kind: "pty",
         session: "create",
+        ptySessionId: "terminal",
         cols: 80,
         rows: 24,
+      },
+    });
+  });
+
+  it("parses a pty connect request with an explicit startup command", () => {
+    expect(
+      parsePtyConnectRequest(
+        JSON.stringify({
+          type: "stream.open",
+          streamId: 8,
+          channel: {
+            kind: "pty",
+            session: "create",
+            ptySessionId: "cli",
+            cols: 80,
+            rows: 24,
+            command: "codex",
+            args: ["resume", "--remote", "ws://127.0.0.1:4500", "thread_123"],
+          },
+        }),
+      ),
+    ).toEqual({
+      type: "stream.open",
+      streamId: 8,
+      channel: {
+        kind: "pty",
+        session: "create",
+        ptySessionId: "cli",
+        cols: 80,
+        rows: 24,
+        command: "codex",
+        args: ["resume", "--remote", "ws://127.0.0.1:4500", "thread_123"],
       },
     });
   });
@@ -75,6 +109,7 @@ describe("pty control message parsing", () => {
           channel: {
             kind: "pty",
             session: "resume",
+            ptySessionId: "terminal",
             cols: 80,
             rows: 24,
           },
@@ -90,11 +125,82 @@ describe("pty control message parsing", () => {
           channel: {
             kind: "pty",
             session: "create",
+            ptySessionId: "terminal",
             cols: 80,
           },
         }),
       ),
     ).toThrow("pty stream.open request cols and rows must both be provided when either is set");
+
+    expect(() =>
+      parsePtyConnectRequest(
+        JSON.stringify({
+          type: "stream.open",
+          streamId: 7,
+          channel: {
+            kind: "pty",
+            session: "create",
+            ptySessionId: "terminal",
+            cols: 80,
+            rows: 24,
+            command: "codex",
+            args: ["resume", ""],
+          },
+        }),
+      ),
+    ).toThrow("pty stream.open request args must contain only non-empty strings");
+
+    expect(() =>
+      parsePtyConnectRequest(
+        JSON.stringify({
+          type: "stream.open",
+          streamId: 7,
+          channel: {
+            kind: "pty",
+            session: "create",
+            ptySessionId: "terminal",
+            cols: 80,
+            rows: 24,
+            command: 42,
+          },
+        }),
+      ),
+    ).toThrow("pty stream.open request command must be a non-empty string");
+
+    expect(() =>
+      parsePtyConnectRequest(
+        JSON.stringify({
+          type: "stream.open",
+          streamId: 7,
+          channel: {
+            kind: "pty",
+            session: "create",
+            ptySessionId: "terminal",
+            cols: 80,
+            rows: 24,
+            command: "   ",
+          },
+        }),
+      ),
+    ).toThrow("pty stream.open request command must be a non-empty string");
+
+    expect(() =>
+      parsePtyConnectRequest(
+        JSON.stringify({
+          type: "stream.open",
+          streamId: 7,
+          channel: {
+            kind: "pty",
+            session: "create",
+            ptySessionId: "terminal",
+            cols: 80,
+            rows: 24,
+            command: "codex",
+            args: "resume",
+          },
+        }),
+      ),
+    ).toThrow("pty stream.open request args must be an array of non-empty strings");
   });
 
   it("parses pty resize and close messages", () => {

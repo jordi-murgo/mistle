@@ -15,9 +15,12 @@ export const SandboxPtyStates = {
 export type SandboxPtyState = (typeof SandboxPtyStates)[keyof typeof SandboxPtyStates];
 
 export type SandboxPtyOpenOptions = {
+  ptySessionId: string;
   cols: number;
   rows: number;
   cwd?: string;
+  command?: string;
+  args?: string[];
 };
 
 export type SandboxPtyExitInfo = {

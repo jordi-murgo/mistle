@@ -1,5 +1,9 @@
 import { createServer as createNetServer, type Socket as NetSocket } from "node:net";
 
+import { systemSleeper } from "@mistle/time";
+import { afterEach, describe, expect, it } from "vitest";
+import { type RawData, WebSocketServer } from "ws";
+
 import {
   decodeDataFrame,
   DefaultStreamWindowBytes,
@@ -8,11 +12,7 @@ import {
   PayloadKindRawBytes,
   PayloadKindWebSocketText,
   type StreamControlMessage,
-} from "@mistle/sandbox-session-protocol";
-import { systemSleeper } from "@mistle/time";
-import { afterEach, describe, expect, it } from "vitest";
-import { type RawData, WebSocketServer } from "ws";
-
+} from "../../sandbox-session-protocol/src/index.js";
 import { createNodeSandboxSessionRuntime } from "./node.js";
 import { SandboxPtyClient } from "./pty-client.js";
 import { SandboxPtyStates } from "./pty-types.js";
@@ -433,6 +433,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 120,
       rows: 40,
       cwd: "/workspace",
@@ -447,6 +448,7 @@ describe("SandboxPtyClient", () => {
         channel: {
           kind: "pty",
           session: "create",
+          ptySessionId: "terminal",
           cols: 120,
           rows: 40,
           cwd: "/workspace",
@@ -459,6 +461,45 @@ describe("SandboxPtyClient", () => {
 
     expect(client.state).toBe(SandboxPtyStates.OPEN);
     expect(client.streamId).toBe(1);
+  });
+
+  it("sends explicit startup command fields when provided", async () => {
+    const server = await startPtyTestServer();
+    startedServers.push(server);
+    const client = new SandboxPtyClient({
+      connectionUrl: server.url,
+      runtime: createNodeSandboxSessionRuntime(),
+    });
+
+    await client.connect();
+    const openPromise = client.open({
+      ptySessionId: "cli",
+      cols: 120,
+      rows: 40,
+      command: "codex",
+      args: ["resume", "--remote", "ws://127.0.0.1:4500", "thread_123"],
+    });
+
+    const openRequest = await server.waitForNextMessage();
+    expect(openRequest).toEqual({
+      kind: "control",
+      message: {
+        type: "stream.open",
+        streamId: 1,
+        channel: {
+          kind: "pty",
+          session: "create",
+          ptySessionId: "cli",
+          cols: 120,
+          rows: 40,
+          command: "codex",
+          args: ["resume", "--remote", "ws://127.0.0.1:4500", "thread_123"],
+        },
+      },
+    });
+
+    server.sendOpenOk(1);
+    await openPromise;
   });
 
   it("forwards PTY output bytes and acknowledges the receive window", async () => {
@@ -475,6 +516,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -510,6 +552,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -535,6 +578,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const firstOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -549,6 +593,7 @@ describe("SandboxPtyClient", () => {
     expect(client.state).toBe(SandboxPtyStates.CONNECTED);
 
     const secondOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 100,
       rows: 30,
     });
@@ -561,6 +606,7 @@ describe("SandboxPtyClient", () => {
         channel: {
           kind: "pty",
           session: "create",
+          ptySessionId: "terminal",
           cols: 100,
           rows: 30,
         },
@@ -587,6 +633,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -625,22 +672,32 @@ describe("SandboxPtyClient", () => {
 
     await expect(
       client.open({
+        ptySessionId: "terminal",
         cols: Number.NaN,
         rows: 24,
       }),
     ).rejects.toThrow("Sandbox PTY open size must use positive integer rows and columns.");
     await expect(
       client.open({
+        ptySessionId: "terminal",
         cols: 80.5,
         rows: 24,
       }),
     ).rejects.toThrow("Sandbox PTY open size must use positive integer rows and columns.");
     await expect(
       client.open({
+        ptySessionId: "terminal",
         cols: Number.POSITIVE_INFINITY,
         rows: 24,
       }),
     ).rejects.toThrow("Sandbox PTY open size must use positive integer rows and columns.");
+    await expect(
+      client.open({
+        ptySessionId: "   ",
+        cols: 80,
+        rows: 24,
+      }),
+    ).rejects.toThrow("Sandbox PTY session id is required.");
     await expectNoServerMessageWithin(server, 20);
   });
 
@@ -672,6 +729,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -710,6 +768,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -747,6 +806,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -789,6 +849,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -832,6 +893,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -862,6 +924,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -897,6 +960,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const firstOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -913,6 +977,7 @@ describe("SandboxPtyClient", () => {
     await firstClosePromise;
 
     const secondOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 132,
       rows: 48,
     });
@@ -925,6 +990,7 @@ describe("SandboxPtyClient", () => {
         channel: {
           kind: "pty",
           session: "create",
+          ptySessionId: "terminal",
           cols: 132,
           rows: 48,
         },
@@ -947,6 +1013,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const firstOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -967,6 +1034,7 @@ describe("SandboxPtyClient", () => {
     });
 
     const secondOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 100,
       rows: 30,
     });
@@ -979,6 +1047,7 @@ describe("SandboxPtyClient", () => {
         channel: {
           kind: "pty",
           session: "create",
+          ptySessionId: "terminal",
           cols: 100,
           rows: 30,
         },
@@ -1007,6 +1076,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -1048,6 +1118,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const firstOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -1065,6 +1136,7 @@ describe("SandboxPtyClient", () => {
     expect(client.state).toBe(SandboxPtyStates.CONNECTED);
 
     const secondOpenPromise = client.open({
+      ptySessionId: "terminal",
       cols: 110,
       rows: 35,
     });
@@ -1077,6 +1149,7 @@ describe("SandboxPtyClient", () => {
         channel: {
           kind: "pty",
           session: "create",
+          ptySessionId: "terminal",
           cols: 110,
           rows: 35,
         },
@@ -1099,6 +1172,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -1149,6 +1223,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });
@@ -1199,6 +1274,7 @@ describe("SandboxPtyClient", () => {
 
     await client.connect();
     const openPromise = client.open({
+      ptySessionId: "terminal",
       cols: 80,
       rows: 24,
     });

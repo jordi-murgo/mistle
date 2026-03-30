@@ -114,9 +114,27 @@ export function parsePtyConnectRequest(payload: string): StreamOpen {
 
   const kind = channel === undefined ? "" : readStringField(channel, "kind");
   const session = channel === undefined ? "" : readStringField(channel, "session");
+  const ptySessionId = channel === undefined ? "" : readStringField(channel, "ptySessionId");
   const cwdValue = channel?.cwd;
   const cwd =
     typeof cwdValue === "string" && cwdValue.trim().length > 0 ? cwdValue.trim() : undefined;
+  const commandValue = channel?.command;
+  if (commandValue !== undefined && typeof commandValue !== "string") {
+    throw new Error("pty stream.open request command must be a non-empty string");
+  }
+  const command =
+    typeof commandValue === "string" && commandValue.trim().length > 0
+      ? commandValue.trim()
+      : undefined;
+  const argsValue = channel?.args;
+  if (argsValue !== undefined && !Array.isArray(argsValue)) {
+    throw new Error("pty stream.open request args must be an array of non-empty strings");
+  }
+  const args =
+    Array.isArray(argsValue) &&
+    argsValue.every((entry) => typeof entry === "string" && entry.trim().length > 0)
+      ? argsValue.map((entry) => entry.trim())
+      : undefined;
   const colsValue = channel?.cols;
   const rowsValue = channel?.rows;
   const cols = typeof colsValue === "number" && Number.isInteger(colsValue) ? colsValue : undefined;
@@ -134,6 +152,9 @@ export function parsePtyConnectRequest(payload: string): StreamOpen {
   if (session !== "create" && session !== "attach") {
     throw new Error(`invalid_pty_session_mode '${session}'`);
   }
+  if (ptySessionId.length === 0) {
+    throw new Error("pty stream.open request channel.ptySessionId is required");
+  }
   if ((cols !== undefined && cols < 0) || (rows !== undefined && rows < 0)) {
     throw new Error("pty stream.open request cols and rows must be greater than or equal to 0");
   }
@@ -145,6 +166,12 @@ export function parsePtyConnectRequest(payload: string): StreamOpen {
       "pty stream.open request cols and rows must both be provided when either is set",
     );
   }
+  if (typeof commandValue === "string" && command === undefined) {
+    throw new Error("pty stream.open request command must be a non-empty string");
+  }
+  if (Array.isArray(argsValue) && args === undefined) {
+    throw new Error("pty stream.open request args must contain only non-empty strings");
+  }
 
   return {
     type: "stream.open",
@@ -152,9 +179,12 @@ export function parsePtyConnectRequest(payload: string): StreamOpen {
     channel: {
       kind: "pty",
       session,
+      ptySessionId,
       ...(cols === undefined ? {} : { cols }),
       ...(rows === undefined ? {} : { rows }),
       ...(cwd === undefined ? {} : { cwd }),
+      ...(command === undefined ? {} : { command }),
+      ...(args === undefined ? {} : { args }),
     },
   };
 }
