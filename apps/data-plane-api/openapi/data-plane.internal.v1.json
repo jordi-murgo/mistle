@@ -544,6 +544,10 @@
                               "type": "string",
                               "minLength": 1
                             },
+                            "runtimeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
                             "runtimeKey": {
                               "type": "string",
                               "minLength": 1
@@ -563,6 +567,7 @@
                           },
                           "required": [
                             "bindingId",
+                            "runtimeId",
                             "runtimeKey",
                             "clientId",
                             "endpointKey",
