@@ -204,6 +204,32 @@ function createDefinitionsBundle(registry: IntegrationRegistry) {
           runtimeKey: "codex-app-server",
           clientId: "codex-cli",
           endpointKey: "app-server",
+          ptyLaunch: {
+            runtimeId: "codex",
+            displayName: "Codex",
+            newLaunch: {
+              ptySessionId: "cli",
+              cols: 120,
+              rows: 32,
+              command: "codex",
+              args: [],
+            },
+            resumeLaunch: {
+              ptySessionId: "cli",
+              cols: 120,
+              rows: 32,
+              command: "codex",
+              args: [
+                {
+                  kind: "literal",
+                  value: "resume",
+                },
+                {
+                  kind: "threadId",
+                },
+              ],
+            },
+          },
         },
       ],
     }),
@@ -259,6 +285,32 @@ function createDefinitionsBundle(registry: IntegrationRegistry) {
           runtimeKey: "claude-code",
           clientId: "claude-code",
           endpointKey: "claude-code",
+          ptyLaunch: {
+            runtimeId: "claude-code",
+            displayName: "Claude Code",
+            newLaunch: {
+              ptySessionId: "cli",
+              cols: 120,
+              rows: 32,
+              command: "claude",
+              args: [],
+            },
+            resumeLaunch: {
+              ptySessionId: "cli",
+              cols: 120,
+              rows: 32,
+              command: "claude",
+              args: [
+                {
+                  kind: "literal",
+                  value: "resume",
+                },
+                {
+                  kind: "threadId",
+                },
+              ],
+            },
+          },
         },
       ],
     }),
@@ -577,6 +629,32 @@ describe("compileRuntimePlan", () => {
         runtimeKey: "codex-app-server",
         clientId: "codex-cli",
         endpointKey: "app-server",
+        ptyLaunch: {
+          runtimeId: "codex",
+          displayName: "Codex",
+          newLaunch: {
+            ptySessionId: "cli",
+            cols: 120,
+            rows: 32,
+            command: "codex",
+            args: [],
+          },
+          resumeLaunch: {
+            ptySessionId: "cli",
+            cols: 120,
+            rows: 32,
+            command: "codex",
+            args: [
+              {
+                kind: "literal",
+                value: "resume",
+              },
+              {
+                kind: "threadId",
+              },
+            ],
+          },
+        },
       },
     ]);
   });
@@ -1781,6 +1859,32 @@ describe("compileRuntimePlan", () => {
             runtimeKey: "codex-app-server",
             clientId: "codex-cli",
             endpointKey: "app-server",
+            ptyLaunch: {
+              runtimeId: "codex",
+              displayName: "Codex",
+              newLaunch: {
+                ptySessionId: "cli",
+                cols: 120,
+                rows: 32,
+                command: "codex",
+                args: [],
+              },
+              resumeLaunch: {
+                ptySessionId: "cli",
+                cols: 120,
+                rows: 32,
+                command: "codex",
+                args: [
+                  {
+                    kind: "literal",
+                    value: "resume",
+                  },
+                  {
+                    kind: "threadId",
+                  },
+                ],
+              },
+            },
           },
         ],
       }),

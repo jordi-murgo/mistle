@@ -10,6 +10,7 @@ import {
   OpenAiCodexAppServerListenUrl,
   OpenAiCodexAppServerProcessKey,
 } from "./app-server.js";
+import { CodexPtyLaunchSpec } from "./pty-launch.js";
 
 const CodexCliArtifactKey = "codex-cli";
 const ProxyModelProviderKey = "proxy";
@@ -230,6 +231,7 @@ export function compileCodexRuntime(
         runtimeKey: OpenAiCodexAppServerProcessKey,
         clientId: "codex-cli",
         endpointKey: OpenAiCodexAppServerEndpointKey,
+        ptyLaunch: CodexPtyLaunchSpec,
       },
     ],
   };

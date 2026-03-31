@@ -127,6 +127,46 @@ export interface paths {
                 bindingId: string;
                 clientId: string;
                 endpointKey: string;
+                ptyLaunch: {
+                  displayName: string;
+                  newLaunch: {
+                    args: (
+                      | {
+                          /** @enum {string} */
+                          kind: "literal";
+                          value: string;
+                        }
+                      | {
+                          /** @enum {string} */
+                          kind: "threadId";
+                        }
+                    )[];
+                    cols: number;
+                    command: string;
+                    cwd?: string;
+                    ptySessionId: string;
+                    rows: number;
+                  };
+                  resumeLaunch: {
+                    args: (
+                      | {
+                          /** @enum {string} */
+                          kind: "literal";
+                          value: string;
+                        }
+                      | {
+                          /** @enum {string} */
+                          kind: "threadId";
+                        }
+                    )[];
+                    cols: number;
+                    command: string;
+                    cwd?: string;
+                    ptySessionId: string;
+                    rows: number;
+                  };
+                  runtimeId: string;
+                };
                 runtimeId: string;
                 runtimeKey: string;
               }[];
