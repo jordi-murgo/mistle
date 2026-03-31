@@ -256,7 +256,8 @@ describe("integration targets discovery integration", () => {
       variantId: "atlassian-default",
       enabled: true,
       displayName: "Atlassian",
-      description: "Access Atlassian REST APIs with personal or service-account tokens.",
+      description:
+        "Access Atlassian REST APIs with personal tokens, service-account tokens, or service-account OAuth client credentials.",
       logoKey: "atlassian",
       connectionMethods: [
         {
@@ -281,6 +282,19 @@ describe("integration targets discovery integration", () => {
               name: "apiKey",
               label: "Service account API token",
               placeholder: "Enter service account API token",
+              inputType: "password",
+            },
+          ],
+        },
+        {
+          id: "atlassian-service-account-oauth-client-credentials",
+          label: "Service account OAuth client credentials",
+          kind: "form",
+          secretFields: [
+            {
+              name: "clientSecret",
+              label: "Client secret",
+              placeholder: "Enter service account OAuth client secret",
               inputType: "password",
             },
           ],
