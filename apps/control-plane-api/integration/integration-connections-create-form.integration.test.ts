@@ -7,10 +7,12 @@ import {
 } from "@mistle/db/control-plane";
 import { ValidationErrorResponseSchema } from "@mistle/http/errors.js";
 import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
+import { AtlassianConnectionMethodIds } from "@mistle/integrations-definitions";
 import { eq } from "drizzle-orm";
 import { describe, expect } from "vitest";
 
 import {
+  CreateFormConnectionBadRequestResponseSchema,
   CreateFormConnectionBodySchema,
   CreateFormConnectionNotFoundResponseSchema,
 } from "../src/integration-connections/create-form-connection/schema.js";
@@ -21,6 +23,7 @@ import {
   unwrapOrganizationCredentialKey,
 } from "../src/lib/crypto.js";
 import { it } from "./test-context.js";
+import type { ControlPlaneApiIntegrationFixture } from "./test-context.js";
 
 describe("integration connections create form integration", () => {
   it("creates connection + encrypted credential + link for an enabled target", async ({
@@ -183,6 +186,195 @@ describe("integration connections create form integration", () => {
     expect(responseBody).toEqual({
       code: "TARGET_NOT_FOUND",
       message: "Integration target 'missing_target' was not found.",
+    });
+  });
+
+  it("creates Atlassian personal token connections", async ({ fixture }) => {
+    await upsertAtlassianTarget({ fixture, targetKey: "atlassian-default" });
+
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-connections-create-atlassian-personal@example.com",
+    });
+
+    const response = await fixture.request("/v1/integration/connections/atlassian-default/form", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: authenticatedSession.cookie,
+      },
+      body: JSON.stringify({
+        displayName: "Atlassian personal token",
+        methodId: AtlassianConnectionMethodIds.PERSONAL_API_TOKEN,
+        config: {
+          connection_method: AtlassianConnectionMethodIds.PERSONAL_API_TOKEN,
+          site_url: "https://mistle.atlassian.net",
+          email: "user@example.com",
+        },
+        secrets: {
+          apiKey: "atlassian-personal-token",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const responseBody = IntegrationConnectionSchema.parse(await response.json());
+    expect(responseBody.config).toEqual({
+      connection_method: AtlassianConnectionMethodIds.PERSONAL_API_TOKEN,
+      site_url: "https://mistle.atlassian.net",
+      email: "user@example.com",
+    });
+
+    const createdConnectionCredential =
+      await fixture.db.query.integrationConnectionCredentials.findFirst({
+        where: (table, { and, eq }) =>
+          and(eq(table.connectionId, responseBody.id), eq(table.purpose, "api_key")),
+      });
+    expect(createdConnectionCredential).toBeDefined();
+
+    if (createdConnectionCredential === undefined) {
+      throw new Error("Expected integration connection credential link.");
+    }
+
+    const createdCredential = await fixture.db.query.integrationCredentials.findFirst({
+      where: (table, { and, eq }) =>
+        and(
+          eq(table.id, createdConnectionCredential.credentialId),
+          eq(table.organizationId, authenticatedSession.organizationId),
+        ),
+    });
+    expect(createdCredential).toBeDefined();
+
+    if (createdCredential === undefined) {
+      throw new Error("Expected integration credential.");
+    }
+
+    const organizationCredentialKey = await fixture.db.query.organizationCredentialKeys.findFirst({
+      where: (table, { and, eq }) =>
+        and(
+          eq(table.organizationId, authenticatedSession.organizationId),
+          eq(table.version, createdCredential.organizationCredentialKeyVersion),
+        ),
+    });
+    expect(organizationCredentialKey).toBeDefined();
+
+    if (organizationCredentialKey === undefined) {
+      throw new Error("Expected organization credential key.");
+    }
+
+    expect(
+      decryptStoredApiKey({
+        wrappedOrganizationKeyCiphertext: organizationCredentialKey.ciphertext,
+        masterKeyVersion: organizationCredentialKey.masterKeyVersion,
+        masterEncryptionKeys: fixture.config.integrations.masterEncryptionKeys,
+        nonce: createdCredential.nonce,
+        ciphertext: createdCredential.ciphertext,
+      }),
+    ).toBe("atlassian-personal-token");
+  });
+
+  it("creates Atlassian service account token connections", async ({ fixture }) => {
+    await upsertAtlassianTarget({ fixture, targetKey: "atlassian-default" });
+
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-connections-create-atlassian-service@example.com",
+    });
+
+    const response = await fixture.request("/v1/integration/connections/atlassian-default/form", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: authenticatedSession.cookie,
+      },
+      body: JSON.stringify({
+        displayName: "Atlassian service account token",
+        methodId: AtlassianConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
+        config: {
+          connection_method: AtlassianConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
+          cloud_id: "cloud-id-123",
+        },
+        secrets: {
+          apiKey: "atlassian-service-account-token",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const responseBody = IntegrationConnectionSchema.parse(await response.json());
+    expect(responseBody.config).toEqual({
+      connection_method: AtlassianConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
+      cloud_id: "cloud-id-123",
+    });
+    expect(responseBody.targetSnapshotConfig).toEqual({});
+  });
+
+  it("returns 400 when Atlassian personal token config is missing site_url", async ({
+    fixture,
+  }) => {
+    await upsertAtlassianTarget({ fixture, targetKey: "atlassian-default" });
+
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-connections-create-atlassian-personal-missing-site-url@example.com",
+    });
+
+    const response = await fixture.request("/v1/integration/connections/atlassian-default/form", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: authenticatedSession.cookie,
+      },
+      body: JSON.stringify({
+        displayName: "Atlassian personal token",
+        methodId: AtlassianConnectionMethodIds.PERSONAL_API_TOKEN,
+        config: {
+          connection_method: AtlassianConnectionMethodIds.PERSONAL_API_TOKEN,
+          email: "user@example.com",
+        },
+        secrets: {
+          apiKey: "atlassian-personal-token",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    const responseBody = CreateFormConnectionBadRequestResponseSchema.parse(await response.json());
+    expect(responseBody).toEqual({
+      code: "INVALID_CREATE_CONNECTION_INPUT",
+      message: `Connection config for method '${AtlassianConnectionMethodIds.PERSONAL_API_TOKEN}' is invalid.`,
+    });
+  });
+
+  it("returns 400 when Atlassian service account token config is missing cloud_id", async ({
+    fixture,
+  }) => {
+    await upsertAtlassianTarget({ fixture, targetKey: "atlassian-default" });
+
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-connections-create-atlassian-service-missing-cloud-id@example.com",
+    });
+
+    const response = await fixture.request("/v1/integration/connections/atlassian-default/form", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: authenticatedSession.cookie,
+      },
+      body: JSON.stringify({
+        displayName: "Atlassian service account token",
+        methodId: AtlassianConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
+        config: {
+          connection_method: AtlassianConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
+        },
+        secrets: {
+          apiKey: "atlassian-service-account-token",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    const responseBody = CreateFormConnectionBadRequestResponseSchema.parse(await response.json());
+    expect(responseBody).toEqual({
+      code: "INVALID_CREATE_CONNECTION_INPUT",
+      message: `Connection config for method '${AtlassianConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN}' is invalid.`,
     });
   });
 
@@ -355,6 +547,30 @@ describe("integration connections create form integration", () => {
     expect(connectionCredentialRows).toHaveLength(0);
   });
 });
+
+async function upsertAtlassianTarget(input: {
+  fixture: ControlPlaneApiIntegrationFixture;
+  targetKey: string;
+}) {
+  await input.fixture.db
+    .insert(integrationTargets)
+    .values({
+      targetKey: input.targetKey,
+      familyId: "atlassian",
+      variantId: "atlassian-default",
+      enabled: true,
+      config: {},
+    })
+    .onConflictDoUpdate({
+      target: integrationTargets.targetKey,
+      set: {
+        familyId: "atlassian",
+        variantId: "atlassian-default",
+        enabled: true,
+        config: {},
+      },
+    });
+}
 
 function decryptStoredApiKey(input: {
   wrappedOrganizationKeyCiphertext: string;
