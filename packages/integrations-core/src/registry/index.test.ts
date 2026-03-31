@@ -6,10 +6,7 @@ import {
   IntegrationDefinitionRegistryError,
 } from "../errors/index.js";
 import type { IntegrationDefinition } from "../types/index.js";
-import {
-  IntegrationConnectionMethodIds,
-  IntegrationConnectionMethodKinds,
-} from "../types/index.js";
+import { IntegrationConnectionMethodIds } from "../types/index.js";
 import { IntegrationRegistry } from "./index.js";
 
 const ConfigSchema = z.record(z.string(), z.unknown());
@@ -18,14 +15,22 @@ const ApiKeyConnectionMethods = [
   {
     id: IntegrationConnectionMethodIds.API_KEY,
     label: "API key",
-    kind: IntegrationConnectionMethodKinds.API_KEY,
+    kind: "form",
+    secretFields: [
+      {
+        name: "apiKey",
+        label: "API key",
+        inputType: "password",
+        secretType: "api_key",
+      },
+    ],
   },
 ] as const;
 const GitHubAppInstallationConnectionMethods = [
   {
     id: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
     label: "GitHub App installation",
-    kind: IntegrationConnectionMethodKinds.REDIRECT,
+    kind: "redirect",
   },
 ] as const;
 const GitHubConnectionMethods = [

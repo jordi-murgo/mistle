@@ -15,7 +15,15 @@ const dialog: IntegrationConnectionDialogState = {
     {
       id: IntegrationConnectionMethodIds.API_KEY,
       label: "API key",
-      kind: "api-key",
+      kind: "form",
+      secretFields: [
+        {
+          name: "apiKey",
+          label: "API key",
+          placeholder: "Enter API key",
+          inputType: "password",
+        },
+      ],
     },
     {
       id: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
@@ -35,21 +43,21 @@ describe("IntegrationConnectionDialog", () => {
   it("disables 1Password autofill for API key input", () => {
     render(
       <IntegrationConnectionDialog
-        apiKeyValue=""
         connectionDisplayNamePlaceholder="OpenAI connection"
         connectionDisplayNameValue=""
         connectError={null}
         connectMethodId={IntegrationConnectionMethodIds.API_KEY}
         dialog={dialog}
         hasChanges={true}
-        isApiKeyChanged={false}
+        isSecretsChanged={false}
         isConnectionDisplayNameChanged={false}
-        onApiKeyChange={() => {}}
         onConnectionDisplayNameChange={() => {}}
         onClose={() => {}}
         onMethodChange={() => {}}
+        onSecretChange={() => {}}
         onSubmit={() => {}}
         pending={false}
+        secrets={{}}
       />,
     );
 
@@ -61,28 +69,39 @@ describe("IntegrationConnectionDialog", () => {
   it("does not render auth method selection in update mode", () => {
     render(
       <IntegrationConnectionDialog
-        apiKeyValue=""
         connectionDisplayNamePlaceholder="OpenAI connection"
         connectionDisplayNameValue="Existing connection"
         connectError={null}
         connectMethodId={IntegrationConnectionMethodIds.API_KEY}
         dialog={{
           connectionId: "icn_123",
-          currentMethodId: IntegrationConnectionMethodIds.API_KEY,
+          currentMethod: {
+            id: IntegrationConnectionMethodIds.API_KEY,
+            label: "API key",
+            kind: "form",
+            secretFields: [
+              {
+                name: "apiKey",
+                label: "API key",
+                inputType: "password",
+              },
+            ],
+          },
           displayName: "OpenAI",
           initialConnectionDisplayName: "Existing connection",
           mode: "update",
           targetKey: "openai",
         }}
         hasChanges={false}
-        isApiKeyChanged={false}
+        isSecretsChanged={false}
         isConnectionDisplayNameChanged={false}
-        onApiKeyChange={() => {}}
         onConnectionDisplayNameChange={() => {}}
         onClose={() => {}}
         onMethodChange={() => {}}
+        onSecretChange={() => {}}
         onSubmit={() => {}}
         pending={false}
+        secrets={{}}
       />,
     );
 
@@ -93,28 +112,32 @@ describe("IntegrationConnectionDialog", () => {
   it("renders Save for redirect connections in update mode", () => {
     render(
       <IntegrationConnectionDialog
-        apiKeyValue=""
         connectionDisplayNamePlaceholder="OpenAI connection"
         connectionDisplayNameValue="Existing GitHub App installation connection"
         connectError={null}
         connectMethodId={IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION}
         dialog={{
           connectionId: "icn_456",
-          currentMethodId: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
+          currentMethod: {
+            id: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
+            label: "GitHub App installation",
+            kind: "redirect",
+          },
           displayName: "OpenAI",
           initialConnectionDisplayName: "Existing GitHub App installation connection",
           mode: "update",
           targetKey: "openai",
         }}
         hasChanges={true}
-        isApiKeyChanged={false}
+        isSecretsChanged={false}
         isConnectionDisplayNameChanged={true}
-        onApiKeyChange={() => {}}
         onConnectionDisplayNameChange={() => {}}
         onClose={() => {}}
         onMethodChange={() => {}}
+        onSecretChange={() => {}}
         onSubmit={() => {}}
         pending={false}
+        secrets={{}}
       />,
     );
 

@@ -1,5 +1,6 @@
 import type { IntegrationTarget as PersistedIntegrationTarget } from "@mistle/db/control-plane";
 import type {
+  IntegrationConnectionMethodDefinition,
   IntegrationWebhookEventDefinition,
   IntegrationWebhookEventParameterDefinition,
 } from "@mistle/integrations-core";
@@ -72,13 +73,52 @@ export type ResolvedIntegrationTargetMetadata = {
   displayName: string;
   description: string;
   logoKey?: string;
-  connectionMethods?: {
-    id: "api-key" | "oauth2-authorization-code" | "github-app-installation";
-    label: string;
-    kind: "api-key" | "oauth2" | "redirect";
-  }[];
+  connectionMethods?: (
+    | {
+        id: string;
+        label: string;
+        kind: "form";
+        secretFields: {
+          name: string;
+          label: string;
+          placeholder?: string;
+          description?: string;
+          inputType: "password" | "text";
+        }[];
+      }
+    | {
+        id: string;
+        label: string;
+        kind: "redirect";
+      }
+  )[];
   supportedWebhookEvents?: ResolvedWebhookEvent[];
 };
+
+function resolveConnectionMethod(
+  method: IntegrationConnectionMethodDefinition,
+): NonNullable<ResolvedIntegrationTargetMetadata["connectionMethods"]>[number] {
+  if (method.kind === "form") {
+    return {
+      id: method.id,
+      label: method.label,
+      kind: "form",
+      secretFields: method.secretFields.map((field) => ({
+        name: field.name,
+        label: field.label,
+        ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
+        ...(field.description === undefined ? {} : { description: field.description }),
+        inputType: field.inputType,
+      })),
+    };
+  }
+
+  return {
+    id: method.id,
+    label: method.label,
+    kind: "redirect",
+  };
+}
 
 function cloneWebhookEventParameters(
   parameters: readonly IntegrationWebhookEventParameterDefinition[],
@@ -195,11 +235,9 @@ export function resolveTargetMetadata(input: {
         displayName: input.displayNameOverride ?? definition.displayName,
         description: input.descriptionOverride,
         logoKey: definition.logoKey,
-        connectionMethods: definition.connectionMethods.map((method) => ({
-          id: method.id,
-          label: method.label,
-          kind: method.kind,
-        })),
+        connectionMethods: definition.connectionMethods.map((method) =>
+          resolveConnectionMethod(method),
+        ),
         ...(definition.supportedWebhookEvents === undefined
           ? {}
           : {
@@ -217,11 +255,9 @@ export function resolveTargetMetadata(input: {
     displayName: input.displayNameOverride ?? definition.displayName,
     description: input.descriptionOverride ?? definition.description,
     logoKey: definition.logoKey,
-    connectionMethods: definition.connectionMethods.map((method) => ({
-      id: method.id,
-      label: method.label,
-      kind: method.kind,
-    })),
+    connectionMethods: definition.connectionMethods.map((method) =>
+      resolveConnectionMethod(method),
+    ),
     ...(definition.supportedWebhookEvents === undefined
       ? {}
       : {

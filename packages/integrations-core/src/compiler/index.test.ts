@@ -3,11 +3,7 @@ import { z } from "zod";
 
 import { CompilerErrorCodes, IntegrationCompilerError } from "../errors/index.js";
 import { IntegrationRegistry } from "../registry/index.js";
-import {
-  IntegrationConnectionMethodIds,
-  IntegrationConnectionMethodKinds,
-  type IntegrationDefinition,
-} from "../types/index.js";
+import { IntegrationConnectionMethodIds, type IntegrationDefinition } from "../types/index.js";
 import { compileRuntimePlan } from "./index.js";
 
 const OpenAiTargetConfigSchema = z.object({
@@ -24,7 +20,15 @@ const ApiKeyConnectionMethods = [
   {
     id: IntegrationConnectionMethodIds.API_KEY,
     label: "API key",
-    kind: IntegrationConnectionMethodKinds.API_KEY,
+    kind: "form",
+    secretFields: [
+      {
+        name: "apiKey",
+        label: "API key",
+        inputType: "password",
+        secretType: "api_key",
+      },
+    ],
   },
 ] as const;
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import {
   type IntegrationConnectionDialogState,
+  type IntegrationConnectionMethod,
   type IntegrationConnectionMethodId,
   IntegrationConnectionMethodIds,
 } from "../integrations/integration-connection-dialog.js";
@@ -29,6 +30,22 @@ function isRedirectConnectionMethodId(
     methodId === IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE ||
     methodId === IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
   );
+}
+
+function resolveSelectedMethod(input: {
+  dialog: IntegrationConnectionDialogState;
+  methodId: IntegrationConnectionMethodId;
+}): IntegrationConnectionMethod {
+  const supportedMethods =
+    input.dialog.mode === "create" ? input.dialog.methods : [input.dialog.currentMethod];
+  const selectedMethod = supportedMethods.find((method) => method.id === input.methodId);
+  if (selectedMethod === undefined) {
+    throw new Error(
+      `Connection method '${input.methodId}' is not defined for target '${input.dialog.targetKey}'.`,
+    );
+  }
+
+  return selectedMethod;
 }
 
 export function useIntegrationConnectionDialogState(input: { queryKey: readonly unknown[] }) {
@@ -71,7 +88,6 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
 
   function openDialog(openInput: OpenIntegrationConnectionDialogInput): void {
     const nextState = createOpenIntegrationConnectionDialogState({
-      defaultMethodId: IntegrationConnectionMethodIds.API_KEY,
       openInput,
     });
     setDialog(nextState.dialog);
@@ -86,8 +102,8 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
     const validationError = resolveIntegrationConnectionDialogValidationError({
       dialog,
       methodId: draft.methodId,
-      apiKeyValue: draft.apiKeyValue,
       connectionDisplayNameValue: draft.connectionDisplayNameValue,
+      secrets: draft.secrets,
     });
     if (validationError !== null) {
       setDraft((currentDraft) => ({
@@ -97,8 +113,24 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
       return;
     }
 
-    if (draft.methodId === IntegrationConnectionMethodIds.API_KEY) {
-      const normalizedApiKey = draft.apiKeyValue.trim();
+    const selectedMethod = resolveSelectedMethod({
+      dialog,
+      methodId: draft.methodId,
+    });
+
+    if (selectedMethod.kind === "form") {
+      const submittedSecrets = Object.fromEntries(
+        Object.entries(draft.secrets).map(([key, value]) => [key, value.trim()]),
+      );
+      const populatedSecrets = Object.entries(submittedSecrets).filter(
+        ([, value]) => value.length > 0,
+      );
+      if (populatedSecrets.length > 1) {
+        throw new Error(
+          `Connection method '${selectedMethod.id}' cannot submit multiple secrets until the generic form routes are available.`,
+        );
+      }
+      const normalizedApiKey = populatedSecrets[0]?.[1] ?? "";
       const normalizedConnectionDisplayName = draft.connectionDisplayNameValue.trim();
 
       if (dialog.mode === "update") {
@@ -182,7 +214,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
     methodId: draft.methodId,
     connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
     connectionDisplayNameValue: draft.connectionDisplayNameValue,
-    apiKeyValue: draft.apiKeyValue,
+    secrets: draft.secrets,
     error: draft.error,
     pending:
       createApiKeyMutation.isPending ||
@@ -193,9 +225,9 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
       dialog,
       connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
       connectionDisplayNameValue: draft.connectionDisplayNameValue,
-      apiKeyValue: draft.apiKeyValue,
+      secrets: draft.secrets,
     }),
-    isApiKeyChanged: draft.apiKeyValue.trim().length > 0,
+    isSecretsChanged: Object.values(draft.secrets).some((value) => value.trim().length > 0),
     isConnectionDisplayNameChanged: isIntegrationConnectionDisplayNameChanged({
       dialog,
       connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
@@ -204,10 +236,13 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
     openDialog,
     closeDialog,
     submitDialog,
-    onApiKeyChange: (value: string): void => {
+    onSecretChange: (name: string, value: string): void => {
       setDraft((currentDraft) => ({
         ...currentDraft,
-        apiKeyValue: value,
+        secrets: {
+          ...currentDraft.secrets,
+          [name]: value,
+        },
         error: null,
       }));
     },

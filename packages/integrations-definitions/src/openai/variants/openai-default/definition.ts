@@ -1,6 +1,5 @@
 import {
   IntegrationConnectionMethodIds,
-  IntegrationConnectionMethodKinds,
   IntegrationKinds,
   IntegrationMcpConfigFormats,
   type IntegrationDefinition,
@@ -41,7 +40,16 @@ export const OpenAiApiKeyDefinition: OpenAiApiKeyIntegrationDefinition = {
     {
       id: IntegrationConnectionMethodIds.API_KEY,
       label: "API key",
-      kind: IntegrationConnectionMethodKinds.API_KEY,
+      kind: "form",
+      secretFields: [
+        {
+          name: "apiKey",
+          label: "API key",
+          placeholder: "Enter API key",
+          inputType: "password",
+          secretType: "api_key",
+        },
+      ],
       configSchema: OpenAiConnectionConfigSchema,
       configForm: OpenAiConnectionConfigForm,
     },
