@@ -2,17 +2,11 @@ import {
   integrationConnectionCredentials,
   integrationConnections,
   type ControlPlaneDatabase,
-  IntegrationConnectionCredentialPurposes,
   IntegrationConnectionStatuses,
   integrationCredentials,
-  IntegrationCredentialSecretKinds,
 } from "@mistle/db/control-plane";
 import { BadRequestError, NotFoundError } from "@mistle/http/errors.js";
-import {
-  type IntegrationConnectionMethodId,
-  IntegrationConnectionMethodIds,
-  type IntegrationRegistry,
-} from "@mistle/integrations-core";
+import type { IntegrationConnectionMethodId, IntegrationRegistry } from "@mistle/integrations-core";
 
 import {
   encryptCredentialUtf8,
@@ -23,12 +17,19 @@ import {
   IntegrationConnectionsBadRequestCodes,
   IntegrationConnectionsNotFoundCodes,
 } from "../constants.js";
+import {
+  parseFormConnectionConfigOrThrow,
+  parseCreateFormSecretsOrThrow,
+  resolveFormConnectionMethodOrThrow,
+} from "./form-connection-methods.js";
 
-export type CreateApiKeyConnectionInput = {
+export type CreateFormConnectionInput = {
   organizationId: string;
   targetKey: string;
   displayName: string;
-  apiKey: string;
+  methodId: IntegrationConnectionMethodId;
+  config: Record<string, unknown>;
+  secrets: Record<string, string>;
 };
 
 type CreatedConnection = {
@@ -43,21 +44,7 @@ type CreatedConnection = {
   updatedAt: string;
 };
 
-export function assertApiKeyConnectionMethodSupportedOrThrow(input: {
-  targetKey: string;
-  connectionMethods: ReadonlyArray<{ id: IntegrationConnectionMethodId }>;
-}): void {
-  if (
-    !input.connectionMethods.some((method) => method.id === IntegrationConnectionMethodIds.API_KEY)
-  ) {
-    throw new BadRequestError(
-      IntegrationConnectionsBadRequestCodes.API_KEY_NOT_SUPPORTED,
-      `Integration target '${input.targetKey}' does not support API-key authentication.`,
-    );
-  }
-}
-
-export async function createApiKeyConnection(
+export async function createFormConnection(
   ctx: {
     db: ControlPlaneDatabase;
     integrationRegistry: IntegrationRegistry;
@@ -65,7 +52,7 @@ export async function createApiKeyConnection(
       masterEncryptionKeys: Record<string, string>;
     };
   },
-  input: CreateApiKeyConnectionInput,
+  input: CreateFormConnectionInput,
 ): Promise<CreatedConnection> {
   const { db, integrationRegistry, integrationsConfig } = ctx;
 
@@ -92,9 +79,23 @@ export async function createApiKeyConnection(
     );
   }
 
-  assertApiKeyConnectionMethodSupportedOrThrow({
+  const formMethod = resolveFormConnectionMethodOrThrow({
     targetKey: input.targetKey,
+    methodId: input.methodId,
     connectionMethods: definition.connectionMethods,
+    invalidInputCode: IntegrationConnectionsBadRequestCodes.INVALID_CREATE_CONNECTION_INPUT,
+  });
+  const parsedConfig = parseFormConnectionConfigOrThrow({
+    targetKey: input.targetKey,
+    method: formMethod,
+    config: input.config,
+    invalidInputCode: IntegrationConnectionsBadRequestCodes.INVALID_CREATE_CONNECTION_INPUT,
+  });
+  const parsedSecrets = parseCreateFormSecretsOrThrow({
+    targetKey: input.targetKey,
+    method: formMethod,
+    secrets: input.secrets,
+    invalidInputCode: IntegrationConnectionsBadRequestCodes.INVALID_CREATE_CONNECTION_INPUT,
   });
 
   const organizationCredentialKey = await db.query.organizationCredentialKeys.findFirst({
@@ -117,11 +118,6 @@ export async function createApiKeyConnection(
   });
 
   try {
-    const encryptedApiKey = encryptCredentialUtf8({
-      plaintext: input.apiKey,
-      organizationCredentialKey: unwrappedOrganizationCredentialKey,
-    });
-
     return await db.transaction(async (tx) => {
       const [createdConnection] = await tx
         .insert(integrationConnections)
@@ -131,7 +127,8 @@ export async function createApiKeyConnection(
           displayName: input.displayName,
           status: IntegrationConnectionStatuses.ACTIVE,
           config: {
-            connection_method: IntegrationConnectionMethodIds.API_KEY,
+            ...parsedConfig,
+            connection_method: input.methodId,
           },
           targetSnapshotConfig: target.config,
         })
@@ -141,29 +138,36 @@ export async function createApiKeyConnection(
         throw new Error("Failed to create integration connection.");
       }
 
-      const [createdCredential] = await tx
-        .insert(integrationCredentials)
-        .values({
-          organizationId: input.organizationId,
-          secretKind: IntegrationCredentialSecretKinds.API_KEY,
-          ciphertext: encryptedApiKey.ciphertext,
-          nonce: encryptedApiKey.nonce,
-          organizationCredentialKeyVersion: organizationCredentialKey.version,
-          intendedFamilyId: target.familyId,
-        })
-        .returning({
-          id: integrationCredentials.id,
+      for (const parsedSecret of parsedSecrets) {
+        const encryptedSecret = encryptCredentialUtf8({
+          plaintext: parsedSecret.normalizedValue,
+          organizationCredentialKey: unwrappedOrganizationCredentialKey,
         });
 
-      if (createdCredential === undefined) {
-        throw new Error("Failed to create integration credential.");
-      }
+        const [createdCredential] = await tx
+          .insert(integrationCredentials)
+          .values({
+            organizationId: input.organizationId,
+            secretKind: parsedSecret.persistedSecretRef.secretKind,
+            ciphertext: encryptedSecret.ciphertext,
+            nonce: encryptedSecret.nonce,
+            organizationCredentialKeyVersion: organizationCredentialKey.version,
+            intendedFamilyId: target.familyId,
+          })
+          .returning({
+            id: integrationCredentials.id,
+          });
 
-      await tx.insert(integrationConnectionCredentials).values({
-        connectionId: createdConnection.id,
-        credentialId: createdCredential.id,
-        purpose: IntegrationConnectionCredentialPurposes.API_KEY,
-      });
+        if (createdCredential === undefined) {
+          throw new Error("Failed to create integration credential.");
+        }
+
+        await tx.insert(integrationConnectionCredentials).values({
+          connectionId: createdConnection.id,
+          credentialId: createdCredential.id,
+          purpose: parsedSecret.persistedSecretRef.purpose,
+        });
+      }
 
       return {
         id: createdConnection.id,

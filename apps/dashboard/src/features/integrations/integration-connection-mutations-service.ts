@@ -1,3 +1,5 @@
+import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
+
 import { requestControlPlane } from "../api/request-control-plane.js";
 import {
   type CreatedIntegrationConnection,
@@ -19,10 +21,16 @@ export async function createApiKeyIntegrationConnection(input: {
     const response = await requestControlPlane({
       operation: "createApiKeyIntegrationConnection",
       method: "POST",
-      pathname: `/v1/integration/connections/${encodeURIComponent(input.targetKey)}/api-key`,
+      pathname: `/v1/integration/connections/${encodeURIComponent(input.targetKey)}/form`,
       body: {
         displayName: input.displayName,
-        apiKey: input.apiKey,
+        methodId: IntegrationConnectionMethodIds.API_KEY,
+        config: {
+          connection_method: IntegrationConnectionMethodIds.API_KEY,
+        },
+        secrets: {
+          apiKey: input.apiKey,
+        },
       },
       fallbackMessage: "Could not create integration connection.",
     });
@@ -79,10 +87,15 @@ export async function updateApiKeyIntegrationConnection(input: {
     const response = await requestControlPlane({
       operation: "updateApiKeyIntegrationConnection",
       method: "PUT",
-      pathname: `/v1/integration/connections/${encodeURIComponent(input.connectionId)}/api-key`,
+      pathname: `/v1/integration/connections/${encodeURIComponent(input.connectionId)}/form`,
       body: {
         displayName: input.displayName,
-        apiKey: input.apiKey,
+        config: {
+          connection_method: IntegrationConnectionMethodIds.API_KEY,
+        },
+        secrets: {
+          apiKey: input.apiKey,
+        },
       },
       fallbackMessage: "Could not update integration connection API key.",
     });
