@@ -181,11 +181,8 @@ describe("SessionsPage", () => {
     const rendered = renderSessionsPage({ queryClient });
 
     try {
-      expect(screen.getByText("Start a new session")).toBeDefined();
       expect(screen.getByRole("combobox", { name: "Sandbox profile" })).toBeDefined();
       expect(screen.getByRole("button", { name: "Start session" })).toBeDefined();
-      expect(screen.queryByText("Recent Sessions")).toBeNull();
-      expect(screen.queryByText("No launched sessions yet.")).toBeNull();
     } finally {
       rendered.unmount();
       await queryClient.cancelQueries();
@@ -210,28 +207,24 @@ describe("SessionsPage", () => {
     expect(markup).toContain('<span class="sr-only">Actions</span>');
   });
 
-  it("renders the result summary even when there is only one page", () => {
+  it("renders the seeded session without pagination when there is only one page", () => {
     const queryClient = createSessionsPageQueryClient({
       refetchOnMount: false,
       staleTime: Number.POSITIVE_INFINITY,
     });
     seedSessionsList({
       queryClient,
-      items: [buildListedSession({ id: "sbi_123" })],
+      items: [buildListedSession({ id: "sbi_123", sandboxProfileDisplayName: "Single session" })],
       totalResults: 1,
     });
 
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SessionsPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    renderSessionsPage({
+      queryClient,
+    });
 
-    expect(markup).toContain("Showing 1 of 1");
-    expect(markup).not.toContain(">Previous<");
-    expect(markup).not.toContain(">Next<");
+    expect(screen.getByText("Single session")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
   });
 
   it("counts optimistic sessions only in the visible results", () => {

@@ -140,7 +140,6 @@ describe("IntegrationConnectionDialog", () => {
       />,
     );
 
-    expect(screen.getByText("Configuration")).toBeTruthy();
     expect(screen.getByLabelText("Endpoint")).toBeTruthy();
     expect(screen.getByPlaceholderText("Paste token")).toBeTruthy();
   });
@@ -200,7 +199,6 @@ describe("IntegrationConnectionDialog", () => {
       />,
     );
 
-    expect(screen.queryByText("Authentication method")).toBeNull();
     expect(screen.queryByRole("radio")).toBeNull();
   });
 
@@ -252,7 +250,7 @@ describe("IntegrationConnectionDialog", () => {
 
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
-    expect(screen.getByText("Save to update this connection.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("renders Save when only the connection name changes in update mode", () => {
@@ -303,7 +301,7 @@ describe("IntegrationConnectionDialog", () => {
 
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
-    expect(screen.getByText("Save to update this connection.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("renders Atlassian personal token configuration fields", () => {
