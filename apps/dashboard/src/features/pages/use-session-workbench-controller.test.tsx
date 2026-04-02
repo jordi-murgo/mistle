@@ -13,10 +13,12 @@ import {
   hasFreshSandboxStatusReadSinceRecoveryBoundary,
   isActiveResumeRequest,
   reduceCodexRecoveryState,
+  resolveSandboxStatusReadState,
+  resolveCodexRecoveryStateForRender,
   resolveCodexReconnectMessage,
-  resolveSessionEntryPhase,
   resolveAutomationSessionPreparationTimeoutDelayMs,
-  resolveStoppedSessionMessageForEntryPhase,
+  resolveStoppedSessionMessageForWorkbenchEntryPhase,
+  resolveWorkbenchEntryPhase,
   seedSandboxInstanceStatusQuery,
   shouldPollStoppedSandboxStatus,
   shouldShowResumeInFlightState,
@@ -66,6 +68,7 @@ describe("useSessionWorkbenchController", () => {
     });
 
     expect(Object.keys(result.current)).toEqual(["workbench", "conversationPane"]);
+    expect(result.current.workbench.sandboxStatusReadState).toBe("loading");
     expect(result.current.workbench.connectionReadiness).toEqual({
       canConnect: false,
       reason: "missing-session",
@@ -74,7 +77,6 @@ describe("useSessionWorkbenchController", () => {
       message: null,
       requiresManualResume: false,
     });
-    expect(result.current.workbench.hasTopAlert).toBe(false);
     expect(result.current.workbench.sessionReconnectState).toEqual({
       isRecovering: false,
       message: null,
@@ -243,6 +245,33 @@ describe("useSessionWorkbenchController", () => {
     });
   });
 
+  it("clears stale recovery state before render-time reconnect logic for a new sandbox", () => {
+    expect(
+      resolveCodexRecoveryStateForRender({
+        baseState: {
+          kind: "recovering",
+          baseMessage: "Sandbox session stream reset.",
+          errorMessage: null,
+          targetThreadId: "thread_old",
+          recoveryStrategy: "reopen_stream",
+          reconnectAttemptCount: 0,
+          reconnectCommand: "reopen_stream",
+          recoverableDisconnectId: 1,
+        },
+        canConnect: true,
+        hasLifecycleError: false,
+        isStartingSession: false,
+        isWaitingForAutomationThread: false,
+        previousSandboxInstanceId: "sbi_old",
+        sandboxInstanceId: "sbi_new",
+        sandboxStatus: "running",
+        transportState: "detached",
+      }),
+    ).toEqual({
+      kind: "idle",
+    });
+  });
+
   it("stops Codex recovery once attempts are exhausted or the sandbox fails", () => {
     const exhaustedRecovery = {
       kind: "recovering" as const,
@@ -345,6 +374,24 @@ describe("useSessionWorkbenchController", () => {
         currentDataUpdatedAtMs: 1_000,
       }),
     ).toBe(true);
+  });
+
+  it("keeps sandbox status ready after a transient refetch error when a fresh read already exists", () => {
+    expect(
+      resolveSandboxStatusReadState({
+        hasFreshSandboxStatusSinceMount: true,
+        hasFreshSandboxStatusSinceRecovery: true,
+        hasStatusQueryError: true,
+      }),
+    ).toBe("ready");
+
+    expect(
+      resolveSandboxStatusReadState({
+        hasFreshSandboxStatusSinceMount: false,
+        hasFreshSandboxStatusSinceRecovery: true,
+        hasStatusQueryError: true,
+      }),
+    ).toBe("error");
   });
 
   it("persists terminal panel visibility and size per sandbox instance", () => {
@@ -571,7 +618,6 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: false,
         hasResumeInFlightState: false,
-        isStatusPending: true,
         sandboxStatus: null,
       },
     },
@@ -580,7 +626,6 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: false,
         hasResumeInFlightState: true,
-        isStatusPending: false,
         sandboxStatus: "stopped" as const,
       },
     },
@@ -589,7 +634,6 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: false,
         hasResumeInFlightState: false,
-        isStatusPending: false,
         sandboxStatus: "stopped" as const,
       },
     },
@@ -598,7 +642,14 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: false,
         hasResumeInFlightState: false,
-        isStatusPending: false,
+        sandboxStatus: "pending" as const,
+      },
+    },
+    {
+      expected: "sandbox_starting",
+      input: {
+        connectedSession: false,
+        hasResumeInFlightState: false,
         sandboxStatus: "starting" as const,
       },
     },
@@ -607,7 +658,6 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: false,
         hasResumeInFlightState: false,
-        isStatusPending: false,
         sandboxStatus: "running" as const,
       },
     },
@@ -616,7 +666,6 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: true,
         hasResumeInFlightState: false,
-        isStatusPending: false,
         sandboxStatus: "running" as const,
       },
     },
@@ -625,12 +674,11 @@ describe("useSessionWorkbenchController", () => {
       input: {
         connectedSession: false,
         hasResumeInFlightState: false,
-        isStatusPending: false,
         sandboxStatus: "failed" as const,
       },
     },
   ])("routes session entry based on sandbox lifecycle status: $expected", ({ input, expected }) => {
-    expect(resolveSessionEntryPhase(input)).toBe(expected);
+    expect(resolveWorkbenchEntryPhase(input)).toBe(expected);
   });
 
   it("shows resume progress while auto-resume is being kicked off or actively submitting", () => {
@@ -697,25 +745,57 @@ describe("useSessionWorkbenchController", () => {
 
   it("shows definitive resume failures in the stopped-session message path", () => {
     expect(
-      resolveStoppedSessionMessageForEntryPhase({
+      resolveStoppedSessionMessageForWorkbenchEntryPhase({
         phase: "manual_resume_required",
         resumeActionErrorMessage: "You no longer have access to this sandbox.",
       }),
     ).toBe("You no longer have access to this sandbox.");
 
     expect(
-      resolveStoppedSessionMessageForEntryPhase({
+      resolveStoppedSessionMessageForWorkbenchEntryPhase({
         phase: "manual_resume_required",
         resumeActionErrorMessage: null,
       }),
     ).toBe("This sandbox is stopped. Resume it to reconnect chat and terminal.");
 
     expect(
-      resolveStoppedSessionMessageForEntryPhase({
+      resolveStoppedSessionMessageForWorkbenchEntryPhase({
         phase: "resume_pending",
         resumeActionErrorMessage: "Conflict",
       }),
     ).toBeNull();
+  });
+
+  it("keeps the stopped-sandbox resume callback stable across rerenders when inputs are unchanged", () => {
+    const queryClient = createControllerQueryClient({
+      gcTime: Infinity,
+      refetchOnMount: false,
+      staleTime: Infinity,
+    });
+    seedSandboxInstanceStatusQuery({
+      queryClient,
+      sandboxInstanceId: "sbi_resume_stable",
+      sandboxStatus: {
+        failureCode: null,
+        failureMessage: null,
+        id: "sbi_resume_stable",
+        runtimePlan: null,
+        automationConversation: null,
+        status: "stopped",
+      },
+    });
+
+    const { result, rerender } = renderSessionWorkbenchController({
+      queryClient,
+      sandboxInstanceId: "sbi_resume_stable",
+    });
+    const initialResumeRequest = result.current.workbench.requestStoppedSandboxResume;
+
+    rerender({
+      sandboxInstanceId: "sbi_resume_stable",
+    });
+
+    expect(result.current.workbench.requestStoppedSandboxResume).toBe(initialResumeRequest);
   });
 
   it("accepts resume completions only for the active request on the same sandbox", () => {

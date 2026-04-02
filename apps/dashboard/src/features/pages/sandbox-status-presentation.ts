@@ -1,6 +1,9 @@
-export type SandboxLifecycleStatus = "pending" | "starting" | "running" | "stopped" | "failed";
+import type { WorkbenchSandboxLifecycleStatus } from "./session-workbench-state.js";
 
-export type WorkbenchSandboxLifecycleStatus = SandboxLifecycleStatus | "resuming" | null;
+export type {
+  SandboxLifecycleStatus,
+  WorkbenchSandboxLifecycleStatus,
+} from "./session-workbench-state.js";
 
 export type SandboxStatusBadgeUi = {
   label: string;
@@ -11,16 +14,23 @@ export type SandboxStatusBadgeUi = {
 export function resolveSandboxStatusBadgeUi(
   sandboxLifecycleStatus: WorkbenchSandboxLifecycleStatus,
 ): SandboxStatusBadgeUi {
+  if (sandboxLifecycleStatus === null) {
+    return {
+      label: "Loading status",
+      variant: "outline",
+    };
+  }
+
   if (sandboxLifecycleStatus === "failed") {
     return {
-      label: "Sandbox failed",
+      label: "Failed",
       variant: "destructive",
     };
   }
 
   if (sandboxLifecycleStatus === "running") {
     return {
-      label: "Connected",
+      label: "Running",
       variant: "secondary",
       className: "bg-emerald-600 text-white hover:bg-emerald-600/90",
     };
@@ -28,20 +38,27 @@ export function resolveSandboxStatusBadgeUi(
 
   if (sandboxLifecycleStatus === "stopped") {
     return {
-      label: "Sandbox stopped",
+      label: "Stopped",
       variant: "outline",
     };
   }
 
   if (sandboxLifecycleStatus === "resuming") {
     return {
-      label: "Resuming sandbox",
+      label: "Resuming",
+      variant: "outline",
+    };
+  }
+
+  if (sandboxLifecycleStatus === "pending") {
+    return {
+      label: "Pending",
       variant: "outline",
     };
   }
 
   return {
-    label: "Starting sandbox",
+    label: "Starting",
     variant: "outline",
   };
 }
