@@ -3,25 +3,23 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FormPageShell } from "./form-page.js";
+import { FormPageStack } from "./form-page.js";
 
-describe("FormPageShell", () => {
+describe("FormPageStack", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("renders a centered stack by default", () => {
-    render(
-      <FormPageShell>
-        <div>Contained content</div>
-      </FormPageShell>,
+  it("uses the standard form document spacing", () => {
+    const { container } = render(
+      <FormPageStack>
+        <div>First section</div>
+        <div>Second section</div>
+      </FormPageStack>,
     );
 
-    const shell = screen.getByText("Contained content").parentElement?.parentElement;
-    expect(shell?.className).toContain("mx-auto");
-    expect(shell?.className).toContain("gap-4");
-    expect(shell?.className).not.toContain("bg-muted/30");
-    expect(shell?.className).not.toContain("-mx-4");
-    expect(shell?.className).not.toContain("-my-6");
+    expect(container.firstElementChild?.className).toContain("gap-6");
+    expect(screen.getByText("First section")).toBeDefined();
+    expect(screen.getByText("Second section")).toBeDefined();
   });
 });

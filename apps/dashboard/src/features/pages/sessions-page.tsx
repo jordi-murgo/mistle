@@ -1,9 +1,7 @@
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
   Badge,
   Button,
+  Notice,
   Table,
   TableBody,
   TableCell,
@@ -143,10 +141,7 @@ export function SandboxSessionStatusBadge(input: {
     );
   }
 
-  const tooltipMessage =
-    input.failureCode === null
-      ? input.failureMessage
-      : `${input.failureCode}\n${input.failureMessage}`;
+  const tooltipMessage = input.failureMessage;
 
   return (
     <Tooltip>
@@ -155,7 +150,7 @@ export function SandboxSessionStatusBadge(input: {
         render={
           <Badge
             className={statusUi.className}
-            render={<span aria-hidden="true" title={tooltipMessage} />}
+            render={<span aria-hidden="true" />}
             variant={statusUi.variant}
           />
         }
@@ -476,30 +471,25 @@ export function SessionsPage(): React.JSX.Element {
         </div>
 
         {selectableProfilesQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>Could not load sandbox profiles</AlertTitle>
-            <AlertDescription>
-              {resolveApiErrorMessage({
-                error: selectableProfilesQuery.error,
-                fallbackMessage: "Could not load sandbox profiles.",
-              })}
-            </AlertDescription>
-          </Alert>
+          <Notice title="Could not load sandbox profiles" variant="alert">
+            {resolveApiErrorMessage({
+              error: selectableProfilesQuery.error,
+              fallbackMessage: "Could not load sandbox profiles.",
+            })}
+          </Notice>
         ) : null}
         {startErrorMessage === null ? null : (
-          <Alert variant="destructive">
-            <AlertTitle>Session start failed</AlertTitle>
-            <AlertDescription>{startErrorMessage}</AlertDescription>
-          </Alert>
+          <Notice title="Session start failed" variant="alert">
+            {startErrorMessage}
+          </Notice>
         )}
       </div>
 
       <div className="flex flex-col gap-3">
         {listErrorMessage === null ? null : (
-          <Alert variant="destructive">
-            <AlertTitle>Could not load sandbox instances</AlertTitle>
-            <AlertDescription>{listErrorMessage}</AlertDescription>
-          </Alert>
+          <Notice title="Could not load sandbox instances" variant="alert">
+            {listErrorMessage}
+          </Notice>
         )}
 
         <div className="flex flex-col gap-3">
