@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { EditableHeading } from "./editable-heading.js";
@@ -11,69 +10,72 @@ describe("EditableHeading", () => {
     cleanup();
   });
 
-  function HeadingEditorHarness(): React.JSX.Element {
-    const [isEditing, setIsEditing] = useState(false);
-    const [draftValue, setDraftValue] = useState("My Title");
-    const [commitCount, setCommitCount] = useState(0);
-    const [cancelCount, setCancelCount] = useState(0);
-
-    return (
-      <div>
-        <EditableHeading
-          ariaLabel="Heading"
-          cancelOnEscape={true}
-          draftValue={draftValue}
-          editButtonLabel="Edit heading"
-          errorMessage={undefined}
-          headingTag="h2"
-          isEditing={isEditing}
-          maxWidthClassName={undefined}
-          onCancel={() => {
-            setCancelCount((current) => current + 1);
-            setIsEditing(false);
-          }}
-          onCommit={() => {
-            setCommitCount((current) => current + 1);
-            setIsEditing(false);
-          }}
-          onDraftValueChange={setDraftValue}
-          onEditStart={() => {
-            setIsEditing(true);
-          }}
-          placeholder={undefined}
-          saveDisabled={false}
-          value="My Title"
-        />
-        <p>Commit count: {commitCount}</p>
-        <p>Cancel count: {cancelCount}</p>
-      </div>
+  function renderEditableHeading(
+    overrides: Partial<Parameters<typeof EditableHeading>[0]> = {},
+  ): ReturnType<typeof render> {
+    return render(
+      <EditableHeading
+        ariaLabel="Heading"
+        cancelOnEscape={true}
+        draftValue="Draft value"
+        editButtonLabel="Edit heading"
+        errorMessage={undefined}
+        isEditing={false}
+        maxWidthClassName={undefined}
+        onCancel={() => {}}
+        onCommit={() => {}}
+        onDraftValueChange={() => {}}
+        onEditStart={() => {}}
+        placeholder="Heading"
+        disabled={false}
+        value="Saved value"
+        {...overrides}
+      />,
     );
   }
 
-  it("switches into edit mode when edit icon is clicked", () => {
-    render(<HeadingEditorHarness />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
-    expect(screen.getByRole("textbox", { name: "Heading" })).toBeDefined();
-  });
-
-  it("commits on blur while editing", () => {
-    render(<HeadingEditorHarness />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
-    fireEvent.blur(screen.getByRole("textbox", { name: "Heading" }));
-
-    expect(screen.getByText("Commit count: 1")).toBeDefined();
-  });
-
-  it("cancels on Escape while editing", () => {
-    render(<HeadingEditorHarness />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Heading" }), {
-      key: "Escape",
+  it("disables the edit button when saves are disabled", () => {
+    renderEditableHeading({
+      disabled: true,
     });
 
-    expect(screen.getByText("Cancel count: 1")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Edit heading" })).toHaveProperty("disabled", true);
+  });
+
+  it("disables the textbox while editing when saves are disabled", () => {
+    renderEditableHeading({
+      isEditing: true,
+      disabled: true,
+    });
+
+    expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty("disabled", true);
+    expect(
+      screen
+        .getByRole("textbox", { name: "Heading" })
+        .closest("[data-save-state]")
+        ?.getAttribute("data-save-state"),
+    ).toBe("idle");
+  });
+
+  it("commits on blur and cancels on escape", () => {
+    let commitCount = 0;
+    let cancelCount = 0;
+
+    renderEditableHeading({
+      isEditing: true,
+      onCancel: () => {
+        cancelCount += 1;
+      },
+      onCommit: () => {
+        commitCount += 1;
+      },
+    });
+
+    const input = screen.getByRole("textbox", { name: "Heading" });
+    fireEvent.blur(input);
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(commitCount).toBe(1);
+    expect(cancelCount).toBe(1);
   });
 });

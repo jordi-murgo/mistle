@@ -1,6 +1,7 @@
 import { Button, Notice } from "@mistle/ui";
 import { PencilSimpleIcon } from "@phosphor-icons/react";
 
+import type { AutoSaveInputVisualStatus } from "./auto-save-input-surface.js";
 import { PageTitleField } from "./page-title-field.js";
 
 export function EditableHeading(input: {
@@ -11,8 +12,9 @@ export function EditableHeading(input: {
   editButtonLabel: string;
   placeholder: string | undefined;
   errorMessage: string | undefined;
-  saveDisabled: boolean;
-  cancelOnEscape: boolean | undefined;
+  disabled: boolean;
+  saveStatus?: AutoSaveInputVisualStatus;
+  cancelOnEscape?: boolean;
   maxWidthClassName: string | undefined;
   headingTag?: "div" | "h1" | "h2";
   headingClassName?: string;
@@ -32,6 +34,7 @@ export function EditableHeading(input: {
       <PageTitleField
         ariaLabel={input.ariaLabel}
         autoFocus={true}
+        disabled={input.disabled}
         fieldId="editable-heading-input"
         label={input.ariaLabel}
         onBlur={input.onCommit}
@@ -46,6 +49,7 @@ export function EditableHeading(input: {
             input.onCancel();
           }
         }}
+        saveStatus={input.saveStatus ?? "idle"}
         showLabel={false}
         value={input.draftValue}
         {...(input.inputClassName === undefined ? {} : { className: input.inputClassName })}
@@ -66,7 +70,7 @@ export function EditableHeading(input: {
         </HeadingTag>
         <Button
           aria-label={input.editButtonLabel}
-          disabled={input.saveDisabled}
+          disabled={input.disabled}
           onClick={input.onEditStart}
           size="icon-sm"
           type="button"

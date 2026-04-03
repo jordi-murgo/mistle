@@ -4,16 +4,16 @@ import { EditableHeading } from "../shared/editable-heading.js";
 
 export function WebhookAutomationTitleEditor(input: {
   title: string;
-  saveDisabled: boolean;
+  disabled: boolean;
   onCommit: (nextValue: string) => void;
   errorMessage: string | undefined;
 }): React.JSX.Element {
   return (
     <WebhookAutomationEditableTitle
       key={input.title}
+      disabled={input.disabled}
       errorMessage={input.errorMessage}
       onCommit={input.onCommit}
-      saveDisabled={input.saveDisabled}
       title={input.title}
     />
   );
@@ -21,7 +21,7 @@ export function WebhookAutomationTitleEditor(input: {
 
 function WebhookAutomationEditableTitle(input: {
   title: string;
-  saveDisabled: boolean;
+  disabled: boolean;
   onCommit: (nextValue: string) => void;
   errorMessage: string | undefined;
 }): React.JSX.Element {
@@ -55,7 +55,7 @@ function WebhookAutomationEditableTitle(input: {
         setIsEditing(true);
       }}
       placeholder="Automation name"
-      saveDisabled={input.saveDisabled}
+      disabled={input.disabled}
       value={input.title}
     />
   );

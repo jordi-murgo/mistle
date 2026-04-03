@@ -1,8 +1,7 @@
 import { Badge, Button, Notice } from "@mistle/ui";
 import { ArrowClockwiseIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
-import { useState } from "react";
 
-import { EditableHeading } from "../shared/editable-heading.js";
+import { AutoSaveEditableHeading } from "../shared/auto-save-editable-heading.js";
 import {
   formatConnectionStatusLabel,
   formatResourceHeading,
@@ -52,12 +51,10 @@ export type IntegrationConnectionDetailViewProps = {
   >;
   titleEditor?:
     | {
-        connectionIdWithError: string | null;
-        errorMessage?: string;
-        onCommit: (connectionId: string, draftValue: string) => void;
-        onEditCancel: () => void;
-        onEditStart: () => void;
-        saveDisabled: boolean;
+        disabled: boolean;
+        errorMessageByConnectionId: Readonly<Record<string, string | undefined>>;
+        onStartEditing: (connectionId: string) => void;
+        onSave: (connectionId: string, draftValue: string) => Promise<void> | void;
       }
     | undefined;
 };
@@ -188,45 +185,27 @@ function EditableConnectionTitle(input: {
   connection: IntegrationConnectionDetailItem;
   titleEditor: NonNullable<IntegrationConnectionDetailViewProps["titleEditor"]>;
 }): React.JSX.Element {
-  const [draftValue, setDraftValue] = useState(input.connection.displayName);
-  const [isEditing, setIsEditing] = useState(false);
+  const connectionErrorMessage = input.titleEditor.errorMessageByConnectionId[input.connection.id];
 
   return (
-    <EditableHeading
+    <AutoSaveEditableHeading
       ariaLabel="Connection name"
-      cancelOnEscape={true}
-      draftValue={draftValue}
+      disabled={input.titleEditor.disabled}
       editButtonLabel="Edit connection name"
-      errorMessage={
-        input.titleEditor.connectionIdWithError === input.connection.id
-          ? input.titleEditor.errorMessage
-          : undefined
-      }
       headingClassName="text-base font-semibold leading-tight"
-      isEditing={isEditing}
+      value={input.connection.displayName}
       maxWidthClassName="max-w-3xl"
-      onCancel={() => {
-        setDraftValue(input.connection.displayName);
-        setIsEditing(false);
-        input.titleEditor.onEditCancel();
-      }}
-      onCommit={() => {
-        input.titleEditor.onCommit(input.connection.id, draftValue);
-        if (draftValue.trim().length > 0) {
-          setIsEditing(false);
-        }
-      }}
-      onDraftValueChange={(nextValue) => {
-        setDraftValue(nextValue);
-      }}
       onEditStart={() => {
-        setDraftValue(input.connection.displayName);
-        setIsEditing(true);
-        input.titleEditor.onEditStart();
+        input.titleEditor.onStartEditing(input.connection.id);
+      }}
+      onSave={async (nextValue) => {
+        await input.titleEditor.onSave(input.connection.id, nextValue.trim());
       }}
       placeholder="Connection name"
-      saveDisabled={input.titleEditor.saveDisabled}
-      value={input.connection.displayName}
+      validate={(nextValue) => {
+        return nextValue.trim().length === 0 ? "Connection name is required." : null;
+      }}
+      {...(connectionErrorMessage === undefined ? {} : { errorMessage: connectionErrorMessage })}
     />
   );
 }

@@ -202,7 +202,7 @@ export function WebhookAutomationForm(input: WebhookAutomationFormProps): React.
               onCommit={(nextValue) => {
                 input.onValueChange("name", nextValue);
               }}
-              saveDisabled={input.isDeleting || input.isSaving}
+              disabled={input.isDeleting || input.isSaving}
               title={input.values.name}
             />
           </div>
