@@ -8,17 +8,11 @@ const meta = {
   component: OrganizationGeneralSettingsPageView,
   decorators: [withDashboardPageWidth],
   args: {
-    hasDirtyChanges: false,
     isLoading: false,
     isSaving: false,
     loadErrorMessage: null,
     name: "Mistle Labs",
-    nameErrorMessage: null,
-    onCancelChanges: () => {},
-    onNameChange: () => {},
-    onSaveChanges: () => {},
-    saveError: null,
-    saveSuccess: false,
+    onSaveChanges: async () => {},
   },
 } satisfies Meta<typeof OrganizationGeneralSettingsPageView>;
 
@@ -37,42 +31,5 @@ export const Loading: Story = {
 export const LoadError: Story = {
   args: {
     loadErrorMessage: "Could not load organization settings.",
-  },
-};
-
-export const DirtyChanges: Story = {
-  args: {
-    hasDirtyChanges: true,
-    name: "Mistle Storybook Labs",
-  },
-};
-
-export const ValidationError: Story = {
-  args: {
-    hasDirtyChanges: true,
-    name: "",
-    nameErrorMessage: "Organization name is required.",
-  },
-};
-
-export const Saving: Story = {
-  args: {
-    hasDirtyChanges: true,
-    isSaving: true,
-    name: "Mistle Storybook Labs",
-  },
-};
-
-export const SaveError: Story = {
-  args: {
-    hasDirtyChanges: true,
-    name: "Mistle Storybook Labs",
-    saveError: "Could not update organization settings.",
-  },
-};
-
-export const Saved: Story = {
-  args: {
-    saveSuccess: true,
   },
 };
