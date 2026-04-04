@@ -1,0 +1,53 @@
+import { z } from "zod";
+
+import { CompiledRuntimePlanSchema } from "./runtime-plan.js";
+
+export const SandboxdStartupModes = {
+  NEW: "new",
+  EXISTING: "existing",
+} as const;
+
+export const SandboxdStartupModeSchema = z.enum([
+  SandboxdStartupModes.NEW,
+  SandboxdStartupModes.EXISTING,
+]);
+
+export type SandboxdStartupMode = z.infer<typeof SandboxdStartupModeSchema>;
+
+export const SandboxdStartupInputSchema = z
+  .object({
+    startupMode: SandboxdStartupModeSchema,
+    bootstrapToken: z.string().min(1),
+    tunnelExchangeToken: z.string().min(1),
+    tunnelGatewayWsUrl: z.string().min(1),
+    runtimePlan: CompiledRuntimePlanSchema,
+    egressGrantByRuleId: z.record(z.string(), z.string().min(1)),
+  })
+  .strict();
+
+export type SandboxdStartupInput = z.infer<typeof SandboxdStartupInputSchema>;
+
+export const SandboxdStartupApplyRequestSchema = z
+  .object({
+    token: z.string().min(1),
+    startupInput: SandboxdStartupInputSchema,
+  })
+  .strict();
+
+export type SandboxdStartupApplyRequest = z.infer<typeof SandboxdStartupApplyRequestSchema>;
+
+export const SandboxdStartupApplyResponseSchema = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      error: z.string().min(1),
+    })
+    .strict(),
+]);
+
+export type SandboxdStartupApplyResponse = z.infer<typeof SandboxdStartupApplyResponseSchema>;
