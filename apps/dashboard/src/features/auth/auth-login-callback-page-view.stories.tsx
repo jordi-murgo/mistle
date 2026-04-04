@@ -1,15 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import {
-  withDashboardCenteredSurface,
-  withDashboardMemoryRouter,
-} from "../../storybook/decorators.js";
+import { withDashboardMemoryRouter, withDashboardPageStory } from "../../storybook/decorators.js";
 import { AuthLoginCallbackPageView } from "./auth-login-callback-page-view.js";
 
 const meta = {
-  title: "Dashboard/Auth/AuthLoginCallbackPageView",
+  title: "Dashboard/Auth/LoginCallbackPageView",
   component: AuthLoginCallbackPageView,
-  decorators: [withDashboardMemoryRouter, withDashboardCenteredSurface],
+  decorators: [withDashboardPageStory, withDashboardMemoryRouter],
   parameters: {
     layout: "fullscreen",
   },
