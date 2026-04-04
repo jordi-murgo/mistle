@@ -89,21 +89,22 @@ export class InMemorySandboxPresenceStore implements SandboxPresenceStore {
   }
 
   async hasAnyActiveLease(input: { sandboxInstanceId: string; nowMs: number }): Promise<boolean> {
-    void input.nowMs;
-
-    this.pruneExpiredLeases(input.sandboxInstanceId);
-    const currentLeases = this.#leasesBySandboxInstanceId.get(input.sandboxInstanceId);
-    return currentLeases !== undefined && currentLeases.size > 0;
+    return (await this.countActiveLeases(input)) > 0;
   }
 
-  private pruneExpiredLeases(sandboxInstanceId: string): void {
+  async countActiveLeases(input: { sandboxInstanceId: string; nowMs: number }): Promise<number> {
+    this.pruneExpiredLeases(input.sandboxInstanceId, input.nowMs);
+    return this.#leasesBySandboxInstanceId.get(input.sandboxInstanceId)?.size ?? 0;
+  }
+
+  private pruneExpiredLeases(sandboxInstanceId: string, nowMs: number = this.clock.nowMs()): void {
     const currentLeases = this.#leasesBySandboxInstanceId.get(sandboxInstanceId);
     if (currentLeases === undefined) {
       return;
     }
 
     for (const [leaseId, lease] of currentLeases.entries()) {
-      if (lease.expiresAtMs <= this.clock.nowMs()) {
+      if (lease.expiresAtMs <= nowMs) {
         currentLeases.delete(leaseId);
       }
     }
