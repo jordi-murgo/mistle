@@ -1,5 +1,8 @@
 use std::fmt;
+use std::io;
+use std::path::Path;
 
+pub mod apply_startup;
 pub mod protocol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,13 +65,33 @@ where
     Ok(command)
 }
 
-pub fn run<I, S>(args: I) -> Result<(), ParseSandboxdCommandError>
+pub fn run<I, S, R, W, E>(args: I, stdin: &mut R, stdout: &mut W, stderr: &mut E) -> i32
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
+    R: io::Read,
+    W: io::Write,
+    E: io::Write,
 {
-    let _command = parse_sandboxd_command(args)?;
-    Ok(())
+    let command = match parse_sandboxd_command(args) {
+        Ok(command) => command,
+        Err(error) => {
+            let _ = writeln!(stderr, "{error}");
+            return 1;
+        }
+    };
+
+    match command {
+        SandboxdCommand::Serve => 0,
+        SandboxdCommand::ApplyStartup => match apply_startup::run_apply_startup(
+            stdin,
+            stdout,
+            Path::new(apply_startup::DEFAULT_MANIFEST_PATH),
+        ) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        },
+    }
 }
 
 #[cfg(test)]
