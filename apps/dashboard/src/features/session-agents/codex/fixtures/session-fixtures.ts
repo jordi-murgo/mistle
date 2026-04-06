@@ -69,8 +69,6 @@ export const SessionComposerFixtureProps: ChatComposerViewModel = {
   canUploadAttachments: true,
   isUploadingAttachments: false,
   configControlsDisabled: false,
-  statusMessage: null,
-  completedTurnErrorMessage: null,
   onComposerTextChange: function onComposerTextChange() {},
   onSubmit: function onSubmit() {},
   onModelChange: function onModelChange() {},
@@ -105,6 +103,7 @@ export const SessionComposerFixtureStatusMessageForNonImageCapableModel: ChatCom
     message:
       "Model GPT-5.3 Codex Spark cannot inspect images. Images will only be sent as file path references.",
     variant: "default",
+    presentation: "notice",
   };
 
 export const SessionComposerFixturePropsForUnavailableModel: ChatComposerViewModel = {
@@ -126,4 +125,5 @@ export const SessionComposerFixturePropsForLoadingModel: ChatComposerViewModel =
 export const SessionComposerFixtureStatusMessageForLoadingModel: ChatComposerStatusMessage = {
   message: "Wait for the selected model to finish loading before sending a message.",
   variant: "alert",
+  presentation: "notice",
 };

@@ -1,4 +1,11 @@
-import { Button, Input, Label } from "@mistle/ui";
+import {
+  Button,
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+  Label,
+  REGEXP_ONLY_DIGITS,
+} from "@mistle/ui";
 
 type OtpStepFormProps = {
   email: string;
@@ -10,6 +17,8 @@ type OtpStepFormProps = {
 };
 
 export function OtpStepForm(props: OtpStepFormProps): React.JSX.Element {
+  const otpSlotClassName = "h-12 min-w-0 flex-1 text-base tabular-nums sm:h-14 sm:text-lg";
+
   return (
     <form className="gap-4 flex flex-col" onSubmit={(event) => void props.onSubmit(event)}>
       <div className="gap-2 flex flex-col">
@@ -20,18 +29,26 @@ export function OtpStepForm(props: OtpStepFormProps): React.JSX.Element {
         <Label className="sr-only" htmlFor="otp">
           One-time code
         </Label>
-        <Input
+        <InputOTP
           autoComplete="one-time-code"
-          className="h-12"
+          className="sr-only"
+          containerClassName="w-full justify-center"
           data-1p-ignore="true"
+          disabled={props.isVerifyingOtp}
           id="otp"
           inputMode="numeric"
+          maxLength={6}
           name="otp"
-          onChange={(event) => props.onOtpChange(event.currentTarget.value)}
-          placeholder="Enter your one-time code"
-          type="text"
+          onChange={props.onOtpChange}
+          pattern={REGEXP_ONLY_DIGITS}
           value={props.otp}
-        />
+        >
+          <InputOTPGroup className="w-full">
+            {Array.from({ length: 6 }, (_, index) => (
+              <InputOTPSlot className={otpSlotClassName} index={index} key={index} />
+            ))}
+          </InputOTPGroup>
+        </InputOTP>
       </div>
       <Button
         className="h-12 w-full text-sm"

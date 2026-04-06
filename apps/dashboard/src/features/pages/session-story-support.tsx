@@ -1,7 +1,10 @@
 import { SandboxPtyStates } from "@mistle/sandbox-session-client";
 import { Badge } from "@mistle/ui";
 
-import type { ChatComposerViewModel } from "../chat/components/chat-composer.js";
+import type {
+  ChatComposerStatusMessage,
+  ChatComposerViewModel,
+} from "../chat/components/chat-composer.js";
 import { noop, noopRespondToServerRequest } from "../chat/components/chat-story-support.js";
 import {
   SessionComposerFixtureProps,
@@ -25,6 +28,7 @@ const textEncoder = new TextEncoder();
 export type SessionConversationStoryArgs = {
   chatEntries: React.ComponentProps<typeof SessionConversationMainContent>["chatEntries"];
   composerViewModel: ChatComposerViewModel;
+  statusMessage: ChatComposerStatusMessage | null;
   isRespondingToServerRequest: boolean;
   onRespondToServerRequest: React.ComponentProps<
     typeof SessionConversationMainContent
@@ -37,6 +41,7 @@ export type SessionConversationStoryArgs = {
 export const StorySessionConversationPaneArgs = {
   chatEntries: CodexFixtureSessionEntriesWithExploringGroup,
   composerViewModel: SessionComposerFixtureProps,
+  statusMessage: null,
   isRespondingToServerRequest: false,
   onRespondToServerRequest: noopRespondToServerRequest,
   serverRequestPanelEntries: CodexFixtureSessionServerRequests,
@@ -149,13 +154,13 @@ export function renderSessionWorkbenchStoryWithChrome(input: {
   };
 
   return (
-    <div className="from-background to-muted/20 min-h-screen bg-linear-to-b">
-      <div className="bg-background/80 flex h-12 items-center justify-end border-b px-4 backdrop-blur-sm">
+    <div className="from-background to-muted/20 flex h-screen min-h-0 flex-col overflow-hidden bg-linear-to-b">
+      <div className="bg-background/80 flex h-12 flex-none items-center justify-end border-b px-4 backdrop-blur-sm">
         <Badge className={headerStatusUi.className} variant={headerStatusUi.variant}>
           {headerStatusUi.label}
         </Badge>
       </div>
-      <div className="h-[calc(100vh-3rem)]">{input.children}</div>
+      <div className="min-h-0 flex-1">{input.children}</div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -26,11 +26,11 @@ type SessionListItem = {
   sandboxProfileVersion: number;
   status: "starting" | "running" | "stopped" | "failed";
   startedBy: {
-    kind: "user";
+    kind: "user" | "system";
     id: string;
-    name: string;
+    name: string | null;
   };
-  source: "dashboard";
+  source: "dashboard" | "webhook";
   createdAt: string;
   updatedAt: string;
   failureCode: string | null;
@@ -202,10 +202,47 @@ describe("SessionsPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(markup).toContain('data-slot="table" class="w-full caption-bottom text-sm table-fixed"');
+    expect(markup).toContain(
+      'data-slot="table" class="w-full caption-bottom text-sm min-w-[48rem]"',
+    );
     expect(markup).toContain("bg-muted/60");
     expect(markup).toContain("text-xs font-semibold tracking-wide uppercase");
     expect(markup).toContain('<span class="sr-only">Actions</span>');
+  });
+
+  it("keeps a single horizontally scrollable table layout", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildListedSession({
+          id: "sbi_mobile",
+          sandboxProfileDisplayName: "Finance Investigator",
+          status: "failed",
+          failureCode: "sandbox_bootstrap_failed",
+          failureMessage: "Could not start sandbox runtime because image pull failed.",
+        }),
+      ],
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain('data-slot="table-container" class="relative w-full overflow-x-auto"');
+    expect(markup).toContain(
+      'data-slot="table" class="w-full caption-bottom text-sm min-w-[48rem]"',
+    );
+    expect(markup).toContain("Finance Investigator");
+    expect(markup).not.toContain('class="grid gap-3 md:hidden"');
+    expect(markup).not.toContain('class="hidden md:block"');
   });
 
   it("renders the seeded session without pagination when there is only one page", () => {
@@ -314,11 +351,57 @@ describe("SessionsPage", () => {
     expect(screen.getByText("/sessions/sbi_stopped")).toBeDefined();
   });
 
+  it("uses the open action label for non-stopped sessions", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [buildListedSession({ id: "sbi_running", status: "running" })],
+    });
+
+    const rendered = renderSessionsPage({
+      queryClient,
+    });
+
+    expect(within(rendered.container).getByRole("button", { name: "Open" })).toBeDefined();
+  });
+
   it("uses the resume action label only for stopped sessions", () => {
     expect(shouldUseResumeActionLabel("stopped")).toBe(true);
     expect(shouldUseResumeActionLabel("starting")).toBe(false);
     expect(shouldUseResumeActionLabel("running")).toBe(false);
     expect(shouldUseResumeActionLabel("failed")).toBe(false);
+  });
+
+  it("renders automation names in the started by column without the source sublabel", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildListedSession({
+          id: "sbi_automation",
+          startedBy: {
+            kind: "system",
+            id: "aru_automation",
+            name: "GitHub Repo Triage",
+          },
+          source: "webhook",
+        }),
+      ],
+    });
+
+    const rendered = renderSessionsPage({
+      queryClient,
+    });
+
+    expect(within(rendered.container).getByText("GitHub Repo Triage")).toBeDefined();
+    expect(within(rendered.container).queryByText("dashboard")).toBeNull();
+    expect(within(rendered.container).queryByText("webhook")).toBeNull();
   });
 
   it("clears a stale selected profile after launchable profiles finish refetching without it", () => {

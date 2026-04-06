@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import { withDashboardWorkspaceStory } from "../../storybook/decorators.js";
 import { noop } from "../chat/components/chat-story-support.js";
 import {
   SessionComposerFixturePropsForLoadingModel,
@@ -50,7 +49,6 @@ const meta = {
     },
   },
   decorators: [
-    withDashboardWorkspaceStory,
     function StoryDecorator(Story, context): React.JSX.Element {
       return (
         <SessionWorkbenchStoryChrome headerStatusUi={context.args.headerStatusUi}>
@@ -142,8 +140,8 @@ export const WithNonImageCapableModelWarning: Story = {
     primaryBottomPanel: createStorySessionBottomPanel({
       composerViewModel: {
         ...SessionComposerFixturePropsForNonImageCapableModel,
-        statusMessage: SessionComposerFixtureStatusMessageForNonImageCapableModel,
       },
+      statusMessage: SessionComposerFixtureStatusMessageForNonImageCapableModel,
     }),
   },
 };
@@ -153,8 +151,8 @@ export const WithUnavailableModelNotice: Story = {
     primaryBottomPanel: createStorySessionBottomPanel({
       composerViewModel: {
         ...SessionComposerFixturePropsForUnavailableModel,
-        statusMessage: SessionComposerFixtureStatusMessageForUnavailableModel,
       },
+      statusMessage: SessionComposerFixtureStatusMessageForUnavailableModel,
     }),
   },
 };
@@ -164,8 +162,8 @@ export const WithLoadingSelectedModelNotice: Story = {
     primaryBottomPanel: createStorySessionBottomPanel({
       composerViewModel: {
         ...SessionComposerFixturePropsForLoadingModel,
-        statusMessage: SessionComposerFixtureStatusMessageForLoadingModel,
       },
+      statusMessage: SessionComposerFixtureStatusMessageForLoadingModel,
     }),
   },
 };

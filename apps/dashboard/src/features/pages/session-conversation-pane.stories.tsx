@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import { withDashboardWorkspaceStory } from "../../storybook/decorators.js";
 import {
   CodexFixtureChatThreadEntriesWithStructuredPlan,
   CodexFixtureChatThreadEntriesWithThinkingGroup,
@@ -41,7 +40,6 @@ const meta = {
   },
   args: baseArgs,
   decorators: [
-    withDashboardWorkspaceStory,
     function StoryDecorator(Story, context): React.JSX.Element {
       return renderSessionWorkbenchContentStory({
         mainContent: <Story />,
@@ -84,6 +82,34 @@ export const WithPendingImageAttachments: Story = {
 export const UploadingImageAttachments: Story = {
   args: {
     composerViewModel: SessionComposerFixturePropsUploadingImageAttachments,
+    statusMessage: {
+      message: "Uploading attachments...",
+      variant: "default",
+      presentation: "loading",
+    },
+  },
+};
+
+export const ExploringStatusBanner: Story = {
+  args: {
+    statusMessage: {
+      message: "Exploring",
+      variant: "default",
+    },
+  },
+};
+
+export const DisconnectedWithError: Story = {
+  args: {
+    composerViewModel: {
+      ...SessionComposerFixtureProps,
+      submitDisabled: true,
+    },
+    statusMessage: {
+      message: "The session disconnected before the turn could be submitted.",
+      variant: "alert",
+      presentation: "notice",
+    },
   },
 };
 
@@ -91,8 +117,8 @@ export const NonImageCapableModelWithAttachments: Story = {
   args: {
     composerViewModel: {
       ...SessionComposerFixturePropsForNonImageCapableModel,
-      statusMessage: SessionComposerFixtureStatusMessageForNonImageCapableModel,
     },
+    statusMessage: SessionComposerFixtureStatusMessageForNonImageCapableModel,
   },
 };
 
@@ -100,7 +126,7 @@ export const LoadingSelectedModelWithAttachments: Story = {
   args: {
     composerViewModel: {
       ...SessionComposerFixturePropsForLoadingModel,
-      statusMessage: SessionComposerFixtureStatusMessageForLoadingModel,
     },
+    statusMessage: SessionComposerFixtureStatusMessageForLoadingModel,
   },
 };

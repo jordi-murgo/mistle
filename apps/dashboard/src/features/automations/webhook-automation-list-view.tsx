@@ -1,5 +1,4 @@
 import {
-  Button,
   Notice,
   Skeleton,
   Table,
@@ -8,7 +7,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@mistle/ui";
+import { WarningCircleIcon } from "@phosphor-icons/react";
 
 import { resolveIntegrationLogoPath } from "../integrations/logo.js";
 import { TableListingFooter } from "../shared/table-listing-footer.js";
@@ -58,7 +61,6 @@ type WebhookAutomationListViewProps = {
   onNextPage: () => void;
   onPreviousPage: () => void;
   onOpenAutomation: (automationId: string) => void;
-  onRetry: () => void;
 };
 
 function LoadingState(): React.JSX.Element {
@@ -139,14 +141,27 @@ function AutomationStatusDot(input: { enabled: boolean }): React.JSX.Element {
   );
 }
 
-function AutomationIssueMessage(input: {
+function AutomationIssueIndicator(input: {
   issue: WebhookAutomationListItemViewModel["issue"];
-}): React.JSX.Element | null {
+  enabled: boolean;
+}): React.JSX.Element {
   if (input.issue === undefined) {
-    return null;
+    return <AutomationStatusDot enabled={input.enabled} />;
   }
 
-  return <p className="text-destructive text-xs leading-5">{input.issue.message}</p>;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        aria-label="View automation issue details"
+        className="inline-flex shrink-0 items-center justify-center rounded-full text-destructive outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <WarningCircleIcon aria-hidden className="size-4 fill-current" weight="fill" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-80 whitespace-pre-wrap text-left" side="top">
+        {input.issue.message}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function AutomationIdentityCell(input: {
@@ -156,9 +171,9 @@ function AutomationIdentityCell(input: {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <AutomationStatusDot enabled={input.item.enabled} />
+        <AutomationIssueIndicator enabled={input.item.enabled} issue={input.item.issue} />
         <button
-          className="text-left font-medium underline-offset-4 hover:underline"
+          className="text-left font-medium underline-offset-4 break-words hover:underline"
           onClick={() => {
             input.onOpenAutomation(input.item.id);
           }}
@@ -167,7 +182,6 @@ function AutomationIdentityCell(input: {
           {input.item.name}
         </button>
       </div>
-      <AutomationIssueMessage issue={input.item.issue} />
     </div>
   );
 }
@@ -185,15 +199,7 @@ export function WebhookAutomationListView(
       {input.isLoading ? (
         <LoadingState />
       ) : input.errorMessage !== null ? (
-        <Notice
-          action={
-            <Button onClick={input.onRetry} type="button" variant="outline">
-              Retry
-            </Button>
-          }
-          title="Could not load automations"
-          variant="alert"
-        >
+        <Notice title="Could not load automations" variant="alert">
           {input.errorMessage}
         </Notice>
       ) : (
@@ -207,13 +213,7 @@ export function WebhookAutomationListView(
             />
           ) : null}
 
-          <Table className="min-w-[56rem] table-fixed">
-            <colgroup>
-              <col className="w-[34%]" />
-              <col className="w-[22%]" />
-              <col className="w-[32%]" />
-              <col className="w-[12%]" />
-            </colgroup>
+          <Table className="min-w-[56rem]">
             <TableHeader className="bg-muted/60">
               <TableRow className="h-9 border-b">
                 <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
@@ -225,7 +225,7 @@ export function WebhookAutomationListView(
                 <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
                   Events
                 </TableHead>
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
+                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
                   Updated
                 </TableHead>
               </TableRow>
@@ -242,14 +242,14 @@ export function WebhookAutomationListView(
               ) : null}
               {visibleItems.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell>
+                  <TableCell className="whitespace-normal">
                     <AutomationIdentityCell item={item} onOpenAutomation={input.onOpenAutomation} />
                   </TableCell>
-                  <TableCell>{item.targetName}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
+                  <TableCell className="whitespace-normal break-words">{item.targetName}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm whitespace-normal">
                     <EventSummaryCell events={item.events} />
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
+                  <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
                     {item.updatedAtLabel}
                   </TableCell>
                 </TableRow>

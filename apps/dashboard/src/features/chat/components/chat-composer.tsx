@@ -1,3 +1,4 @@
+import { OpenAiReasoningEffortLabelByValue } from "@mistle/integrations-definitions/openai";
 import {
   Button,
   Select,
@@ -13,10 +14,16 @@ import { useRef } from "react";
 import { resolveSelectableValue } from "../../shared/select-value.js";
 
 const REASONING_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"] as const;
+const ReasoningEffortLabels: Readonly<Record<string, string>> = OpenAiReasoningEffortLabelByValue;
+
+function formatReasoningEffortLabel(value: string): string {
+  return ReasoningEffortLabels[value] ?? value;
+}
 
 export type ChatComposerStatusMessage = {
   message: string;
   variant: "alert" | "default";
+  presentation?: "loading" | "notice";
 };
 
 export type ChatComposerViewModel = {
@@ -38,8 +45,6 @@ export type ChatComposerViewModel = {
   canUploadAttachments: boolean;
   isUploadingAttachments: boolean;
   configControlsDisabled: boolean;
-  statusMessage: ChatComposerStatusMessage | null;
-  completedTurnErrorMessage: string | null;
   onComposerTextChange: (value: string) => void;
   onSubmit: () => void;
   onModelChange: (value: string) => void;
@@ -60,7 +65,6 @@ export function ChatComposer({
   canUploadAttachments,
   isUploadingAttachments,
   configControlsDisabled,
-  completedTurnErrorMessage,
   onComposerTextChange,
   onSubmit,
   onModelChange,
@@ -173,19 +177,19 @@ export function ChatComposer({
         rows={2}
         value={composerText}
       />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
+        <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5 md:flex md:flex-wrap md:items-center md:gap-2">
           <Button
-            className="h-8 gap-1.5 rounded-full"
+            aria-label="Add images"
+            className="text-muted-foreground h-8 min-w-0 rounded-md px-1.5 hover:bg-muted/60"
             disabled={!canUploadAttachments || isUploadingAttachments}
             onClick={() => {
               fileInputRef.current?.click();
             }}
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             <PlusIcon aria-hidden="true" className="size-4" />
-            Add images
           </Button>
 
           <Select
@@ -200,7 +204,8 @@ export function ChatComposer({
           >
             <SelectTrigger
               aria-label="Model switcher"
-              className="text-muted-foreground h-8 w-[11rem] border-0 bg-transparent shadow-none hover:bg-muted/60 data-[state=open]:bg-muted/70"
+              className="text-muted-foreground h-8 w-full min-w-0 border-0 bg-transparent px-2 shadow-none hover:bg-muted/60 md:w-fit md:px-2.5 data-[state=open]:bg-muted/70"
+              size="sm"
             >
               <SelectValue className="text-muted-foreground" placeholder="Model">
                 {selectedModelLabel ?? "Model"}
@@ -227,16 +232,19 @@ export function ChatComposer({
           >
             <SelectTrigger
               aria-label="Reasoning switcher"
-              className="text-muted-foreground h-8 w-[8.5rem] border-0 bg-transparent shadow-none hover:bg-muted/60 data-[state=open]:bg-muted/70"
+              className="text-muted-foreground h-8 w-full min-w-0 border-0 bg-transparent px-2 shadow-none hover:bg-muted/60 md:w-fit md:px-2.5 data-[state=open]:bg-muted/70"
+              size="sm"
             >
               <SelectValue className="text-muted-foreground" placeholder="Reasoning">
-                {selectedReasoningEffortValue ?? "Reasoning"}
+                {selectedReasoningEffortValue === null
+                  ? "Reasoning"
+                  : formatReasoningEffortLabel(selectedReasoningEffortValue)}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {REASONING_EFFORT_OPTIONS.map((reasoningOption) => (
                 <SelectItem key={reasoningOption} value={reasoningOption}>
-                  {reasoningOption}
+                  {formatReasoningEffortLabel(reasoningOption)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -245,7 +253,7 @@ export function ChatComposer({
 
         <Button
           aria-label={submitLabel}
-          className="rounded-full bg-transparent text-primary hover:bg-transparent"
+          className="shrink-0 rounded-full bg-transparent text-primary hover:bg-transparent"
           disabled={submitDisabled}
           onClick={onSubmit}
           size="icon-fill"
@@ -256,14 +264,6 @@ export function ChatComposer({
           {composerActionIcon}
         </Button>
       </div>
-      {!isUploadingAttachments ? null : (
-        <p className="text-muted-foreground text-sm">Uploading attachments...</p>
-      )}
-      {completedTurnErrorMessage === null ? null : (
-        <p className="text-destructive text-sm">
-          <span className="font-medium">Turn error:</span> {completedTurnErrorMessage}
-        </p>
-      )}
     </div>
   );
 }
