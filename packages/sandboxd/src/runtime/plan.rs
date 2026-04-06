@@ -1,7 +1,14 @@
+//! Rust decode types for the runtime-plan subset `sandboxd` currently applies.
+//!
+//! This module mirrors the shared runtime-plan wire shape closely enough for the
+//! supervisor to materialize artifacts, workspace sources, setup files, and
+//! runtime client processes without pulling in TypeScript-specific helpers.
+
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+/// The subset of the compiled runtime plan that `sandboxd` currently understands.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompiledRuntimePlan {
@@ -10,6 +17,7 @@ pub struct CompiledRuntimePlan {
     pub runtime_clients: Vec<RuntimeClient>,
 }
 
+/// One artifact lifecycle command or runtime client process command.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeArtifactCommand {
@@ -19,12 +27,14 @@ pub struct RuntimeArtifactCommand {
     pub timeout_ms: Option<u64>,
 }
 
+/// The install lifecycle for one compiled runtime artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeArtifactLifecycle {
     pub install: Vec<RuntimeArtifactCommand>,
 }
 
+/// One artifact that must be materialized before runtime clients start.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompiledRuntimeArtifact {
@@ -34,6 +44,7 @@ pub struct CompiledRuntimeArtifact {
     pub lifecycle: RuntimeArtifactLifecycle,
 }
 
+/// One file that runtime setup should write into the sandbox filesystem.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeClientSetupFile {
@@ -44,6 +55,7 @@ pub struct RuntimeClientSetupFile {
     pub write_mode: Option<RuntimeFileWriteMode>,
 }
 
+/// The file-write behaviors `sandboxd` supports during runtime setup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeFileWriteMode {
@@ -53,6 +65,7 @@ pub enum RuntimeFileWriteMode {
     IfAbsent,
 }
 
+/// Shared setup state applied before a runtime client's processes start.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeClientSetup {
@@ -61,15 +74,74 @@ pub struct RuntimeClientSetup {
     pub launch_args: Option<Vec<String>>,
 }
 
+/// One compiled runtime client definition from the runtime plan.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeClient {
     pub client_id: String,
     pub setup: RuntimeClientSetup,
-    pub processes: Vec<serde_json::Value>,
+    pub processes: Vec<RuntimeClientProcess>,
     pub endpoints: Vec<serde_json::Value>,
 }
 
+/// One child process that belongs to a runtime client.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeClientProcess {
+    pub process_key: String,
+    pub command: RuntimeArtifactCommand,
+    pub readiness: RuntimeClientProcessReadiness,
+    pub stop: RuntimeClientProcessStopPolicy,
+}
+
+/// The readiness strategies supported for runtime client processes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "type")]
+pub enum RuntimeClientProcessReadiness {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "tcp")]
+    Tcp {
+        host: String,
+        port: u16,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
+    #[serde(rename = "http")]
+    Http {
+        url: String,
+        #[serde(rename = "expectedStatus")]
+        expected_status: u16,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
+    #[serde(rename = "ws")]
+    Ws {
+        url: String,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
+}
+
+/// The configured stop behavior for one runtime client process.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeClientProcessStopPolicy {
+    pub signal: RuntimeClientProcessStopSignal,
+    pub timeout_ms: u64,
+    pub grace_period_ms: Option<u64>,
+}
+
+/// The Unix signals `sandboxd` can use when stopping runtime client processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum RuntimeClientProcessStopSignal {
+    #[serde(rename = "sigterm")]
+    Sigterm,
+    #[serde(rename = "sigkill")]
+    Sigkill,
+}
+
+/// The workspace sources `sandboxd` knows how to materialize today.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "sourceKind")]
 pub enum CompiledWorkspaceSource {
@@ -83,6 +155,7 @@ pub enum CompiledWorkspaceSource {
     },
 }
 
+/// The resource categories that can currently back a workspace source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum WorkspaceSourceResourceKind {
     #[serde(rename = "repository")]
