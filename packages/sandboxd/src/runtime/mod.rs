@@ -12,6 +12,8 @@ use std::fmt;
 
 use crate::command::{CommandSpec, DEFAULT_COMMAND_POLL_INTERVAL, run_command};
 use crate::time::{SystemClock, ThreadSleeper};
+use crate::protocol::startup::StartupInput;
+
 pub(crate) use plan::RuntimeClient;
 pub use plan::{
     CompiledRuntimePlan, RuntimeArtifactCommand, RuntimeClientProcessReadiness,
@@ -85,8 +87,18 @@ impl fmt::Display for RuntimePlanApplyError {
 
 impl std::error::Error for RuntimePlanApplyError {}
 
-/// Applies the artifact, workspace-source, and setup-file portions of one runtime plan.
-pub fn apply_runtime_plan(runtime_plan: &CompiledRuntimePlan) -> Result<(), RuntimePlanApplyError> {
+/// Applies the artifact, workspace-source, and setup-file portions of one startup input's runtime
+/// plan.
+pub fn apply_runtime_plan(startup_input: &StartupInput) -> Result<(), RuntimePlanApplyError> {
+    let runtime_plan: CompiledRuntimePlan = serde_json::from_value(startup_input.runtime_plan.clone())
+        .map_err(RuntimePlanApplyError::InvalidRuntimePlan)?;
+    apply_compiled_runtime_plan(&runtime_plan)
+}
+
+/// Applies the artifact, workspace-source, and setup-file portions of one compiled runtime plan.
+fn apply_compiled_runtime_plan(
+    runtime_plan: &CompiledRuntimePlan,
+) -> Result<(), RuntimePlanApplyError> {
     // Materialize artifacts, workspace sources, and setup files before later PRs add
     // long-lived process supervision on top of this state.
     for (artifact_index, artifact) in runtime_plan.artifacts.iter().enumerate() {
