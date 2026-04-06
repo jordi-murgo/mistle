@@ -11,6 +11,9 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket, connect};
 use url::Url;
 
+pub mod protocol;
+pub mod pty_stream;
+
 /// Describes why bootstrap tunnel setup or shutdown failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelError {
@@ -35,12 +38,12 @@ impl std::error::Error for TunnelError {}
 
 #[derive(Debug)]
 /// Owns one established bootstrap websocket connection.
-pub struct StartedBootstrapTunnel {
+pub struct BootstrapTunnel {
     connected_url: String,
     socket: Option<WebSocket<MaybeTlsStream<TcpStream>>>,
 }
 
-impl StartedBootstrapTunnel {
+impl BootstrapTunnel {
     /// Returns the final websocket URL used to connect to the gateway.
     pub fn connected_url(&self) -> &str {
         &self.connected_url
@@ -67,7 +70,7 @@ impl StartedBootstrapTunnel {
 pub fn connect_bootstrap_tunnel(
     gateway_ws_url: &str,
     bootstrap_token: &str,
-) -> Result<StartedBootstrapTunnel, TunnelError> {
+) -> Result<BootstrapTunnel, TunnelError> {
     let normalized_token = bootstrap_token.trim();
     if normalized_token.is_empty() {
         return Err(TunnelError::new(
@@ -89,8 +92,8 @@ pub fn connect_bootstrap_tunnel(
         }
     }
 
-    // The bootstrap token rides on the initial websocket request because this
-    // first PR only needs a minimal connect/close handshake.
+    // The bootstrap token travels on the initial websocket request so the
+    // gateway can authenticate tunnel setup before exchanging tunnel frames.
     parsed_url
         .query_pairs_mut()
         .append_pair("bootstrap_token", normalized_token);
@@ -100,7 +103,7 @@ pub fn connect_bootstrap_tunnel(
         TunnelError::new(format!("failed to connect bootstrap tunnel: {error}"))
     })?;
 
-    Ok(StartedBootstrapTunnel {
+    Ok(BootstrapTunnel {
         connected_url,
         socket: Some(socket),
     })
