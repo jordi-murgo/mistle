@@ -7,8 +7,10 @@ use std::io;
 use std::path::Path;
 
 pub mod apply_startup;
+pub mod command;
 pub mod control;
 pub mod protocol;
+pub mod runtime;
 pub mod time;
 
 use crate::time::ThreadSleeper;
