@@ -1,16 +1,26 @@
+//! `sandboxd` is the Rust sandbox supervisor binary that is gradually absorbing
+//! startup application, local control, process supervision, and tunnel logic
+//! from the legacy JavaScript runtime.
+
 use std::fmt;
 use std::io;
 use std::path::Path;
 
 pub mod apply_startup;
+pub mod control;
 pub mod protocol;
+pub mod time;
 
+use crate::time::ThreadSleeper;
+
+/// Enumerates the top-level `sandboxd` subcommands the CLI currently supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SandboxdCommand {
     Serve,
     ApplyStartup,
 }
 
+/// Describes why CLI argument parsing failed before any command-specific work ran.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseSandboxdCommandError {
     MissingCommand,
@@ -38,6 +48,7 @@ impl fmt::Display for ParseSandboxdCommandError {
 
 impl std::error::Error for ParseSandboxdCommandError {}
 
+/// Parses `sandboxd` CLI arguments into one supported subcommand.
 pub fn parse_sandboxd_command<I, S>(args: I) -> Result<SandboxdCommand, ParseSandboxdCommandError>
 where
     I: IntoIterator<Item = S>,
@@ -65,6 +76,7 @@ where
     Ok(command)
 }
 
+/// Runs one `sandboxd` CLI invocation against the provided process I/O streams.
 pub fn run<I, S, R, W, E>(args: I, stdin: &mut R, stdout: &mut W, stderr: &mut E) -> i32
 where
     I: IntoIterator<Item = S>,
@@ -82,11 +94,33 @@ where
     };
 
     match command {
-        SandboxdCommand::Serve => 0,
+        SandboxdCommand::Serve => {
+            let server = match control::start_control_server(
+                Path::new(control::DEFAULT_CONTROL_SOCKET_PATH),
+                Path::new(apply_startup::DEFAULT_MANIFEST_PATH),
+                ThreadSleeper,
+                control::DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
+            ) {
+                Ok(server) => server,
+                Err(error) => {
+                    let _ = writeln!(stderr, "{error}");
+                    return 1;
+                }
+            };
+
+            match server.wait() {
+                Ok(()) => 0,
+                Err(error) => {
+                    let _ = writeln!(stderr, "{error}");
+                    1
+                }
+            }
+        }
         SandboxdCommand::ApplyStartup => match apply_startup::run_apply_startup(
             stdin,
             stdout,
             Path::new(apply_startup::DEFAULT_MANIFEST_PATH),
+            Path::new(control::DEFAULT_CONTROL_SOCKET_PATH),
         ) {
             Ok(()) => 0,
             Err(_) => 1,
@@ -96,7 +130,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{ParseSandboxdCommandError, SandboxdCommand, parse_sandboxd_command};
+    use crate::{ParseSandboxdCommandError, SandboxdCommand, parse_sandboxd_command};
 
     #[test]
     fn parses_serve() {

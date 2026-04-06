@@ -1,3 +1,9 @@
+//! Durable startup-manifest persistence helpers for `sandboxd apply-startup`.
+//!
+//! This module keeps disk-format concerns separate from command handling so
+//! later supervisor code can load and persist the same manifest through one
+//! shared path.
+
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::io::Write;
@@ -5,12 +11,28 @@ use std::path::Path;
 
 use crate::protocol::startup::StartupInput;
 
-use super::ApplyStartupError;
+use crate::apply_startup::ApplyStartupError;
 
-pub fn persist_manifest(path: &Path, startup_input: &StartupInput) -> Result<(), ApplyStartupError> {
-    let parent_dir = path.parent().ok_or_else(|| ApplyStartupError::MissingManifestParent {
+/// Loads the persisted startup manifest from disk and decodes it into the shared protocol type.
+pub fn load_manifest(path: &Path) -> Result<StartupInput, ApplyStartupError> {
+    let manifest_bytes = fs::read(path).map_err(|error| ApplyStartupError::ReadManifest {
         path: path.to_path_buf(),
+        error,
     })?;
+
+    serde_json::from_slice(&manifest_bytes).map_err(ApplyStartupError::InvalidManifest)
+}
+
+/// Persists the startup manifest with an atomic temp-file write followed by rename.
+pub fn persist_manifest(
+    path: &Path,
+    startup_input: &StartupInput,
+) -> Result<(), ApplyStartupError> {
+    let parent_dir = path
+        .parent()
+        .ok_or_else(|| ApplyStartupError::MissingManifestParent {
+            path: path.to_path_buf(),
+        })?;
 
     fs::create_dir_all(parent_dir).map_err(|error| ApplyStartupError::CreateManifestDirectory {
         path: parent_dir.to_path_buf(),
@@ -76,6 +98,7 @@ pub fn persist_manifest(path: &Path, startup_input: &StartupInput) -> Result<(),
     Ok(())
 }
 
+/// Best-effort cleanup for abandoned temp manifests after a failed write or rename.
 fn cleanup_temp_manifest(path: &Path) {
     match fs::remove_file(path) {
         Ok(()) => {}
@@ -89,7 +112,7 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::persist_manifest;
+    use crate::apply_startup::manifest::persist_manifest;
     use crate::protocol::startup::{StartupInput, StartupMode};
 
     #[test]
