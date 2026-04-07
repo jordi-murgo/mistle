@@ -6167,6 +6167,9 @@
                       "type": "string",
                       "enum": ["pending", "starting", "running", "stopped", "failed"]
                     },
+                    "connectable": {
+                      "type": "boolean"
+                    },
                     "failureCode": {
                       "type": ["string", "null"],
                       "minLength": 1
@@ -6892,6 +6895,7 @@
                     "id",
                     "title",
                     "status",
+                    "connectable",
                     "failureCode",
                     "failureMessage",
                     "runtimePlan",
@@ -7215,6 +7219,9 @@
                       "type": "string",
                       "enum": ["pending", "starting", "running", "stopped", "failed"]
                     },
+                    "connectable": {
+                      "type": "boolean"
+                    },
                     "failureCode": {
                       "type": ["string", "null"],
                       "minLength": 1
@@ -7940,6 +7947,7 @@
                     "id",
                     "title",
                     "status",
+                    "connectable",
                     "failureCode",
                     "failureMessage",
                     "runtimePlan",
@@ -8026,6 +8034,28 @@
                     "code": {
                       "type": "string",
                       "enum": ["INSTANCE_NOT_FOUND"]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["code", "message"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox instance cannot be resumed from its current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": ["INSTANCE_FAILED", "INSTANCE_NOT_RESUMABLE"]
                     },
                     "message": {
                       "type": "string",

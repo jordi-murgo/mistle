@@ -3306,6 +3306,7 @@ export interface paths {
                 providerConversationId: string | null;
                 routeId: string | null;
               } | null;
+              connectable: boolean;
               failureCode: string | null;
               failureMessage: string | null;
               id: string;
@@ -3733,6 +3734,7 @@ export interface paths {
                 providerConversationId: string | null;
                 routeId: string | null;
               } | null;
+              connectable: boolean;
               failureCode: string | null;
               failureMessage: string | null;
               id: string;
@@ -3978,6 +3980,19 @@ export interface paths {
             "application/json": {
               /** @enum {string} */
               code: "INSTANCE_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Sandbox instance cannot be resumed from its current state. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "INSTANCE_FAILED" | "INSTANCE_NOT_RESUMABLE";
               message: string;
             };
           };

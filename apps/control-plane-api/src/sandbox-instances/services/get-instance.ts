@@ -117,6 +117,7 @@ export async function getInstance(
     id: sandboxInstance.id,
     title: sandboxInstance.title,
     status: sandboxInstance.status,
+    connectable: sandboxInstance.connectable,
     failureCode: sandboxInstance.failureCode,
     failureMessage: sandboxInstance.failureMessage,
     runtimePlan: sandboxInstance.runtimePlan,
