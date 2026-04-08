@@ -4,22 +4,11 @@ import { eq } from "drizzle-orm";
 import sharp from "sharp";
 import { describe, expect } from "vitest";
 
-import { createControlPlaneApiRuntime } from "../src/main.js";
-import type { ControlPlaneApiConfig } from "../src/types.js";
+import { createRuntimeWithObjectStore } from "./helpers/control-plane-runtime-with-object-store.js";
+import { readImageMetadata } from "./helpers/image-metadata.js";
 import { createTestObjectStore, getStoredWebpFixtureBytes } from "./helpers/test-object-store.js";
 import type { ControlPlaneApiIntegrationFixture } from "./test-context.js";
 import { it } from "./test-context.js";
-
-const IntegrationConnectionTokenConfig = {
-  secret: "integration-connection-secret",
-  issuer: "integration-issuer",
-  audience: "integration-audience",
-} as const;
-
-const IntegrationSandboxRuntimeConfig = {
-  defaultBaseImage: "127.0.0.1:5001/mistle/sandbox-base:dev",
-  gatewayWsUrl: "ws://127.0.0.1:5202/tunnel/sandbox",
-} as const;
 
 describe("organization logo endpoints integration", () => {
   it("returns null from the authenticated read endpoint when no logo is stored", async ({
@@ -50,7 +39,8 @@ describe("organization logo endpoints integration", () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
-        imageUrl: null,
+        hasImage: false,
+        imageVersion: null,
       });
     } finally {
       await runtime.stop();
@@ -58,7 +48,7 @@ describe("organization logo endpoints integration", () => {
     }
   });
 
-  it("uploads an organization logo through the authenticated endpoint and returns a signed read URL", async ({
+  it("uploads an organization logo through the authenticated endpoint and returns image metadata", async ({
     fixture,
   }) => {
     const authenticatedSession = await fixture.authSession({
@@ -108,10 +98,9 @@ describe("organization logo endpoints integration", () => {
 
       expect(response.status).toBe(200);
 
-      const payload: unknown = await response.json();
-      const imageUrl = readImageUrl(payload);
-
-      expect(imageUrl).not.toBeNull();
+      const payload = readImageMetadata(await response.json());
+      expect(payload.hasImage).toBe(true);
+      expect(payload.imageVersion).not.toBeNull();
 
       const persistedOrganization = await runtime.db.query.organizations.findFirst({
         columns: {
@@ -127,8 +116,28 @@ describe("organization logo endpoints integration", () => {
         ),
       );
 
+      if (payload.imageVersion === null) {
+        throw new Error("Expected organization logo response to include imageVersion.");
+      }
+
+      expect(payload.imageVersion).toBe(persistedOrganization?.logoObjectKey ?? null);
+
+      const contentResponse = await runtime.request(
+        `/v1/organizations/${encodeURIComponent(authenticatedSession.organizationId)}/logo/content?v=${encodeURIComponent(payload.imageVersion)}`,
+        {
+          method: "GET",
+          headers: {
+            cookie: authenticatedSession.cookie,
+          },
+          redirect: "manual",
+        },
+      );
+
+      expect(contentResponse.status).toBe(302);
+      const imageUrl = contentResponse.headers.get("location");
+      expect(imageUrl).not.toBeNull();
       if (imageUrl === null) {
-        throw new Error("Expected organization logo response to include imageUrl.");
+        throw new Error("Expected organization logo content response to include location.");
       }
 
       const imageResponse = await fetch(imageUrl);
@@ -142,6 +151,150 @@ describe("organization logo endpoints integration", () => {
       expect(imageMetadata.width).toBe(512);
       expect(imageMetadata.height).toBe(512);
     } finally {
+      await runtime.stop();
+      await seaweedfs.stop();
+    }
+  });
+
+  it("returns not found from the authenticated content endpoint when no logo is stored", async ({
+    fixture,
+  }) => {
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-organization-logo-endpoint-content-missing@example.com",
+    });
+    const seaweedfs = await startSeaweedfsS3({
+      bucketName: "mistle-assets",
+    });
+    const runtime = await createRuntimeWithObjectStore({
+      config: fixture.config,
+      internalAuthServiceToken: fixture.internalAuthServiceToken,
+      seaweedfs,
+    });
+
+    try {
+      const response = await runtime.request(
+        `/v1/organizations/${encodeURIComponent(authenticatedSession.organizationId)}/logo/content`,
+        {
+          method: "GET",
+          headers: {
+            cookie: authenticatedSession.cookie,
+          },
+          redirect: "manual",
+        },
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        code: "NOT_FOUND",
+        message: "Organization logo was not found.",
+      });
+    } finally {
+      await runtime.stop();
+      await seaweedfs.stop();
+    }
+  });
+
+  it("returns not found from the authenticated content endpoint when the requested organization logo version is missing", async ({
+    fixture,
+  }) => {
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-organization-logo-endpoint-content-version-missing@example.com",
+    });
+    const seaweedfs = await startSeaweedfsS3({
+      bucketName: "mistle-assets",
+    });
+    const runtime = await createRuntimeWithObjectStore({
+      config: fixture.config,
+      internalAuthServiceToken: fixture.internalAuthServiceToken,
+      seaweedfs,
+    });
+    const objectStore = createTestObjectStore(seaweedfs);
+    const objectKey = `logos/organizations/${authenticatedSession.organizationId}/img_existing.webp`;
+
+    try {
+      await objectStore.putObject({
+        Body: await getStoredWebpFixtureBytes(),
+        ContentType: "image/webp",
+        objectKey,
+      });
+      await runtime.db
+        .update(organizations)
+        .set({
+          logoObjectKey: objectKey,
+        })
+        .where(eq(organizations.id, authenticatedSession.organizationId));
+
+      const response = await runtime.request(
+        `/v1/organizations/${encodeURIComponent(authenticatedSession.organizationId)}/logo/content`,
+        {
+          method: "GET",
+          headers: {
+            cookie: authenticatedSession.cookie,
+          },
+          redirect: "manual",
+        },
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        code: "NOT_FOUND",
+        message: "Organization logo was not found.",
+      });
+    } finally {
+      objectStore.destroy();
+      await runtime.stop();
+      await seaweedfs.stop();
+    }
+  });
+
+  it("returns not found from the authenticated content endpoint when the requested organization logo version is stale", async ({
+    fixture,
+  }) => {
+    const authenticatedSession = await fixture.authSession({
+      email: "integration-organization-logo-endpoint-content-version-stale@example.com",
+    });
+    const seaweedfs = await startSeaweedfsS3({
+      bucketName: "mistle-assets",
+    });
+    const runtime = await createRuntimeWithObjectStore({
+      config: fixture.config,
+      internalAuthServiceToken: fixture.internalAuthServiceToken,
+      seaweedfs,
+    });
+    const objectStore = createTestObjectStore(seaweedfs);
+    const objectKey = `logos/organizations/${authenticatedSession.organizationId}/img_existing.webp`;
+
+    try {
+      await objectStore.putObject({
+        Body: await getStoredWebpFixtureBytes(),
+        ContentType: "image/webp",
+        objectKey,
+      });
+      await runtime.db
+        .update(organizations)
+        .set({
+          logoObjectKey: objectKey,
+        })
+        .where(eq(organizations.id, authenticatedSession.organizationId));
+
+      const response = await runtime.request(
+        `/v1/organizations/${encodeURIComponent(authenticatedSession.organizationId)}/logo/content?v=${encodeURIComponent(`logos/organizations/${authenticatedSession.organizationId}/img_stale.webp`)}`,
+        {
+          method: "GET",
+          headers: {
+            cookie: authenticatedSession.cookie,
+          },
+          redirect: "manual",
+        },
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        code: "NOT_FOUND",
+        message: "Organization logo was not found.",
+      });
+    } finally {
+      objectStore.destroy();
       await runtime.stop();
       await seaweedfs.stop();
     }
@@ -249,7 +402,7 @@ describe("organization logo endpoints integration", () => {
     }
   });
 
-  it("returns a signed read URL from the authenticated read endpoint when a logo exists", async ({
+  it("returns image metadata from the authenticated read endpoint when a logo exists", async ({
     fixture,
   }) => {
     const authenticatedSession = await fixture.authSession({
@@ -291,13 +444,29 @@ describe("organization logo endpoints integration", () => {
 
       expect(response.status).toBe(200);
 
-      const payload: unknown = await response.json();
-      const imageUrl = readImageUrl(payload);
+      const payload = readImageMetadata(await response.json());
 
+      expect(payload).toEqual({
+        hasImage: true,
+        imageVersion: objectKey,
+      });
+
+      const contentResponse = await runtime.request(
+        `/v1/organizations/${encodeURIComponent(authenticatedSession.organizationId)}/logo/content?v=${encodeURIComponent(objectKey)}`,
+        {
+          method: "GET",
+          headers: {
+            cookie: authenticatedSession.cookie,
+          },
+          redirect: "manual",
+        },
+      );
+
+      expect(contentResponse.status).toBe(302);
+      const imageUrl = contentResponse.headers.get("location");
       expect(imageUrl).not.toBeNull();
-
       if (imageUrl === null) {
-        throw new Error("Expected organization logo read response to include imageUrl.");
+        throw new Error("Expected organization logo content response to include location.");
       }
 
       const imageResponse = await fetch(imageUrl);
@@ -337,6 +506,47 @@ describe("organization logo endpoints integration", () => {
           headers: {
             cookie: secondSession.cookie,
           },
+        },
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        code: "FORBIDDEN",
+        message: "Forbidden API request.",
+      });
+    } finally {
+      await runtime.stop();
+      await seaweedfs.stop();
+    }
+  });
+
+  it("returns forbidden from the content endpoint when the request targets a different organization than the active session organization", async ({
+    fixture,
+  }) => {
+    const firstSession = await fixture.authSession({
+      email: "integration-organization-logo-content-endpoint-forbidden-first@example.com",
+    });
+    const secondSession = await fixture.authSession({
+      email: "integration-organization-logo-content-endpoint-forbidden-second@example.com",
+    });
+    const seaweedfs = await startSeaweedfsS3({
+      bucketName: "mistle-assets",
+    });
+    const runtime = await createRuntimeWithObjectStore({
+      config: fixture.config,
+      internalAuthServiceToken: fixture.internalAuthServiceToken,
+      seaweedfs,
+    });
+
+    try {
+      const response = await runtime.request(
+        `/v1/organizations/${encodeURIComponent(firstSession.organizationId)}/logo/content`,
+        {
+          method: "GET",
+          headers: {
+            cookie: secondSession.cookie,
+          },
+          redirect: "manual",
         },
       );
 
@@ -490,41 +700,6 @@ describe("organization logo endpoints integration", () => {
     }
   });
 });
-
-async function createRuntimeWithObjectStore(input: {
-  config: ControlPlaneApiConfig;
-  internalAuthServiceToken: string;
-  seaweedfs: Awaited<ReturnType<typeof startSeaweedfsS3>>;
-}) {
-  return createControlPlaneApiRuntime({
-    app: {
-      ...input.config,
-      objectStore: {
-        bucketName: input.seaweedfs.bucketName,
-        region: input.seaweedfs.region,
-        endpoint: input.seaweedfs.endpoint,
-        forcePathStyle: true,
-        accessKeyId: input.seaweedfs.accessKeyId,
-        secretAccessKey: input.seaweedfs.secretAccessKey,
-      },
-    },
-    internalAuthServiceToken: input.internalAuthServiceToken,
-    connectionToken: IntegrationConnectionTokenConfig,
-    sandbox: IntegrationSandboxRuntimeConfig,
-  });
-}
-
-function readImageUrl(payload: unknown): string | null {
-  if (typeof payload !== "object" || payload === null) {
-    return null;
-  }
-
-  if (!("imageUrl" in payload) || typeof payload.imageUrl !== "string") {
-    return null;
-  }
-
-  return payload.imageUrl;
-}
 
 async function addMemberToActiveOrganization(input: {
   fixture: ControlPlaneApiIntegrationFixture;
