@@ -9,9 +9,11 @@ import {
 import { MembersDirectoryToolbar } from "./members-directory-toolbar.js";
 import { DirectoryTableRow } from "./members-table-rows.js";
 import { buildMembersDirectoryTableRowViewModels } from "./members-table-view-model.js";
+import { useMemberAvatars } from "./use-member-avatars.js";
 import { useMembersDirectoryTableState } from "./use-members-directory-table-state.js";
 
 export function MembersDirectoryTable(input: {
+  organizationId: string;
   members: SettingsMember[];
   invitations: SettingsInvitation[];
   capabilities: MembershipCapabilities | null;
@@ -37,8 +39,13 @@ export function MembersDirectoryTable(input: {
     members: input.members,
     invitations: input.invitations,
   });
+  const memberAvatarsByUserId = useMemberAvatars({
+    organizationId: input.organizationId,
+    rows: visibleRows,
+  });
   const tableRows = buildMembersDirectoryTableRowViewModels({
     rows: visibleRows,
+    memberAvatarsByUserId,
     capabilities: input.capabilities,
     canManageInvitations: input.canManageInvitations,
     pendingMemberOperation: input.pendingMemberOperation,
@@ -99,6 +106,8 @@ export function MembersDirectoryTable(input: {
                 date={row.date}
                 email={row.email}
                 key={row.key}
+                showMemberAvatar={row.showMemberAvatar}
+                memberAvatar={row.memberAvatar}
                 name={row.name}
                 status={row.status}
                 actionFeedback={row.actionFeedback}
