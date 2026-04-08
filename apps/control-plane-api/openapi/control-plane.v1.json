@@ -4306,9 +4306,13 @@
                                           "inputType": {
                                             "type": "string",
                                             "enum": ["password", "text"]
+                                          },
+                                          "slotKey": {
+                                            "type": "string",
+                                            "minLength": 1
                                           }
                                         },
-                                        "required": ["name", "label", "inputType"],
+                                        "required": ["name", "label", "inputType", "slotKey"],
                                         "additionalProperties": false
                                       },
                                       "minItems": 1
@@ -6526,7 +6530,7 @@
                                     "type": "string",
                                     "minLength": 1
                                   },
-                                  "purpose": {
+                                  "slotKey": {
                                     "type": "string",
                                     "minLength": 1
                                   },
@@ -7578,7 +7582,7 @@
                                     "type": "string",
                                     "minLength": 1
                                   },
-                                  "purpose": {
+                                  "slotKey": {
                                     "type": "string",
                                     "minLength": 1
                                   },

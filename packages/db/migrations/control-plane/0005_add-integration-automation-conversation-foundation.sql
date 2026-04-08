@@ -96,9 +96,9 @@ CREATE TABLE "control_plane"."automation_conversations" (
 CREATE TABLE "control_plane"."integration_connection_credentials" (
 	"connection_id" text NOT NULL,
 	"credential_id" text NOT NULL,
-	"purpose" text NOT NULL,
+	"slot_key" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "integration_connection_credentials_connection_id_purpose_pk" PRIMARY KEY("connection_id","purpose")
+	CONSTRAINT "integration_connection_credentials_connection_id_slot_key_pk" PRIMARY KEY("connection_id","slot_key")
 );
 --> statement-breakpoint
 CREATE TABLE "control_plane"."integration_connections" (
@@ -109,7 +109,6 @@ CREATE TABLE "control_plane"."integration_connections" (
 	"status" text DEFAULT 'active' NOT NULL,
 	"external_subject_id" text,
 	"config" jsonb,
-	"secrets" jsonb,
 	"target_snapshot_config" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL

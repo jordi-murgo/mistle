@@ -10,6 +10,7 @@ import {
   resolveOpenAiCredentialSecretType,
   type OpenAiConnectionConfig,
   OpenAiConnectionConfigSchema,
+  OpenAiCredentialSlotKeys,
 } from "./auth.js";
 import {
   OpenAiConnectionConfigForm,
@@ -61,6 +62,7 @@ export const OpenAiApiKeyDefinition: OpenAiApiKeyIntegrationDefinition = {
           placeholder: "Enter API key",
           inputType: "password",
           secretType: "api_key",
+          slotKey: OpenAiCredentialSlotKeys.API_KEY,
         },
       ],
       configSchema: OpenAiConnectionConfigSchema,
@@ -79,6 +81,7 @@ export const OpenAiApiKeyDefinition: OpenAiApiKeyIntegrationDefinition = {
           credentialResolver: {
             connectionId: input.connection.id,
             secretType: resolveOpenAiCredentialSecretType(input.connection.config),
+            slotKey: OpenAiCredentialSlotKeys.API_KEY,
           },
           allowedMethods: ["GET", "POST"],
           allowedPathPrefixes: ["/"],

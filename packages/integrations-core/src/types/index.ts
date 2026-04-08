@@ -29,6 +29,21 @@ export const IntegrationConnectionMethodIds: {
   GITHUB_APP_INSTALLATION: "github-app-installation",
 };
 
+export function createOAuth2AuthorizationCodeCredentialSlotKeys(input: {
+  familyId: string;
+  variantId: string;
+}): {
+  accessToken: string;
+  refreshToken: string;
+} {
+  const prefix = `${input.familyId}.${input.variantId}.${IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE}`;
+
+  return {
+    accessToken: `${prefix}.access-token`,
+    refreshToken: `${prefix}.refresh-token`,
+  };
+}
+
 export type IntegrationConnectionMethodKind = "form" | "redirect";
 
 export const IntegrationConnectionMethodKinds: {
@@ -46,6 +61,7 @@ export type IntegrationConnectionMethodSecretField = {
   description?: string;
   inputType: "password" | "text";
   secretType: string;
+  slotKey: string;
 };
 
 export type IntegrationBrowserSafeConnectionMethodSecretField = Omit<
@@ -121,7 +137,7 @@ export type IntegrationFormConnectionResourceSummary = {
 
 export type IntegrationResourceCredentialRef = {
   secretType: string;
-  purpose?: string;
+  slotKey?: string;
   resolverKey?: string;
 };
 
@@ -443,7 +459,7 @@ export type IntegrationCredentialResolverInput = {
   connection: IntegrationConnection;
   binding?: Pick<IntegrationBinding, "id" | "kind"> & { config: Record<string, unknown> };
   secretType: string;
-  purpose?: string;
+  slotKey?: string;
 };
 
 export type IntegrationCredentialResolverResult = {
@@ -463,10 +479,11 @@ export type IntegrationCredentialResolvers = {
 };
 
 export type IntegrationRedirectCredentialMaterial = {
-  purpose: string;
+  slotKey: string;
   secretType: string;
   plaintext: string;
   metadata?: Record<string, unknown>;
+  expiresAt?: string;
 };
 
 export type IntegrationRedirectStartInput<
@@ -798,7 +815,7 @@ export type IntegrationWebhookHandler<
 export type EgressCredentialResolverRef = {
   connectionId: string;
   secretType: string;
-  purpose?: string;
+  slotKey?: string;
   resolverKey?: string;
 };
 

@@ -2229,6 +2229,7 @@ export interface paths {
                         label: string;
                         name: string;
                         placeholder?: string;
+                        slotKey: string;
                       }[];
                     }
                   | {
@@ -3543,9 +3544,9 @@ export interface paths {
                   bindingId: string;
                   credentialResolver: {
                     connectionId: string;
-                    purpose?: string;
                     resolverKey?: string;
                     secretType: string;
+                    slotKey?: string;
                   };
                   egressRuleId: string;
                   match: {
@@ -3971,9 +3972,9 @@ export interface paths {
                   bindingId: string;
                   credentialResolver: {
                     connectionId: string;
-                    purpose?: string;
                     resolverKey?: string;
                     secretType: string;
+                    slotKey?: string;
                   };
                   egressRuleId: string;
                   match: {
