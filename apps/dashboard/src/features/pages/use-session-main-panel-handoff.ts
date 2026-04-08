@@ -3,6 +3,7 @@ import { systemScheduler, type TimerHandle } from "@mistle/time";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import type { useCodexSessionState } from "../session-agents/codex/session-state/index.js";
+import type { ConnectCodexSessionInput } from "../session-agents/codex/session-state/session-connection/index.js";
 import type { useSandboxPtyState } from "../sessions/use-sandbox-pty-state.js";
 import {
   InitialSessionMainPanelHandoffState,
@@ -54,7 +55,30 @@ async function closeAndDisconnectCliPty(
   await Promise.all([closePromise, disconnectPromise]);
 }
 
-export type { SessionMainPanelHandoffResult, UseSessionMainPanelHandoffInput };
+export function resolveChatRestoreConnectionInput(input: {
+  sandboxInstanceId: string;
+  durableThreadId: string | null;
+}): ConnectCodexSessionInput {
+  if (input.durableThreadId === null) {
+    return {
+      sandboxInstanceId: input.sandboxInstanceId,
+      targetThreadId: null,
+      selectionPolicy: "most_recently_updated",
+    };
+  }
+
+  return {
+    sandboxInstanceId: input.sandboxInstanceId,
+    targetThreadId: input.durableThreadId,
+    providerThreadId: input.durableThreadId,
+  };
+}
+
+export type {
+  ConnectCodexSessionInput as ChatRestoreConnectionInput,
+  SessionMainPanelHandoffResult,
+  UseSessionMainPanelHandoffInput,
+};
 
 export function useSessionMainPanelHandoff(
   input: UseSessionMainPanelHandoffInput,
@@ -139,12 +163,12 @@ export function useSessionMainPanelHandoff(
 
     // Restore honors durable provider authority when one exists. Otherwise local
     // sessions intentionally reconnect using the most recently updated thread.
-    input.lifecycle.connectSession({
-      sandboxInstanceId: input.sandboxInstanceId,
-      targetThreadId: durableThreadId,
-      ...(durableThreadId === null ? {} : { providerThreadId: durableThreadId }),
-      selectionPolicy: durableThreadId === null ? "most_recently_updated" : "oldest",
-    });
+    input.lifecycle.connectSession(
+      resolveChatRestoreConnectionInput({
+        sandboxInstanceId: input.sandboxInstanceId,
+        durableThreadId,
+      }),
+    );
   }, [
     clearRestoreTimeout,
     input.cliPtyState,
