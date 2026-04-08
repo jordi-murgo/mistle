@@ -61,6 +61,7 @@ function resolveSelectWidgetOptions(input: {
 }
 
 export const IntegrationHorizontalFieldGroupClassName = "gap-6 flex flex-col";
+const IntegrationVerticalFieldGroupClassName = "gap-6 flex flex-col";
 export const IntegrationSelectContentClassName =
   "w-max min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))]";
 
@@ -124,6 +125,39 @@ function resolveTextInputValue(value: unknown): string {
   return "";
 }
 
+function resolveCheckboxOptionLabel(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  option: { label: string; value: unknown },
+): string {
+  if (option.label !== String(option.value)) {
+    return option.label;
+  }
+
+  const uiEnumNames = props.uiSchema?.["ui:enumNames"];
+  const itemsSchema = isRecord(props.schema.items) ? props.schema.items : null;
+  if (Array.isArray(uiEnumNames) && itemsSchema !== null && Array.isArray(itemsSchema.enum)) {
+    const optionIndex = itemsSchema.enum.findIndex((candidate) => candidate === option.value);
+    const optionLabel = uiEnumNames[optionIndex];
+    if (typeof optionLabel === "string") {
+      return optionLabel;
+    }
+  }
+
+  if (itemsSchema !== null && Array.isArray(itemsSchema.oneOf)) {
+    for (const candidate of itemsSchema.oneOf) {
+      if (!isRecord(candidate)) {
+        continue;
+      }
+
+      if (candidate.const === option.value && typeof candidate.title === "string") {
+        return candidate.title;
+      }
+    }
+  }
+
+  return option.label;
+}
+
 function TextWidget(
   props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
 ): React.JSX.Element {
@@ -148,6 +182,64 @@ function TextWidget(
       }}
       placeholder={props.placeholder}
       type="text"
+      value={value}
+    />
+  );
+}
+
+function EmailWidget(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+): React.JSX.Element {
+  const value = resolveTextInputValue(props.value);
+
+  return (
+    <Input
+      aria-label={props.label}
+      autoFocus={props.autofocus}
+      className="w-full"
+      disabled={props.disabled || props.readonly}
+      id={props.id}
+      onBlur={(event) => {
+        props.onBlur(props.id, event.currentTarget.value);
+      }}
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        props.onChange(nextValue.length === 0 ? undefined : nextValue);
+      }}
+      onFocus={(event) => {
+        props.onFocus(props.id, event.currentTarget.value);
+      }}
+      placeholder={props.placeholder}
+      type="email"
+      value={value}
+    />
+  );
+}
+
+function URLWidget(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+): React.JSX.Element {
+  const value = resolveTextInputValue(props.value);
+
+  return (
+    <Input
+      aria-label={props.label}
+      autoFocus={props.autofocus}
+      className="w-full"
+      disabled={props.disabled || props.readonly}
+      id={props.id}
+      onBlur={(event) => {
+        props.onBlur(props.id, event.currentTarget.value);
+      }}
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        props.onChange(nextValue.length === 0 ? undefined : nextValue);
+      }}
+      onFocus={(event) => {
+        props.onFocus(props.id, event.currentTarget.value);
+      }}
+      placeholder={props.placeholder}
+      type="url"
       value={value}
     />
   );
@@ -254,6 +346,7 @@ function CheckboxesWidget(
 
   return (
     <div
+      data-slot="checkbox-group"
       className={cn(
         "gap-3 flex flex-col",
         inline ? "sm:flex-row sm:flex-wrap sm:gap-4" : undefined,
@@ -266,6 +359,10 @@ function CheckboxesWidget(
             const itemDisabled = Array.isArray(enumDisabled) && enumDisabled.includes(option.value);
             const itemId = optionId(id, index);
             const describedBy = ariaDescribedByIds(id);
+            const optionLabel = resolveCheckboxOptionLabel(props, {
+              label: String(option.label),
+              value: option.value,
+            });
 
             return (
               <label
@@ -277,7 +374,7 @@ function CheckboxesWidget(
               >
                 <Checkbox
                   aria-describedby={describedBy}
-                  aria-label={String(option.label)}
+                  aria-label={optionLabel}
                   autoFocus={autofocus && index === 0}
                   checked={checked}
                   disabled={disabled || itemDisabled || readonly}
@@ -299,7 +396,7 @@ function CheckboxesWidget(
                   }}
                   value={String(index)}
                 />
-                <span className="text-sm">{option.label}</span>
+                <span className="text-sm">{optionLabel}</span>
               </label>
             );
           })
@@ -491,10 +588,7 @@ function IntegrationFieldTemplate(
     >
       {props.displayLabel && props.label.length > 0 ? (
         <FieldHeader>
-          <FieldLabel htmlFor={props.id}>
-            {props.label}
-            {props.required ? <span className="text-destructive">*</span> : null}
-          </FieldLabel>
+          <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
           {props.description}
         </FieldHeader>
       ) : null}
@@ -550,6 +644,7 @@ function IntegrationObjectFieldTemplate(
       <div
         className={cn(
           props.className,
+          IntegrationVerticalFieldGroupClassName,
           layout === "horizontal" ? IntegrationHorizontalFieldGroupClassName : undefined,
         )}
       >
@@ -580,6 +675,8 @@ export const IntegrationFormTemplates = {
 
 export const IntegrationFormWidgets = {
   TextWidget,
+  EmailWidget,
+  URLWidget,
   PasswordWidget,
   SelectWidget,
   CheckboxesWidget,

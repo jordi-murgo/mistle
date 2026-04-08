@@ -101,6 +101,18 @@ const meta = {
   title: "Dashboard/SandboxProfiles/Integrations/BindingDialog",
   component: SandboxProfileBindingDialog,
   decorators: [withDashboardCenteredStory],
+  args: {
+    state: null,
+    availableConnections: StoryIntegrationConnections,
+    availableConnectionsByKind: AvailableConnectionsByKind,
+    availableTargets: StoryIntegrationTargets,
+    isSubmittingIntegrationBindings: false,
+    onClose: () => {},
+    onConnectionIdChange: () => {},
+    onRowChange: () => {},
+    onSave: () => {},
+    resolveSelectedConnectionDisplayName: () => undefined,
+  },
   parameters: {
     layout: "fullscreen",
   },
