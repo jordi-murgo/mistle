@@ -8,6 +8,9 @@
 
 use std::fmt::{self, Display};
 
+use serde_json::{Map, Value};
+
+use crate::time::{Clock, format_rfc3339_timestamp};
 use crate::tunnel::protocol::{
     BootstrapTelemetryControlMessage, MAX_STREAM_WINDOW_BYTES, PAYLOAD_KIND_RAW_BYTES,
     StreamSendWindow, decode_stream_data_frame, encode_stream_data_frame,
@@ -18,6 +21,25 @@ use crate::tunnel::protocol::{
 pub const SANDBOX_TELEMETRY_LOG_STREAM_ID: u32 = 0xffff_fffe;
 const TELEMETRY_LOGS_SIGNAL: &str = "logs";
 const TELEMETRY_LOGS_FORMAT: &str = "mistle.sandbox-runtime.log.v1";
+const RESERVED_LOG_FIELDS: [&str; 3] = ["timestamp", "level", "event"];
+
+/// Supported log severities for sandbox telemetry log lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxTelemetryLogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl SandboxTelemetryLogLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
 
 /// Describes why one telemetry relay step failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,6 +196,18 @@ impl TelemetryRelay {
         self.flush()
     }
 
+    /// Serializes one structured telemetry log record and queues it for transmission.
+    pub fn enqueue_log_record(
+        &mut self,
+        clock: &dyn Clock,
+        level: SandboxTelemetryLogLevel,
+        event: &str,
+        extra_fields: &[(&str, Value)],
+    ) -> Result<Vec<TelemetryRelayFrame>, TelemetryRelayError> {
+        let line = encode_sandbox_telemetry_log_line(clock, level, event, extra_fields)?;
+        self.enqueue_log_line(&line)
+    }
+
     fn flush(&mut self) -> Result<Vec<TelemetryRelayFrame>, TelemetryRelayError> {
         if self.state != TelemetryRelayState::Open {
             return Ok(Vec::new());
@@ -216,4 +250,60 @@ pub fn decode_telemetry_data_frame(payload: &[u8]) -> Result<Vec<u8>, TelemetryR
         ));
     }
     Ok(frame.payload)
+}
+
+/// Serializes one newline-delimited `mistle.sandbox-runtime.log.v1` log line.
+pub fn encode_sandbox_telemetry_log_line(
+    clock: &dyn Clock,
+    level: SandboxTelemetryLogLevel,
+    event: &str,
+    extra_fields: &[(&str, Value)],
+) -> Result<String, TelemetryRelayError> {
+    if event.trim().is_empty() {
+        return Err(TelemetryRelayError::new(
+            "sandbox telemetry log event must not be empty",
+        ));
+    }
+
+    let mut payload = Map::new();
+    payload.insert(
+        "timestamp".to_string(),
+        Value::String(
+            format_rfc3339_timestamp(clock.now_system_time())
+                .map_err(|error| TelemetryRelayError::new(error.to_string()))?,
+        ),
+    );
+    payload.insert(
+        "level".to_string(),
+        Value::String(level.as_str().to_string()),
+    );
+    payload.insert("event".to_string(), Value::String(event.to_string()));
+
+    for (field_name, field_value) in extra_fields {
+        if field_name.trim().is_empty() {
+            return Err(TelemetryRelayError::new(
+                "sandbox telemetry log field name must not be empty",
+            ));
+        }
+        if RESERVED_LOG_FIELDS.contains(field_name) {
+            return Err(TelemetryRelayError::new(format!(
+                "sandbox telemetry log field '{field_name}' is reserved",
+            )));
+        }
+        if !matches!(
+            field_value,
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+        ) {
+            return Err(TelemetryRelayError::new(format!(
+                "sandbox telemetry log field '{field_name}' must be scalar",
+            )));
+        }
+
+        payload.insert((*field_name).to_string(), field_value.clone());
+    }
+
+    let mut line = serde_json::to_string(&Value::Object(payload))
+        .map_err(|error| TelemetryRelayError::new(error.to_string()))?;
+    line.push('\n');
+    Ok(line)
 }
