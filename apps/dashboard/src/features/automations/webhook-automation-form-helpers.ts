@@ -4,6 +4,10 @@ import type {
   WebhookAutomationFormValueKey,
   WebhookAutomationFormValues,
 } from "./webhook-automation-form.js";
+import {
+  InitialWebhookAutomationInputTemplate,
+  UntouchedWebhookAutomationInputTemplateError,
+} from "./webhook-automation-input-template.js";
 import { createWebhookAutomationTriggerId } from "./webhook-automation-option-builders.js";
 import {
   extractWebhookAutomationTriggerParameterValues,
@@ -87,7 +91,7 @@ export function toWebhookAutomationFormValues(
       name: "",
       sandboxProfileId: "",
       enabled: true,
-      inputTemplate: "",
+      inputTemplate: InitialWebhookAutomationInputTemplate,
       conversationKeyTemplate: "",
       triggerIds: [],
       triggerParameterValues: {},
@@ -122,6 +126,7 @@ export function validateWebhookAutomationFormValues(
   eventOptions: readonly WebhookAutomationEventOption[] = [],
 ): Partial<Record<WebhookAutomationFormValueKey, string>> {
   const errors: Partial<Record<WebhookAutomationFormValueKey, string>> = {};
+  const trimmedInputTemplate = values.inputTemplate.trim();
 
   if (values.name.trim().length === 0) {
     errors.name = "Automation name is required.";
@@ -161,8 +166,10 @@ export function validateWebhookAutomationFormValues(
     errors.sandboxProfileId = "Select a sandbox profile.";
   }
 
-  if (values.inputTemplate.trim().length === 0) {
+  if (trimmedInputTemplate.length === 0) {
     errors.inputTemplate = "Input template is required.";
+  } else if (trimmedInputTemplate === InitialWebhookAutomationInputTemplate.trim()) {
+    errors.inputTemplate = UntouchedWebhookAutomationInputTemplateError;
   }
 
   if (values.conversationKeyTemplate.trim().length === 0) {

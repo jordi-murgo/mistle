@@ -7,6 +7,7 @@ import {
   validateWebhookAutomationFormValues,
 } from "./webhook-automation-form-helpers.js";
 import type { WebhookAutomationFormValues } from "./webhook-automation-form.js";
+import { InitialWebhookAutomationInputTemplate } from "./webhook-automation-input-template.js";
 import { createWebhookAutomationTriggerId } from "./webhook-automation-option-builders.js";
 import {
   createGithubIssueCommentCreatedEventOption,
@@ -129,7 +130,7 @@ describe("toWebhookAutomationFormValues", () => {
       name: "",
       sandboxProfileId: "",
       enabled: true,
-      inputTemplate: "",
+      inputTemplate: InitialWebhookAutomationInputTemplate,
       conversationKeyTemplate: "",
       triggerIds: [],
       triggerParameterValues: {},
@@ -333,6 +334,39 @@ describe("validateWebhookAutomationFormValues", () => {
     ).toEqual({
       triggerIds: "Trigger is unavailable for the selected sandbox profile.",
     });
+  });
+
+  it("rejects the untouched seeded input template", () => {
+    expect(
+      validateWebhookAutomationFormValues(
+        {
+          ...BaseFormValues,
+          inputTemplate: InitialWebhookAutomationInputTemplate,
+          conversationKeyTemplate:
+            "{{payload.repository.full_name}}:pull-request:{{payload.pull_request.number}}",
+        },
+        GitHubEventOptions,
+      ),
+    ).toEqual({
+      inputTemplate: "Please replace the instructions placeholder with your own instructions.",
+    });
+  });
+
+  it("accepts the seeded template after the placeholder instructions are replaced", () => {
+    expect(
+      validateWebhookAutomationFormValues(
+        {
+          ...BaseFormValues,
+          inputTemplate: InitialWebhookAutomationInputTemplate.replace(
+            "Replace this with your instructions.",
+            "Review the event and draft a concise response.",
+          ),
+          conversationKeyTemplate:
+            "{{payload.repository.full_name}}:pull-request:{{payload.pull_request.number}}",
+        },
+        GitHubEventOptions,
+      ),
+    ).toEqual({});
   });
 });
 
