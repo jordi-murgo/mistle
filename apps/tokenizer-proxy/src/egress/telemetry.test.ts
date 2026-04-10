@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createCredentialCacheTelemetryAttributes,
   createEgressTelemetryBaseAttributes,
   createUpstreamTelemetryAttributes,
 } from "./telemetry.js";
@@ -32,6 +33,16 @@ describe("tokenizer proxy egress telemetry helpers", () => {
     ).toEqual({
       "server.address": "api.github.com",
       "url.path": "/graphql",
+    });
+  });
+
+  it("emits cache result attributes without leaking credential material", () => {
+    expect(
+      createCredentialCacheTelemetryAttributes({
+        result: "refresh_skew_expired",
+      }),
+    ).toEqual({
+      "mistle.credential.cache.result": "refresh_skew_expired",
     });
   });
 });

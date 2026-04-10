@@ -6,6 +6,8 @@ export type EgressTelemetryBaseAttributesInput = {
   connectionId: string;
 };
 
+export type CredentialCacheTelemetryResult = "hit" | "miss" | "refresh_skew_expired";
+
 export function createEgressTelemetryBaseAttributes(
   input: EgressTelemetryBaseAttributesInput,
 ): Record<string, string> {
@@ -24,5 +26,13 @@ export function createUpstreamTelemetryAttributes(input: {
   return {
     "server.address": input.upstreamUrl.host,
     "url.path": input.upstreamUrl.pathname,
+  };
+}
+
+export function createCredentialCacheTelemetryAttributes(input: {
+  result: CredentialCacheTelemetryResult;
+}): Record<string, string> {
+  return {
+    "mistle.credential.cache.result": input.result,
   };
 }

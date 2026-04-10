@@ -1,4 +1,5 @@
 import { ControlPlaneInternalClient } from "@mistle/control-plane-internal-client";
+import { resolveProviderEgressTelemetryHandler } from "@mistle/integrations-definitions/server";
 import type { EgressGrantConfig } from "@mistle/sandbox-egress-auth";
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { Hash } from "@smithy/hash-node";
@@ -17,6 +18,7 @@ import {
   type StaticAuthorizedEgressGrant,
 } from "./grant.js";
 import {
+  createCredentialCacheTelemetryAttributes,
   createEgressTelemetryBaseAttributes,
   createUpstreamTelemetryAttributes,
 } from "./telemetry.js";
@@ -514,7 +516,13 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
             : { resolverKey: egressGrant.resolverKey }),
         };
 
-        let resolvedCredential = input.credentialCache.get(cacheKey);
+        const cacheLookup = input.credentialCache.getWithResult(cacheKey);
+        let resolvedCredential = cacheLookup.credential;
+        span.setAttributes(
+          createCredentialCacheTelemetryAttributes({
+            result: cacheLookup.result,
+          }),
+        );
         span.setAttribute("mistle.credential.cache_hit", resolvedCredential !== undefined);
 
         if (resolvedCredential === undefined) {
@@ -546,6 +554,10 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
                     });
 
                   input.credentialCache.set(cacheKey, resolvedCredential);
+                  credentialSpan.setAttribute(
+                    "mistle.integration.credential.result_kind",
+                    resolvedCredential.kind,
+                  );
                   return resolvedCredential;
                 } catch (error) {
                   credentialSpan.recordException(
@@ -567,6 +579,12 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
               {
                 err: error,
                 egressRuleId: egressGrant.egressRuleId,
+                bindingId: egressGrant.bindingId,
+                connectionId: egressGrant.connectionId,
+                secretType: egressGrant.secretType,
+                ...(egressGrant.resolverKey === undefined
+                  ? {}
+                  : { resolverKey: egressGrant.resolverKey }),
               },
               "Failed to resolve integration credential from control-plane-api",
             );
@@ -588,6 +606,7 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
         if (resolvedCredential === undefined) {
           throw new Error("Expected integration credential to be resolved.");
         }
+        span.setAttribute("mistle.integration.credential.result_kind", resolvedCredential.kind);
 
         const upstreamUrl = createUpstreamUrl({
           requestUrl: ctx.req.url,
@@ -606,18 +625,77 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
         const outgoingBody = await readOutgoingRequestBody(ctx);
 
         if (egressGrant.authInjectionType === "aws_sigv4") {
-          await applyAwsSigV4AuthInjection({
-            method: ctx.req.method,
-            upstreamUrl,
-            outgoingHeaders,
-            outgoingBody,
+          const telemetryHandler = resolveProviderEgressTelemetryHandler(
+            egressGrant.authInjectionType,
+          );
+          if (telemetryHandler === undefined) {
+            throw new Error(
+              `No provider egress telemetry handler is registered for '${egressGrant.authInjectionType}'.`,
+            );
+          }
+
+          const awsSigV4Attributes = telemetryHandler.createRequestTelemetryAttributes({
             service: egressGrant.authInjectionService,
             region: egressGrant.authInjectionRegion,
-            credential: resolveAwsSessionCredentialOrThrow({
-              credential: resolvedCredential,
-              context: "HTTP SigV4 auth injection",
-            }),
+            hasBody: outgoingBody !== undefined,
+            bodyByteLength: outgoingBody?.byteLength ?? 0,
           });
+          span.setAttributes(awsSigV4Attributes);
+
+          try {
+            await EgressTracer.startActiveSpan(
+              "tokenizer_proxy.egress.sign_aws_request",
+              async (signingSpan) => {
+                signingSpan.setAttributes(createUpstreamTelemetryAttributes({ upstreamUrl }));
+                signingSpan.setAttribute("http.request.method", ctx.req.method);
+                signingSpan.setAttributes(awsSigV4Attributes);
+                try {
+                  await applyAwsSigV4AuthInjection({
+                    method: ctx.req.method,
+                    upstreamUrl,
+                    outgoingHeaders,
+                    outgoingBody,
+                    service: egressGrant.authInjectionService,
+                    region: egressGrant.authInjectionRegion,
+                    credential: resolveAwsSessionCredentialOrThrow({
+                      credential: resolvedCredential,
+                      context: "HTTP SigV4 auth injection",
+                    }),
+                  });
+                } catch (error) {
+                  signingSpan.recordException(
+                    error instanceof Error ? error : new Error(String(error)),
+                  );
+                  signingSpan.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: "aws sigv4 signing failed",
+                  });
+                  throw error;
+                } finally {
+                  signingSpan.end();
+                }
+              },
+            );
+          } catch (error) {
+            logger.error(
+              {
+                err: error,
+                egressRuleId: egressGrant.egressRuleId,
+                bindingId: egressGrant.bindingId,
+                connectionId: egressGrant.connectionId,
+                awsService: egressGrant.authInjectionService,
+                awsRegion: egressGrant.authInjectionRegion,
+                upstreamHost: upstreamUrl.host,
+              },
+              "Failed to apply AWS SigV4 auth injection",
+            );
+            span.recordException(error instanceof Error ? error : new Error(String(error)));
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: "aws sigv4 signing failed",
+            });
+            throw error;
+          }
         } else {
           const staticAuthInjection = resolveStaticAuthInjectionOrThrow(egressGrant);
 
@@ -683,6 +761,22 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
         }
 
         span.setAttribute("http.response.status_code", upstreamResponse.status);
+        if (egressGrant.authInjectionType === "aws_sigv4") {
+          const telemetryHandler = resolveProviderEgressTelemetryHandler(
+            egressGrant.authInjectionType,
+          );
+          if (telemetryHandler === undefined) {
+            throw new Error(
+              `No provider egress telemetry handler is registered for '${egressGrant.authInjectionType}'.`,
+            );
+          }
+
+          span.setAttributes(
+            telemetryHandler.createResponseTelemetryAttributes({
+              headers: upstreamResponse.headers,
+            }),
+          );
+        }
 
         if (upstreamResponse.status >= 400) {
           const upstreamResponseClone = upstreamResponse.clone();
@@ -701,6 +795,17 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
               egressRuleId: egressGrant.egressRuleId,
               bindingId: egressGrant.bindingId,
               connectionId: egressGrant.connectionId,
+              ...(egressGrant.authInjectionType !== "aws_sigv4"
+                ? {}
+                : {
+                    awsService: egressGrant.authInjectionService,
+                    awsRegion: egressGrant.authInjectionRegion,
+                    awsResponse: resolveProviderEgressTelemetryHandler(
+                      egressGrant.authInjectionType,
+                    )?.createResponseTelemetryAttributes({
+                      headers: upstreamResponse.headers,
+                    }),
+                  }),
             },
             "Upstream egress request returned non-success status",
           );
