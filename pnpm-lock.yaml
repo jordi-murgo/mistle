@@ -235,6 +235,12 @@ importers:
       '@mistle/test-harness':
         specifier: workspace:*
         version: link:../../packages/test-harness
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
+      '@opentelemetry/context-async-hooks':
+        specifier: ^2.6.1
+        version: 2.6.1(@opentelemetry/api@1.9.1)
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
@@ -972,7 +978,13 @@ importers:
       '@opentelemetry/auto-instrumentations-node':
         specifier: ^0.71.0
         version: 0.71.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.6.1(@opentelemetry/api@1.9.1))
+      '@opentelemetry/core':
+        specifier: ^2.6.1
+        version: 2.6.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/exporter-logs-otlp-http':
+        specifier: ^0.214.0
+        version: 0.214.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/exporter-metrics-otlp-http':
         specifier: ^0.214.0
         version: 0.214.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/exporter-trace-otlp-http':
@@ -984,9 +996,16 @@ importers:
       '@opentelemetry/sdk-logs':
         specifier: ^0.214.0
         version: 0.214.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/sdk-metrics':
+        specifier: ^2.6.1
+        version: 2.6.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-node':
         specifier: ^0.214.0
         version: 0.214.0(@opentelemetry/api@1.9.1)
+    devDependencies:
+      '@opentelemetry/context-async-hooks':
+        specifier: ^2.6.1
+        version: 2.6.1(@opentelemetry/api@1.9.1)
 
   packages/test-harness:
     dependencies:
@@ -1146,6 +1165,9 @@ importers:
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.1)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(@types/pg@8.20.0)(kysely@0.28.14)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.8)(prisma@7.4.2(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))
       openapi-fetch:
         specifier: ^0.17.0
         version: 0.17.0
@@ -15515,7 +15537,7 @@ snapshots:
       '@opentelemetry/resource-detector-azure': 0.21.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/resource-detector-container': 0.8.4(@opentelemetry/api@1.9.1)
       '@opentelemetry/resource-detector-gcp': 0.48.0(@opentelemetry/api@1.9.1)
-      '@opentelemetry/resources': 2.6.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/resources': 2.6.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-node': 0.213.0(@opentelemetry/api@1.9.1)
     transitivePeerDependencies:
       - supports-color
