@@ -226,6 +226,8 @@ function withStreamId(input: {
 class SandboxSessionTransportStream implements SandboxSessionStream {
   readonly #listeners = new Set<StreamListener>();
   readonly #transport: SandboxSessionTransport;
+  #isDisposed = false;
+  #queuedEvents: SandboxSessionStreamEvent[] = [];
   #state: SandboxSessionStreamState;
 
   constructor(input: {
@@ -245,7 +247,18 @@ class SandboxSessionTransportStream implements SandboxSessionStream {
   }
 
   onEvent(listener: StreamListener): () => void {
+    if (this.#isDisposed) {
+      throw new Error(`Sandbox session stream ${String(this.streamId)} has been disposed.`);
+    }
+
     this.#listeners.add(listener);
+    if (this.#queuedEvents.length > 0) {
+      const queuedEvents = [...this.#queuedEvents];
+      this.#queuedEvents = [];
+      for (const queuedEvent of queuedEvents) {
+        listener(queuedEvent);
+      }
+    }
     return () => {
       this.#listeners.delete(listener);
     };
@@ -270,7 +283,9 @@ class SandboxSessionTransportStream implements SandboxSessionStream {
   }
 
   dispose(): void {
+    this.#isDisposed = true;
     this.#listeners.clear();
+    this.#queuedEvents = [];
   }
 
   markOpen(): void {
@@ -304,6 +319,15 @@ class SandboxSessionTransportStream implements SandboxSessionStream {
   }
 
   #emit(event: SandboxSessionStreamEvent): void {
+    if (this.#isDisposed) {
+      return;
+    }
+
+    if (this.#listeners.size === 0) {
+      this.#queuedEvents.push(event);
+      return;
+    }
+
     for (const listener of this.#listeners) {
       listener(event);
     }
@@ -448,53 +472,58 @@ export class SandboxSessionTransport {
       transport: this,
       initialState: "opening",
     });
-
-    await new Promise<void>((resolve, reject) => {
-      const timeoutTask = this.#runtime.scheduleTimeout(() => {
-        this.#pendingOpensByStreamId.delete(streamId);
-        reject(
-          new Error(
-            `Timed out waiting for stream.open acknowledgement for stream ${String(streamId)}.`,
-          ),
-        );
-      }, this.#connectTimeoutMs);
-
-      this.#pendingOpensByStreamId.set(streamId, {
-        streamId,
-        resolve: (): void => {
-          timeoutTask.cancel();
-          resolve();
-        },
-        reject: (error): void => {
-          timeoutTask.cancel();
-          reject(error);
-        },
-        timeoutTask,
-      });
-
-      const openMessage: StreamOpen = {
-        type: "stream.open",
-        streamId,
-        channel: input.channel,
-      };
-      void socket.send(JSON.stringify(openMessage)).catch((error) => {
-        const pendingOpen = this.#pendingOpensByStreamId.get(streamId);
-        if (pendingOpen === undefined) {
-          return;
-        }
-
-        this.#pendingOpensByStreamId.delete(streamId);
-        pendingOpen.reject(
-          error instanceof Error ? error : new Error("Failed to send stream.open request."),
-        );
-      });
-    });
-
     this.#activeStreamsByStreamId.set(streamId, {
       sendWindowBytes: getInitialSendWindowBytes(input.channel),
       stream,
     });
-    stream.markOpen();
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeoutTask = this.#runtime.scheduleTimeout(() => {
+          this.#pendingOpensByStreamId.delete(streamId);
+          reject(
+            new Error(
+              `Timed out waiting for stream.open acknowledgement for stream ${String(streamId)}.`,
+            ),
+          );
+        }, this.#connectTimeoutMs);
+
+        this.#pendingOpensByStreamId.set(streamId, {
+          streamId,
+          resolve: (): void => {
+            timeoutTask.cancel();
+            resolve();
+          },
+          reject: (error): void => {
+            timeoutTask.cancel();
+            reject(error);
+          },
+          timeoutTask,
+        });
+
+        const openMessage: StreamOpen = {
+          type: "stream.open",
+          streamId,
+          channel: input.channel,
+        };
+        void socket.send(JSON.stringify(openMessage)).catch((error) => {
+          const pendingOpen = this.#pendingOpensByStreamId.get(streamId);
+          if (pendingOpen === undefined) {
+            return;
+          }
+
+          this.#pendingOpensByStreamId.delete(streamId);
+          pendingOpen.reject(
+            error instanceof Error ? error : new Error("Failed to send stream.open request."),
+          );
+        });
+      });
+      stream.markOpen();
+    } catch (error) {
+      this.#activeStreamsByStreamId.delete(streamId);
+      stream.dispose();
+      throw error;
+    }
 
     return stream;
   }
@@ -677,6 +706,11 @@ export class SandboxSessionTransport {
 
     this.#pendingOpensByStreamId.delete(controlMessage.streamId);
     if (controlMessage.type === "stream.open.error") {
+      const streamRecord = this.#activeStreamsByStreamId.get(controlMessage.streamId);
+      if (streamRecord !== undefined) {
+        this.#activeStreamsByStreamId.delete(controlMessage.streamId);
+        streamRecord.stream.markClosed(controlMessage.message);
+      }
       pendingOpen.reject(new SandboxSessionStreamOpenError(controlMessage));
       return;
     }
