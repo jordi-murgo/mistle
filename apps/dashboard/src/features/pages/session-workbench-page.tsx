@@ -1,11 +1,10 @@
 import { Badge, Button } from "@mistle/ui";
 import { GitDiffIcon, TerminalIcon } from "@phosphor-icons/react";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useLocation, useParams } from "react-router";
 
 import type { ChatComposerViewModel } from "../chat/components/chat-composer.js";
 import { useAppShellHeaderActions } from "../shell/app-shell-header-actions.js";
-import type { SandboxStatusBadgeUi } from "./sandbox-status-presentation.js";
 import { SessionCliPanel } from "./session-cli-panel.js";
 import {
   SessionConversationBottomPanel,
@@ -18,69 +17,7 @@ import {
   SessionWorkbenchPageView,
   type SessionWorkbenchAlert,
 } from "./session-workbench-page-view.js";
-import type {
-  SandboxStatusReadState,
-  WorkbenchSandboxLifecycleStatus,
-} from "./session-workbench-state.js";
 import { useSessionWorkbenchController } from "./use-session-workbench-controller.js";
-
-export function hasSessionTopAlert(input: {
-  hasSandboxStatusError: boolean;
-  lifecycleErrorMessage: string | null;
-  reconnectMessage: string | null;
-  sandboxFailureMessage: string | null;
-  stoppedSessionMessage: string | null;
-}): boolean {
-  return (
-    input.hasSandboxStatusError ||
-    input.lifecycleErrorMessage !== null ||
-    input.reconnectMessage !== null ||
-    input.sandboxFailureMessage !== null ||
-    input.stoppedSessionMessage !== null
-  );
-}
-
-export function resolveSessionWorkbenchHeaderStatusUi(input: {
-  sandboxLifecycleStatus: WorkbenchSandboxLifecycleStatus;
-  sandboxStatusReadState: SandboxStatusReadState;
-}): SandboxStatusBadgeUi {
-  if (input.sandboxStatusReadState === "loading") {
-    return {
-      label: "Not connected",
-      variant: "outline",
-    };
-  }
-
-  if (input.sandboxLifecycleStatus === "failed") {
-    return {
-      label: "Error",
-      variant: "destructive",
-    };
-  }
-
-  if (input.sandboxLifecycleStatus === "running") {
-    return {
-      label: "Connected",
-      variant: "secondary",
-      className: "bg-emerald-600 text-white hover:bg-emerald-600/90",
-    };
-  }
-
-  return {
-    label: "Not connected",
-    variant: "outline",
-  };
-}
-
-export function shouldShowResumeAction(input: { requiresManualResume: boolean }): boolean {
-  return input.requiresManualResume;
-}
-
-export function shouldShowSessionWorkbenchHeaderStatusLabel(input: {
-  headerStatusUi: SandboxStatusBadgeUi;
-}): boolean {
-  return input.headerStatusUi.variant === "destructive";
-}
 
 export function SessionWorkbenchPage(): React.JSX.Element {
   const location = useLocation();
@@ -100,69 +37,36 @@ function SessionWorkbenchPageContent(input: {
     !workbench.terminalPanelState.isVisible && !workbench.connectionReadiness.canConnect;
   const terminalButtonLabel = workbench.terminalPanelState.isVisible ? "Terminal" : "Open terminal";
   const terminalButtonTitle = isTerminalOpenDisabled
-    ? (workbench.stoppedSessionState.message ??
-      "Terminal is available only when the sandbox is running.")
+    ? (workbench.stoppedSessionMessage ?? "Terminal is available only when the sandbox is running.")
     : terminalButtonLabel;
   const isDiffOpenDisabled =
     !workbench.diffPanelState.isVisible && !workbench.connectionReadiness.canConnect;
   const diffButtonLabel = workbench.diffPanelState.isVisible ? "Changes" : "Open changes";
   const diffButtonTitle = isDiffOpenDisabled
-    ? (workbench.stoppedSessionState.message ??
-      "Changes are available only when the sandbox is running.")
+    ? (workbench.stoppedSessionMessage ?? "Changes are available only when the sandbox is running.")
     : diffButtonLabel;
   const cliButtonLabel = "CLI";
   const cliButtonTitle = workbench.primaryPanelState.isCliToggleActive
     ? "Return to chat"
     : (workbench.primaryPanelState.disabledReason ?? "Open Codex CLI");
-  const sandboxHeaderStatusUi = resolveSessionWorkbenchHeaderStatusUi({
-    sandboxLifecycleStatus: workbench.sandboxLifecycleStatus,
-    sandboxStatusReadState: workbench.sandboxStatusReadState,
-  });
-  const showResumeButton = shouldShowResumeAction({
-    requiresManualResume: workbench.stoppedSessionState.requiresManualResume,
-  });
-  const showHeaderStatusLabel = shouldShowSessionWorkbenchHeaderStatusLabel({
-    headerStatusUi: sandboxHeaderStatusUi,
-  });
+  const isErrorHeaderStatus = workbench.workbenchStatus.kind === "error";
+  const headerStatusLabel = isErrorHeaderStatus ? "Error" : "Not connected";
   const headerActions = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {showHeaderStatusLabel ? (
-          <Badge
-            aria-label={sandboxHeaderStatusUi.label}
-            className={sandboxHeaderStatusUi.className}
-            title={sandboxHeaderStatusUi.label}
-            variant={sandboxHeaderStatusUi.variant}
-          >
-            {sandboxHeaderStatusUi.label}
+        {isErrorHeaderStatus ? (
+          <Badge aria-label={headerStatusLabel} title={headerStatusLabel} variant="destructive">
+            {headerStatusLabel}
           </Badge>
         ) : (
           <span
-            aria-label={sandboxHeaderStatusUi.label}
-            className={[
-              "inline-block size-2.5 rounded-full border",
-              sandboxHeaderStatusUi.variant === "secondary"
-                ? "border-emerald-700 bg-emerald-600"
-                : "border-stone-300 bg-stone-300",
-            ].join(" ")}
+            aria-label={headerStatusLabel}
+            className="inline-block size-2.5 rounded-full border border-stone-300 bg-stone-300"
             role="status"
-            title={sandboxHeaderStatusUi.label}
+            title={headerStatusLabel}
           />
         )}
         <span aria-hidden className="h-5 w-px bg-stone-200" />
-        {showResumeButton ? (
-          <Button
-            disabled={workbench.isResumingStoppedSandbox}
-            onClick={() => {
-              void workbench.requestStoppedSandboxResume();
-            }}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {workbench.isResumingStoppedSandbox ? "Resuming..." : "Resume"}
-          </Button>
-        ) : null}
         <Button
           aria-label={cliButtonLabel}
           aria-pressed={workbench.primaryPanelState.isCliToggleActive}
@@ -242,9 +146,9 @@ function SessionWorkbenchPageContent(input: {
       cliButtonTitle,
       diffButtonLabel,
       diffButtonTitle,
+      headerStatusLabel,
+      isErrorHeaderStatus,
       terminalButtonLabel,
-      showResumeButton,
-      showHeaderStatusLabel,
       terminalButtonTitle,
       workbench.diffPanelState.isVisible,
       workbench.diffPanelState.togglePanel,
@@ -253,12 +157,7 @@ function SessionWorkbenchPageContent(input: {
       workbench.primaryPanelState.enterCliMode,
       workbench.primaryPanelState.exitCliMode,
       workbench.primaryPanelState.isCliToggleActive,
-      workbench.isResumingStoppedSandbox,
       workbench.ptyState.actions.disconnectPty,
-      workbench.requestStoppedSandboxResume,
-      sandboxHeaderStatusUi.className,
-      sandboxHeaderStatusUi.label,
-      sandboxHeaderStatusUi.variant,
       workbench.terminalPanelState.closePanel,
       workbench.terminalPanelState.isVisible,
       workbench.terminalPanelState.openPanel,
@@ -293,77 +192,40 @@ function SessionWorkbenchPageContent(input: {
     workbench.terminalPanelState.isVisible ? "visible" : "hidden",
   ].join(":");
   const diffPanelErrorMessage = !workbench.connectionReadiness.canConnect
-    ? (workbench.stoppedSessionState.message ??
-      "Changes are available only when the sandbox is running.")
+    ? (workbench.stoppedSessionMessage ?? "Changes are available only when the sandbox is running.")
     : workbench.diffPanelState.errorMessage;
   const diffPanelPatch = workbench.connectionReadiness.canConnect
     ? workbench.diffPanelState.patch
     : "";
 
-  const alerts: SessionWorkbenchAlert[] = [];
-  if (workbench.sandboxStatusQuery.isError) {
-    alerts.push({
-      title: "Could not load sandbox status",
-      description:
-        workbench.sandboxStatusQuery.error instanceof Error
-          ? workbench.sandboxStatusQuery.error.message
-          : "Could not load sandbox status.",
-    });
-  }
-  if (workbench.lifecycleErrorMessage !== null) {
-    alerts.push({
-      title: "Session connection error",
-      description: workbench.lifecycleErrorMessage,
-    });
-  }
-  if (workbench.sessionReconnectState.message !== null) {
-    alerts.push({
-      title: "Reconnecting session",
-      description: workbench.sessionReconnectState.message,
-    });
-  }
-  if (workbench.stoppedSessionState.message !== null) {
-    alerts.push({
-      title: "Stopped sandbox",
-      description: workbench.stoppedSessionState.message,
-    });
-  }
-  if (workbench.sandboxFailureMessage !== null) {
-    alerts.push({
-      title: "Sandbox failed",
-      description: workbench.sandboxFailureMessage,
-    });
-  }
-  if (
-    workbench.primaryPanelState.transitionState === "stable_chat" &&
-    workbench.primaryPanelState.error !== null
-  ) {
-    alerts.push({
-      title:
-        workbench.primaryPanelState.error.kind === "chat_restore_failed"
-          ? "Could not restore chat"
-          : "Could not start Codex CLI",
-      description:
-        workbench.primaryPanelState.error.message ??
-        (workbench.primaryPanelState.error.kind === "chat_restore_failed"
-          ? "The workbench could not reconnect chat automatically. Please try again later or contact support if the problem continues."
-          : "Could not start Codex CLI."),
-    });
-  }
-  const hasTopAlert = hasSessionTopAlert({
-    hasSandboxStatusError: workbench.sandboxStatusQuery.isError,
-    lifecycleErrorMessage: workbench.lifecycleErrorMessage,
-    reconnectMessage:
-      workbench.primaryPanelState.transitionState === "stable_chat"
-        ? workbench.sessionReconnectState.message
-        : null,
-    sandboxFailureMessage: workbench.sandboxFailureMessage,
-    stoppedSessionMessage: workbench.stoppedSessionState.message,
-  });
+  const alert: SessionWorkbenchAlert | null = workbench.sandboxStatusQuery.isError
+    ? {
+        title: "Could not load sandbox status",
+        description:
+          workbench.sandboxStatusQuery.error instanceof Error
+            ? workbench.sandboxStatusQuery.error.message
+            : "Could not load sandbox status.",
+      }
+    : workbench.workbenchStatus.alert !== null
+      ? workbench.workbenchStatus.alert
+      : workbench.primaryPanelState.transitionState === "stable_chat" &&
+          workbench.primaryPanelState.error !== null
+        ? {
+            title:
+              workbench.primaryPanelState.error.kind === "chat_restore_failed"
+                ? "Could not restore chat"
+                : "Could not start Codex CLI",
+            description:
+              workbench.primaryPanelState.error.message ??
+              (workbench.primaryPanelState.error.kind === "chat_restore_failed"
+                ? "The workbench could not reconnect chat automatically. Please try again later or contact support if the problem continues."
+                : "Could not start Codex CLI."),
+          }
+        : null;
   if (input.sandboxInstanceId === null) {
     return (
       <SessionWorkbenchPageView
-        alerts={[]}
+        alert={null}
         bottomPanel={<></>}
         bottomPanelSize={32}
         isBottomPanelVisible={false}
@@ -397,13 +259,7 @@ function SessionWorkbenchPageContent(input: {
 
   return (
     <SessionWorkbenchPageView
-      alerts={
-        hasTopAlert ||
-        (workbench.primaryPanelState.transitionState === "stable_chat" &&
-          workbench.primaryPanelState.error !== null)
-          ? alerts
-          : []
-      }
+      alert={alert}
       isPrimaryPanelTransitioning={
         workbench.primaryPanelState.transitionState === "switching_to_cli" ||
         workbench.primaryPanelState.transitionState === "restoring_chat"
@@ -411,7 +267,6 @@ function SessionWorkbenchPageContent(input: {
       bottomPanel={
         <SessionTerminalPanel
           key={terminalPanelKey}
-          isResumingSandbox={workbench.isResumingStoppedSandbox}
           isConnectionReady={workbench.connectionReadiness.canConnect}
           isVisible={workbench.terminalPanelState.isVisible}
           onHide={workbench.terminalPanelState.closePanel}
@@ -419,7 +274,6 @@ function SessionWorkbenchPageContent(input: {
             workbench.terminalPanelState.closePanel();
             await workbench.ptyState.actions.disconnectPty();
           }}
-          onRequestSandboxResume={workbench.requestStoppedSandboxResume}
           ptyState={workbench.ptyState}
           sandboxStatus={workbench.sandboxLifecycleStatus}
           sandboxInstanceId={input.sandboxInstanceId}
@@ -453,23 +307,16 @@ function SessionWorkbenchPageContent(input: {
       onSecondaryPanelResize={workbench.diffPanelState.setPanelSize}
       primaryBottomPanel={
         workbench.primaryPanelState.showsChatComposer ? (
-          <>
-            {workbench.shouldAutoResumeOnEntry ? (
-              <SessionWorkbenchAutoResumeOnEntry
-                requestStoppedSandboxResume={workbench.requestStoppedSandboxResume}
-              />
-            ) : null}
-            <SessionConversationBottomPanelController
-              chatEntries={conversationPane.chatState.entries}
-              composerStateInput={conversationPane.composerStateInput}
-              isRespondingToServerRequest={
-                conversationPane.serverRequestsState.isRespondingToServerRequest
-              }
-              onRespondToServerRequest={conversationPane.serverRequestsState.respondToServerRequest}
-              key={input.sandboxInstanceId ?? "missing-session"}
-              serverRequestPanelEntries={unmatchedServerRequests}
-            />
-          </>
+          <SessionConversationBottomPanelController
+            chatEntries={conversationPane.chatState.entries}
+            composerStateInput={conversationPane.composerStateInput}
+            isRespondingToServerRequest={
+              conversationPane.serverRequestsState.isRespondingToServerRequest
+            }
+            onRespondToServerRequest={conversationPane.serverRequestsState.respondToServerRequest}
+            key={input.sandboxInstanceId ?? "missing-session"}
+            serverRequestPanelEntries={unmatchedServerRequests}
+          />
         ) : null
       }
       secondaryPanel={
@@ -521,17 +368,6 @@ function renderPrimaryPanelMainContent(input: {
     case "stable_chat":
       return <SessionConversationMainContent {...input.conversation} />;
   }
-}
-
-function SessionWorkbenchAutoResumeOnEntry(input: {
-  requestStoppedSandboxResume: () => Promise<void>;
-}): null {
-  // Syncs this mount with the external resume API; render logic alone cannot start the network request.
-  useEffect(() => {
-    void input.requestStoppedSandboxResume();
-  }, [input.requestStoppedSandboxResume]);
-
-  return null;
 }
 
 function createEmptyComposerViewModel(): ChatComposerViewModel {

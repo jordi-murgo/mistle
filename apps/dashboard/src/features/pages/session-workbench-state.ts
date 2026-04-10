@@ -13,11 +13,30 @@ export type SandboxAutomationConversation = {
 export type WorkbenchEntryPhase =
   | "connecting"
   | "loading"
-  | "manual_resume_required"
   | "ready"
   | "resume_pending"
   | "sandbox_failed"
+  | "sandbox_stopped"
   | "sandbox_starting";
+
+export type SessionWorkbenchStatusAlert = {
+  title: string;
+  description: string;
+};
+
+export type SessionWorkbenchStatus =
+  | {
+      kind: "connected";
+      alert: SessionWorkbenchStatusAlert | null;
+    }
+  | {
+      kind: "error";
+      alert: SessionWorkbenchStatusAlert | null;
+    }
+  | {
+      kind: "not_connected";
+      alert: SessionWorkbenchStatusAlert | null;
+    };
 
 export function shouldWaitForAutomationSessionThread(input: {
   sandboxStatus: WorkbenchSandboxLifecycleStatus;
@@ -98,39 +117,6 @@ export function resolveTrustedSandboxStatus(input: {
   return input.sandboxStatusReadState === "ready" ? input.sandboxStatus : null;
 }
 
-export function shouldShowResumeInFlightState(input: {
-  hasAttemptedInitialStoppedResume: boolean;
-  resumeActionErrorMessage: string | null;
-  shouldAttemptInitialStoppedResume: boolean;
-  isResumingStoppedSandbox: boolean;
-  sandboxStatus: SandboxLifecycleStatus | null;
-}): boolean {
-  return (
-    input.sandboxStatus === "stopped" &&
-    (input.isResumingStoppedSandbox ||
-      input.shouldAttemptInitialStoppedResume ||
-      (input.hasAttemptedInitialStoppedResume && input.resumeActionErrorMessage === null))
-  );
-}
-
-export function shouldPollStoppedSandboxStatus(input: {
-  sandboxStatus: SandboxLifecycleStatus | null;
-  hasAttemptedInitialStoppedResume: boolean;
-  isResumingStoppedSandbox: boolean;
-  resumeActionErrorMessage: string | null;
-}): boolean {
-  return (
-    input.sandboxStatus === "stopped" &&
-    shouldShowResumeInFlightState({
-      hasAttemptedInitialStoppedResume: input.hasAttemptedInitialStoppedResume,
-      resumeActionErrorMessage: input.resumeActionErrorMessage,
-      shouldAttemptInitialStoppedResume: false,
-      isResumingStoppedSandbox: input.isResumingStoppedSandbox,
-      sandboxStatus: input.sandboxStatus,
-    })
-  );
-}
-
 export function resolveWorkbenchEntryPhase(input: {
   connectedSession: boolean;
   hasResumeInFlightState: boolean;
@@ -149,7 +135,7 @@ export function resolveWorkbenchEntryPhase(input: {
   }
 
   if (input.sandboxStatus === "stopped") {
-    return input.hasResumeInFlightState ? "resume_pending" : "manual_resume_required";
+    return input.hasResumeInFlightState ? "resume_pending" : "sandbox_stopped";
   }
 
   return "loading";
@@ -162,19 +148,19 @@ export function resolveSandboxLifecycleStatusForWorkbenchEntryPhase(
     return "failed";
   }
 
-  if (phase === "resume_pending") {
-    return "resuming";
-  }
-
   if (phase === "sandbox_starting") {
     return "starting";
+  }
+
+  if (phase === "resume_pending") {
+    return "resuming";
   }
 
   if (phase === "connecting" || phase === "ready") {
     return "running";
   }
 
-  if (phase === "manual_resume_required") {
+  if (phase === "sandbox_stopped") {
     return "stopped";
   }
 
@@ -182,15 +168,99 @@ export function resolveSandboxLifecycleStatusForWorkbenchEntryPhase(
 }
 
 export function resolveStoppedSessionMessageForWorkbenchEntryPhase(input: {
+  autoResumeErrorMessage: string | null;
   phase: WorkbenchEntryPhase;
-  resumeActionErrorMessage: string | null;
 }): string | null {
-  if (input.phase !== "manual_resume_required") {
+  if (input.phase !== "sandbox_stopped") {
     return null;
   }
 
   return (
-    input.resumeActionErrorMessage ??
-    "This sandbox is stopped. Resume it to reconnect chat and terminal."
+    input.autoResumeErrorMessage ?? "This sandbox is stopped. Chat and terminal are unavailable."
   );
+}
+
+export function resolveSessionWorkbenchStatus(input: {
+  sandboxStatusReadState: SandboxStatusReadState;
+  sandboxLifecycleStatus: WorkbenchSandboxLifecycleStatus;
+  lifecycleErrorMessage: string | null;
+  reconnectMessage: string | null;
+  sandboxFailureMessage: string | null;
+  stoppedSessionMessage: string | null;
+}): SessionWorkbenchStatus {
+  if (input.lifecycleErrorMessage !== null) {
+    return {
+      kind: "error",
+      alert: {
+        title: "Session connection error",
+        description: input.lifecycleErrorMessage,
+      },
+    };
+  }
+
+  if (input.sandboxFailureMessage !== null) {
+    return {
+      kind: "error",
+      alert: {
+        title: "Sandbox failed",
+        description: input.sandboxFailureMessage,
+      },
+    };
+  }
+
+  if (input.sandboxLifecycleStatus === "failed") {
+    return {
+      kind: "error",
+      alert: null,
+    };
+  }
+
+  if (input.stoppedSessionMessage !== null) {
+    return {
+      kind: "not_connected",
+      alert: {
+        title: "Stopped sandbox",
+        description: input.stoppedSessionMessage,
+      },
+    };
+  }
+
+  if (input.reconnectMessage !== null) {
+    if (input.sandboxLifecycleStatus === "running") {
+      return {
+        kind: "connected",
+        alert: {
+          title: "Reconnecting session",
+          description: input.reconnectMessage,
+        },
+      };
+    }
+
+    return {
+      kind: "not_connected",
+      alert: {
+        title: "Reconnecting session",
+        description: input.reconnectMessage,
+      },
+    };
+  }
+
+  if (
+    input.sandboxStatusReadState === "loading" ||
+    input.sandboxLifecycleStatus === null ||
+    input.sandboxLifecycleStatus === "pending" ||
+    input.sandboxLifecycleStatus === "starting" ||
+    input.sandboxLifecycleStatus === "resuming" ||
+    input.sandboxLifecycleStatus === "stopped"
+  ) {
+    return {
+      kind: "not_connected",
+      alert: null,
+    };
+  }
+
+  return {
+    kind: "connected",
+    alert: null,
+  };
 }

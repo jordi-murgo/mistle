@@ -21,10 +21,9 @@ import {
   resolveAutomationSessionPreparationTimeoutDelayMs,
   resolveStoppedSessionMessageForWorkbenchEntryPhase,
   resolveWorkbenchEntryPhase,
-  shouldPollStoppedSandboxStatus,
-  shouldShowResumeInFlightState,
   shouldWaitForAutomationSessionThread,
 } from "./session-workbench-state.js";
+import type { SessionWorkbenchStatus } from "./session-workbench-state.js";
 import { useSessionBranchDiff } from "./use-session-branch-diff.js";
 import { useSessionDiffWorkbenchState } from "./use-session-diff-workbench-state.js";
 import { useSessionMainPanelHandoff } from "./use-session-main-panel-handoff.js";
@@ -38,16 +37,9 @@ import {
   getSandboxInstanceStatusQueryKey,
   useSessionWorkbenchLifecycleState,
 } from "./use-session-workbench-lifecycle-state.js";
-import {
-  isActiveResumeRequest,
-  seedSandboxInstanceStatusQuery,
-} from "./use-session-workbench-stopped-resume.js";
 import { useSessionWorkbenchTransport } from "./use-session-workbench-transport.js";
 
 type SessionWorkbenchState = {
-  sandboxStatusReadState: ReturnType<
-    typeof useSessionWorkbenchLifecycleState
-  >["sandboxStatusReadState"];
   connectionReadiness: {
     canConnect: boolean;
     reason:
@@ -60,25 +52,14 @@ type SessionWorkbenchState = {
       | "stopped"
       | "unknown";
   };
-  stoppedSessionState: {
-    message: string | null;
-    requiresManualResume: boolean;
-  };
-  isResumingStoppedSandbox: boolean;
-  sessionReconnectState: {
-    isRecovering: boolean;
-    message: string | null;
-  };
-  shouldAutoResumeOnEntry: boolean;
+  stoppedSessionMessage: string | null;
+  workbenchStatus: SessionWorkbenchStatus;
   ptyState: ReturnType<typeof useSandboxPtyState>;
-  requestStoppedSandboxResume: () => Promise<void>;
   sandboxLifecycleStatus: ReturnType<
     typeof useSessionWorkbenchLifecycleState
   >["sandboxLifecycleStatus"];
-  sandboxFailureMessage: string | null;
   sandboxStatusQuery: ReturnType<typeof useSessionWorkbenchLifecycleState>["sandboxStatusQuery"];
   lifecycleStep: ReturnType<typeof useCodexSessionState>["lifecycle"]["step"];
-  lifecycleErrorMessage: string | null;
   cliPtyState: ReturnType<typeof useSandboxPtyState>;
   primaryPanelState: {
     transitionState: MainPanelTransitionState;
@@ -133,7 +114,6 @@ export {
   hasAutomationSessionPreparationTimedOut,
   hasFreshSandboxStatusRead,
   hasFreshSandboxStatusReadSinceRecoveryBoundary,
-  isActiveResumeRequest,
   resolveSandboxStatusReadState,
   reduceCodexRecoveryState,
   resolveAutomationSessionPreparationTimeoutDelayMs,
@@ -141,9 +121,6 @@ export {
   resolveCodexReconnectMessage,
   resolveStoppedSessionMessageForWorkbenchEntryPhase,
   resolveWorkbenchEntryPhase,
-  seedSandboxInstanceStatusQuery,
-  shouldPollStoppedSandboxStatus,
-  shouldShowResumeInFlightState,
   shouldWaitForAutomationSessionThread,
 };
 export type {
@@ -219,7 +196,7 @@ export function useSessionWorkbenchController(input: {
       : sessionSnapshot === null
         ? "CLI is available after the session is connected."
         : !workbenchLifecycleState.connectionReadiness.canConnect
-          ? (workbenchLifecycleState.stoppedSessionState.message ??
+          ? (workbenchLifecycleState.stoppedSessionMessage ??
             "CLI is available only when the sandbox is running.")
           : handoff.transitionState !== "stable_chat"
             ? "Finish the current primary-panel transition before opening Codex CLI."
@@ -239,20 +216,14 @@ export function useSessionWorkbenchController(input: {
 
   return {
     workbench: {
-      sandboxStatusReadState: workbenchLifecycleState.sandboxStatusReadState,
       connectionReadiness: workbenchLifecycleState.connectionReadiness,
-      stoppedSessionState: workbenchLifecycleState.stoppedSessionState,
-      isResumingStoppedSandbox: workbenchLifecycleState.isResumingStoppedSandbox,
-      sessionReconnectState: workbenchLifecycleState.sessionReconnectState,
-      shouldAutoResumeOnEntry: workbenchLifecycleState.shouldAutoResumeOnEntry,
+      stoppedSessionMessage: workbenchLifecycleState.stoppedSessionMessage,
+      workbenchStatus: workbenchLifecycleState.workbenchStatus,
       ptyState,
       cliPtyState,
-      requestStoppedSandboxResume: workbenchLifecycleState.requestStoppedSandboxResume,
       sandboxLifecycleStatus: workbenchLifecycleState.sandboxLifecycleStatus,
-      sandboxFailureMessage: workbenchLifecycleState.sandboxFailureMessage,
       sandboxStatusQuery: workbenchLifecycleState.sandboxStatusQuery,
       lifecycleStep: lifecycle.step,
-      lifecycleErrorMessage: workbenchLifecycleState.lifecycleErrorMessage,
       primaryPanelState: {
         transitionState: handoff.transitionState,
         canEnterCli: enterCliDisabledReason === null,

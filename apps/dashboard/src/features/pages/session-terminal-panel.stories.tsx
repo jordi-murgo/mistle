@@ -101,10 +101,9 @@ function StoryTerminalWorkbench(input: TerminalStoryScenario): React.JSX.Element
   }, [errorMessage, lifecycleState, outputChunks]);
 
   return renderSessionWorkbenchContentStory({
-    alerts: [],
+    alert: null,
     bottomPanel: (
       <SessionTerminalPanel
-        isResumingSandbox={false}
         isConnectionReady={true}
         isVisible={isTerminalVisible}
         onHide={() => {
@@ -112,9 +111,6 @@ function StoryTerminalWorkbench(input: TerminalStoryScenario): React.JSX.Element
         }}
         onDisconnectTerminal={() => {
           setIsTerminalVisible(false);
-        }}
-        onRequestSandboxResume={async () => {
-          return;
         }}
         ptyState={ptyState}
         sandboxStatus="running"

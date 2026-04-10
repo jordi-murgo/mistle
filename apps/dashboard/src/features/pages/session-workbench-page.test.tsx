@@ -7,13 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { createTestQueryClient } from "../../test-support/query-client.js";
 import { AppShellHeaderActionsContext } from "../shell/app-shell-header-actions.js";
-import {
-  hasSessionTopAlert,
-  resolveSessionWorkbenchHeaderStatusUi,
-  SessionWorkbenchPage,
-  shouldShowSessionWorkbenchHeaderStatusLabel,
-  shouldShowResumeAction,
-} from "./session-workbench-page.js";
+import { SessionWorkbenchPage } from "./session-workbench-page.js";
 import { getSandboxInstanceStatusQueryKey } from "./use-session-workbench-controller.js";
 
 function renderSessionWorkbenchPage(input?: {
@@ -62,110 +56,5 @@ describe("SessionWorkbenchPage", () => {
     renderSessionWorkbenchPage();
 
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("maps loading read state to the loading badge regardless of lifecycle value", () => {
-    expect(
-      resolveSessionWorkbenchHeaderStatusUi({
-        sandboxLifecycleStatus: "running",
-        sandboxStatusReadState: "loading",
-      }),
-    ).toEqual({
-      label: "Not connected",
-      variant: "outline",
-    });
-  });
-
-  it("maps ready running state to the connected badge", () => {
-    expect(
-      resolveSessionWorkbenchHeaderStatusUi({
-        sandboxLifecycleStatus: "running",
-        sandboxStatusReadState: "ready",
-      }),
-    ).toEqual({
-      label: "Connected",
-      variant: "secondary",
-      className: "bg-emerald-600 text-white hover:bg-emerald-600/90",
-    });
-  });
-
-  it("maps ready non-running states to the not connected badge", () => {
-    expect(
-      resolveSessionWorkbenchHeaderStatusUi({
-        sandboxLifecycleStatus: "starting",
-        sandboxStatusReadState: "ready",
-      }),
-    ).toEqual({
-      label: "Not connected",
-      variant: "outline",
-    });
-  });
-
-  it("maps failed state to the error badge", () => {
-    expect(
-      resolveSessionWorkbenchHeaderStatusUi({
-        sandboxLifecycleStatus: "failed",
-        sandboxStatusReadState: "ready",
-      }),
-    ).toEqual({
-      label: "Error",
-      variant: "destructive",
-    });
-  });
-
-  it("shows visible header text only for the error badge", () => {
-    expect(
-      shouldShowSessionWorkbenchHeaderStatusLabel({
-        headerStatusUi: {
-          label: "Connected",
-          variant: "secondary",
-        },
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldShowSessionWorkbenchHeaderStatusLabel({
-        headerStatusUi: {
-          label: "Not connected",
-          variant: "outline",
-        },
-      }),
-    ).toBe(false);
-
-    expect(
-      shouldShowSessionWorkbenchHeaderStatusLabel({
-        headerStatusUi: {
-          label: "Error",
-          variant: "destructive",
-        },
-      }),
-    ).toBe(true);
-  });
-
-  it("shows top alerts only when one of the alert sources is present", () => {
-    expect(
-      hasSessionTopAlert({
-        hasSandboxStatusError: false,
-        lifecycleErrorMessage: null,
-        reconnectMessage: null,
-        sandboxFailureMessage: null,
-        stoppedSessionMessage: null,
-      }),
-    ).toBe(false);
-
-    expect(
-      hasSessionTopAlert({
-        hasSandboxStatusError: false,
-        lifecycleErrorMessage: null,
-        reconnectMessage: "Reconnecting session.",
-        sandboxFailureMessage: null,
-        stoppedSessionMessage: null,
-      }),
-    ).toBe(true);
-  });
-
-  it("shows the resume action only when manual resume is required", () => {
-    expect(shouldShowResumeAction({ requiresManualResume: true })).toBe(true);
-    expect(shouldShowResumeAction({ requiresManualResume: false })).toBe(false);
   });
 });

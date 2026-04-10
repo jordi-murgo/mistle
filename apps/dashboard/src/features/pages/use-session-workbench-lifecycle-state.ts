@@ -7,7 +7,7 @@ import {
   resolveSessionConnectionReadiness,
   shouldAutoConnectSession,
 } from "../sessions/session-connect-policy.js";
-import { getSandboxInstanceStatus } from "../sessions/sessions-service.js";
+import { getSandboxInstanceStatus, resumeSandboxInstance } from "../sessions/sessions-service.js";
 import type { useSandboxPtyState } from "../sessions/use-sandbox-pty-state.js";
 import { TopLoadingBarQueryMeta } from "../shell/top-loading-bar-query-meta.js";
 import { type MainPanelTransitionState } from "./session-main-panel-handoff-state.js";
@@ -16,17 +16,15 @@ import {
   hasFreshSandboxStatusRead,
   hasFreshSandboxStatusReadSinceRecoveryBoundary,
   resolveAutomationSessionPreparationTimeoutDelayMs,
+  resolveSessionWorkbenchStatus,
   resolveSandboxLifecycleStatusForWorkbenchEntryPhase,
   resolveSandboxStatusReadState,
   resolveStoppedSessionMessageForWorkbenchEntryPhase,
   resolveTrustedSandboxStatus,
   resolveWorkbenchEntryPhase,
-  shouldPollStoppedSandboxStatus,
-  shouldShowResumeInFlightState,
   shouldWaitForAutomationSessionThread,
 } from "./session-workbench-state.js";
 import { useSessionWorkbenchCodexRecovery } from "./use-session-workbench-codex-recovery.js";
-import { useSessionWorkbenchStoppedResume } from "./use-session-workbench-stopped-resume.js";
 
 const AutomationSessionStatusRefetchIntervalMs = 2_000;
 const AutomationSessionPreparationTimeoutMessage =
@@ -57,6 +55,9 @@ export function useSessionWorkbenchLifecycleState(input: {
   queryClient: QueryClient;
 }) {
   const [hasAttemptedAutoConnect, setHasAttemptedAutoConnect] = useState(false);
+  const [hasAttemptedAutoResume, setHasAttemptedAutoResume] = useState(false);
+  const [isAutoResumingStoppedSandbox, setIsAutoResumingStoppedSandbox] = useState(false);
+  const [autoResumeErrorMessage, setAutoResumeErrorMessage] = useState<string | null>(null);
   const [automationPendingSinceMs, setAutomationPendingSinceMs] = useState<number | null>(null);
   const [automationPendingErrorMessage, setAutomationPendingErrorMessage] = useState<string | null>(
     null,
@@ -78,25 +79,6 @@ export function useSessionWorkbenchLifecycleState(input: {
     sessionConnectionState,
   } = input.lifecycle;
   const { disconnectPty } = input.ptyState.actions;
-  const handleResumeSucceeded = useCallback(() => {
-    setHasAttemptedAutoConnect(false);
-  }, []);
-  const refetchSandboxStatus = useCallback(
-    () =>
-      input.queryClient.refetchQueries({
-        queryKey: getSandboxInstanceStatusQueryKey(input.sandboxInstanceId),
-        exact: true,
-      }),
-    [input.queryClient, input.sandboxInstanceId],
-  );
-  const stoppedResumeState = useSessionWorkbenchStoppedResume({
-    clearLifecycleErrorMessage,
-    onResumeSucceeded: handleResumeSucceeded,
-    queryClient: input.queryClient,
-    refetchSandboxStatus,
-    sandboxInstanceId: input.sandboxInstanceId,
-  });
-
   const sandboxStatusQuery = useQuery({
     queryKey: getSandboxInstanceStatusQueryKey(input.sandboxInstanceId),
     meta: {
@@ -127,14 +109,7 @@ export function useSessionWorkbenchLifecycleState(input: {
         return AutomationSessionStatusRefetchIntervalMs;
       }
 
-      if (
-        shouldPollStoppedSandboxStatus({
-          sandboxStatus: status ?? null,
-          hasAttemptedInitialStoppedResume: stoppedResumeState.hasAttemptedInitialStoppedResume,
-          isResumingStoppedSandbox: stoppedResumeState.isResumingStoppedSandbox,
-          resumeActionErrorMessage: stoppedResumeState.resumeActionErrorMessage,
-        })
-      ) {
+      if (isAutoResumingStoppedSandbox && status === "stopped") {
         return 1_000;
       }
 
@@ -166,26 +141,13 @@ export function useSessionWorkbenchLifecycleState(input: {
     sandboxStatusReadState,
     sandboxStatus: sandboxStatusQuery.data?.status ?? null,
   });
-  const shouldAttemptRecoverableStoppedResume =
+  const shouldAttemptAutoResume =
     input.sandboxInstanceId !== null &&
     trustedSandboxStatus === "stopped" &&
-    recoverableDisconnect !== null;
-  const shouldAttemptInitialStoppedResume =
-    input.sandboxInstanceId !== null &&
-    trustedSandboxStatus === "stopped" &&
-    recoverableDisconnect === null &&
-    !stoppedResumeState.hasAttemptedInitialStoppedResume;
-  const isShowingResumeInFlightState = shouldShowResumeInFlightState({
-    hasAttemptedInitialStoppedResume: stoppedResumeState.hasAttemptedInitialStoppedResume,
-    resumeActionErrorMessage: stoppedResumeState.resumeActionErrorMessage,
-    shouldAttemptInitialStoppedResume:
-      shouldAttemptInitialStoppedResume || shouldAttemptRecoverableStoppedResume,
-    isResumingStoppedSandbox: stoppedResumeState.isResumingStoppedSandbox,
-    sandboxStatus: trustedSandboxStatus,
-  });
+    !hasAttemptedAutoResume;
   const workbenchEntryPhase = resolveWorkbenchEntryPhase({
     connectedSession: sessionSnapshot !== null,
-    hasResumeInFlightState: isShowingResumeInFlightState,
+    hasResumeInFlightState: shouldAttemptAutoResume || isAutoResumingStoppedSandbox,
     sandboxStatus: trustedSandboxStatus,
   });
   const displaySandboxLifecycleStatus =
@@ -202,13 +164,9 @@ export function useSessionWorkbenchLifecycleState(input: {
     isStatusPending: sandboxStatusQuery.isPending,
   });
   const stoppedSessionMessage = resolveStoppedSessionMessageForWorkbenchEntryPhase({
+    autoResumeErrorMessage,
     phase: workbenchEntryPhase,
-    resumeActionErrorMessage: stoppedResumeState.resumeActionErrorMessage,
   });
-  const stoppedSessionState = {
-    message: stoppedSessionMessage,
-    requiresManualResume: stoppedSessionMessage !== null,
-  };
 
   useEffect(() => {
     return () => {
@@ -220,6 +178,9 @@ export function useSessionWorkbenchLifecycleState(input: {
 
   useEffect(() => {
     setHasAttemptedAutoConnect(false);
+    setHasAttemptedAutoResume(false);
+    setIsAutoResumingStoppedSandbox(false);
+    setAutoResumeErrorMessage(null);
     setAutomationPendingSinceMs(null);
     setAutomationPendingErrorMessage(null);
     initialSandboxStatusDataUpdatedAtRef.current = null;
@@ -231,6 +192,63 @@ export function useSessionWorkbenchLifecycleState(input: {
       setHasAttemptedAutoConnect(false);
     }
   }, [input.mainPanelTransitionState]);
+
+  useEffect(() => {
+    if (!shouldAttemptAutoResume || input.sandboxInstanceId === null) {
+      return;
+    }
+
+    let isActive = true;
+    setHasAttemptedAutoResume(true);
+    setIsAutoResumingStoppedSandbox(true);
+    setAutoResumeErrorMessage(null);
+    clearLifecycleErrorMessage();
+
+    void resumeSandboxInstance({
+      instanceId: input.sandboxInstanceId,
+    })
+      .then((sandboxStatus) => {
+        if (!isActive) {
+          return;
+        }
+
+        input.queryClient.setQueryData(
+          getSandboxInstanceStatusQueryKey(input.sandboxInstanceId),
+          sandboxStatus,
+        );
+        setHasAttemptedAutoConnect(false);
+        clearLifecycleErrorMessage();
+        void sandboxStatusQuery.refetch().catch(() => {});
+      })
+      .catch((error: unknown) => {
+        if (!isActive) {
+          return;
+        }
+
+        setAutoResumeErrorMessage(
+          error instanceof Error && error.message.length > 0
+            ? error.message
+            : "Could not resume sandbox session.",
+        );
+      })
+      .finally(() => {
+        if (!isActive) {
+          return;
+        }
+
+        setIsAutoResumingStoppedSandbox(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    clearLifecycleErrorMessage,
+    input.queryClient,
+    input.sandboxInstanceId,
+    sandboxStatusQuery,
+    shouldAttemptAutoResume,
+  ]);
 
   useEffect(() => {
     if (!isWaitingForAutomationThread) {
@@ -361,27 +379,23 @@ export function useSessionWorkbenchLifecycleState(input: {
   ]);
 
   const sandboxFailureMessage = sandboxStatusQuery.data?.failureMessage ?? null;
-  const requestStoppedSandboxResume = useCallback(
-    () =>
-      stoppedResumeState.requestStoppedSandboxResume({
-        trustedSandboxStatus,
-      }),
-    [stoppedResumeState.requestStoppedSandboxResume, trustedSandboxStatus],
-  );
+  const sessionReconnectMessage = codexRecoveryState.sessionReconnectState.message;
+  const workbenchStatus = resolveSessionWorkbenchStatus({
+    sandboxStatusReadState,
+    sandboxLifecycleStatus: displaySandboxLifecycleStatus,
+    lifecycleErrorMessage: resolvedLifecycleErrorMessage,
+    reconnectMessage: sessionReconnectMessage,
+    sandboxFailureMessage,
+    stoppedSessionMessage,
+  });
 
   return {
     sessionSnapshot,
     sandboxStatusReadState,
     connectionReadiness,
-    isResumingStoppedSandbox: isShowingResumeInFlightState,
-    requestStoppedSandboxResume,
     sandboxLifecycleStatus: displaySandboxLifecycleStatus,
-    sandboxFailureMessage,
+    workbenchStatus,
     sandboxStatusQuery,
-    sessionReconnectState: codexRecoveryState.sessionReconnectState,
-    shouldAutoResumeOnEntry:
-      shouldAttemptInitialStoppedResume || shouldAttemptRecoverableStoppedResume,
-    lifecycleErrorMessage: resolvedLifecycleErrorMessage,
-    stoppedSessionState,
+    stoppedSessionMessage,
   };
 }
