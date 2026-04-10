@@ -8,6 +8,7 @@ import type { OpenWorkflow } from "openworkflow";
 import { createAuthRoutes } from "./auth/routes.js";
 import { createAutomationWebhooksRoutes } from "./automation-webhooks/index.js";
 import { createHomeRoutes } from "./home/index.js";
+import { createIntegrationCallbacksRoutes } from "./integration-callbacks/index.js";
 import { createIntegrationConnectionsRoutes } from "./integration-connections/index.js";
 import { createIntegrationTargetsRoutes } from "./integration-targets/index.js";
 import { createIntegrationWebhooksRoutes } from "./integration-webhooks/index.js";
@@ -17,6 +18,7 @@ import { createInternalSandboxRuntimeRoutes } from "./internal/sandbox-runtime/i
 import { createMeRoutes } from "./me/index.js";
 import { createAppContextMiddleware } from "./middleware/app-context.js";
 import { createCorsMiddleware } from "./middleware/cors.js";
+import { withActiveOrganizationAccess } from "./middleware/with-active-organization-access.js";
 import { withAuthSession } from "./middleware/with-auth-session.js";
 import { createOrganizationsRoutes } from "./organizations/index.js";
 import { createSandboxInstancesRoutes } from "./sandbox-instances/index.js";
@@ -106,19 +108,23 @@ export function registerApiRouteModules(app: ControlPlaneApp): void {
 
 export function registerPublicApiRouteModules(app: ControlPlaneApp): void {
   const authRoutes = createAuthRoutes();
-  const automationWebhooksRoutes = withAuthSession(createAutomationWebhooksRoutes());
-  const homeRoutes = withAuthSession(createHomeRoutes());
-  const integrationConnectionsRoutes = createIntegrationConnectionsRoutes();
+  const automationWebhooksRoutes = withActiveOrganizationAccess(createAutomationWebhooksRoutes());
+  const homeRoutes = withActiveOrganizationAccess(createHomeRoutes());
+  const integrationCallbacksRoutes = createIntegrationCallbacksRoutes();
+  const integrationConnectionsRoutes = withActiveOrganizationAccess(
+    createIntegrationConnectionsRoutes(),
+  );
   const integrationTargetsRoutes = withAuthSession(createIntegrationTargetsRoutes());
   const integrationWebhooksRoutes = createIntegrationWebhooksRoutes();
   const meRoutes = withAuthSession(createMeRoutes());
-  const organizationsRoutes = withAuthSession(createOrganizationsRoutes());
-  const sandboxInstancesRoutes = withAuthSession(createSandboxInstancesRoutes());
-  const sandboxProfilesRoutes = withAuthSession(createSandboxProfilesRoutes());
+  const organizationsRoutes = withActiveOrganizationAccess(createOrganizationsRoutes());
+  const sandboxInstancesRoutes = withActiveOrganizationAccess(createSandboxInstancesRoutes());
+  const sandboxProfilesRoutes = withActiveOrganizationAccess(createSandboxProfilesRoutes());
 
   app.route(authRoutes.basePath, authRoutes.routes);
   app.route(automationWebhooksRoutes.basePath, automationWebhooksRoutes.routes);
   app.route(homeRoutes.basePath, homeRoutes.routes);
+  app.route(integrationCallbacksRoutes.basePath, integrationCallbacksRoutes.routes);
   app.route(integrationConnectionsRoutes.basePath, integrationConnectionsRoutes.routes);
   app.route(integrationTargetsRoutes.basePath, integrationTargetsRoutes.routes);
   app.route(integrationWebhooksRoutes.basePath, integrationWebhooksRoutes.routes);
