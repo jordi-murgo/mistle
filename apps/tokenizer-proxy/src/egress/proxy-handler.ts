@@ -1,16 +1,20 @@
 import { ControlPlaneInternalClient } from "@mistle/control-plane-internal-client";
 import type { EgressGrantConfig } from "@mistle/sandbox-egress-auth";
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
+import { Hash } from "@smithy/hash-node";
+import { HttpRequest as SmithyHttpRequest } from "@smithy/protocol-http";
+import { SignatureV4 } from "@smithy/signature-v4";
 import type { Context } from "hono";
 
 import { logger } from "../logger.js";
 import type { AppContextBindings } from "../types.js";
 import { EGRESS_BASE_PATH, EgressRequestHeaders } from "./constants.js";
-import { CredentialCache } from "./credential-cache.js";
+import { CredentialCache, type CachedCredential } from "./credential-cache.js";
 import {
   authorizeEgressGrant,
   EgressGrantRequestError,
   type AuthorizedEgressGrant,
+  type StaticAuthorizedEgressGrant,
 } from "./grant.js";
 import {
   createEgressTelemetryBaseAttributes,
@@ -27,6 +31,8 @@ type ErrorResponse = {
   code: string;
   message: string;
 };
+
+type AwsSessionCredential = Extract<CachedCredential, { kind: "aws_session" }>;
 
 const EgressTracer = trace.getTracer("@mistle/tokenizer-proxy");
 
@@ -146,10 +152,50 @@ function toBearerAuthorizationValue(secretValue: string): string {
   return `Bearer ${secretValue}`;
 }
 
+function resolveStaticCredentialValueOrThrow(input: {
+  credential: CachedCredential;
+  context: string;
+}): string {
+  if (input.credential.kind !== "value") {
+    throw new Error(`${input.context} requires a string credential value.`);
+  }
+
+  return input.credential.value;
+}
+
+function resolveAwsSessionCredentialOrThrow(input: {
+  credential: CachedCredential;
+  context: string;
+}): AwsSessionCredential {
+  if (input.credential.kind !== "aws_session") {
+    throw new Error(`${input.context} requires AWS session credentials.`);
+  }
+
+  return input.credential;
+}
+
+function resolveStaticAuthInjectionOrThrow(egressGrant: AuthorizedEgressGrant): {
+  authInjectionType: StaticAuthorizedEgressGrant["authInjectionType"];
+  authInjectionTarget: string;
+  authInjectionUsername?: string;
+} {
+  if (!("authInjectionTarget" in egressGrant)) {
+    throw new Error("HTTP egress auth injection requires a concrete injection target.");
+  }
+
+  return {
+    authInjectionType: egressGrant.authInjectionType,
+    authInjectionTarget: egressGrant.authInjectionTarget,
+    ...(egressGrant.authInjectionType !== "basic" || egressGrant.authInjectionUsername === undefined
+      ? {}
+      : { authInjectionUsername: egressGrant.authInjectionUsername }),
+  };
+}
+
 function applyAuthInjection(input: {
   upstreamUrl: URL;
   outgoingHeaders: Headers;
-  authInjectionType: AuthorizedEgressGrant["authInjectionType"];
+  authInjectionType: StaticAuthorizedEgressGrant["authInjectionType"];
   authInjectionTarget: string;
   authInjectionUsername?: string;
   secretValue: string;
@@ -188,6 +234,86 @@ function applyAdditionalHeaders(input: {
   additionalHeaders: Readonly<Record<string, string>>;
 }): void {
   for (const [headerName, headerValue] of Object.entries(input.additionalHeaders)) {
+    input.outgoingHeaders.set(headerName, headerValue);
+  }
+}
+
+function toQueryParameterBag(searchParams: URLSearchParams): Record<string, string | string[]> {
+  const queryParameters: Record<string, string | string[]> = {};
+
+  for (const [queryKey, queryValue] of searchParams.entries()) {
+    const existingValue = queryParameters[queryKey];
+    if (existingValue === undefined) {
+      queryParameters[queryKey] = queryValue;
+      continue;
+    }
+
+    if (typeof existingValue === "string") {
+      queryParameters[queryKey] = [existingValue, queryValue];
+      continue;
+    }
+
+    existingValue.push(queryValue);
+  }
+
+  return queryParameters;
+}
+
+function resolveUpstreamPort(upstreamUrl: URL): number | undefined {
+  if (upstreamUrl.port.length === 0) {
+    return undefined;
+  }
+
+  const port = Number.parseInt(upstreamUrl.port, 10);
+  if (Number.isNaN(port)) {
+    throw new Error(`Upstream URL port '${upstreamUrl.port}' is invalid.`);
+  }
+
+  return port;
+}
+
+async function applyAwsSigV4AuthInjection(input: {
+  method: string;
+  upstreamUrl: URL;
+  outgoingHeaders: Headers;
+  outgoingBody: ArrayBuffer | undefined;
+  service: string;
+  region: string;
+  credential: AwsSessionCredential;
+}): Promise<void> {
+  const signer = new SignatureV4({
+    credentials: {
+      accessKeyId: input.credential.accessKeyId,
+      secretAccessKey: input.credential.secretAccessKey,
+      sessionToken: input.credential.sessionToken,
+    },
+    region: input.region,
+    service: input.service,
+    sha256: Hash.bind(null, "sha256"),
+    ...(input.service === "s3" ? { uriEscapePath: false } : {}),
+  });
+  const port = resolveUpstreamPort(input.upstreamUrl);
+  const headersToSign = new Headers(input.outgoingHeaders);
+  headersToSign.set("host", input.upstreamUrl.host);
+
+  const signedRequest = await signer.sign(
+    new SmithyHttpRequest({
+      method: input.method,
+      protocol: input.upstreamUrl.protocol,
+      hostname: input.upstreamUrl.hostname,
+      path: input.upstreamUrl.pathname,
+      query: toQueryParameterBag(input.upstreamUrl.searchParams),
+      headers: Object.fromEntries(headersToSign.entries()),
+      ...(port === undefined ? {} : { port }),
+      ...(input.outgoingBody === undefined ? {} : { body: new Uint8Array(input.outgoingBody) }),
+    }),
+  );
+
+  for (const headerName of [...input.outgoingHeaders.keys()]) {
+    input.outgoingHeaders.delete(headerName);
+  }
+
+  for (const [headerName, headerValue] of Object.entries(signedRequest.headers)) {
     input.outgoingHeaders.set(headerName, headerValue);
   }
 }
@@ -388,12 +514,12 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
             : { resolverKey: egressGrant.resolverKey }),
         };
 
-        let resolvedCredentialValue = input.credentialCache.get(cacheKey);
-        span.setAttribute("mistle.credential.cache_hit", resolvedCredentialValue !== undefined);
+        let resolvedCredential = input.credentialCache.get(cacheKey);
+        span.setAttribute("mistle.credential.cache_hit", resolvedCredential !== undefined);
 
-        if (resolvedCredentialValue === undefined) {
+        if (resolvedCredential === undefined) {
           try {
-            const resolvedCredentialValueFromControlPlane = await EgressTracer.startActiveSpan(
+            const resolvedCredentialFromControlPlane = await EgressTracer.startActiveSpan(
               "tokenizer_proxy.egress.resolve_credential",
               async (credentialSpan) => {
                 credentialSpan.setAttributes(
@@ -420,7 +546,7 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
                     });
 
                   input.credentialCache.set(cacheKey, resolvedCredential);
-                  return resolvedCredential.value;
+                  return resolvedCredential;
                 } catch (error) {
                   credentialSpan.recordException(
                     error instanceof Error ? error : new Error(String(error)),
@@ -435,7 +561,7 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
                 }
               },
             );
-            resolvedCredentialValue = resolvedCredentialValueFromControlPlane;
+            resolvedCredential = resolvedCredentialFromControlPlane;
           } catch (error) {
             logger.error(
               {
@@ -459,6 +585,10 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
           }
         }
 
+        if (resolvedCredential === undefined) {
+          throw new Error("Expected integration credential to be resolved.");
+        }
+
         const upstreamUrl = createUpstreamUrl({
           requestUrl: ctx.req.url,
           targetPath,
@@ -473,19 +603,34 @@ export function createEgressProxyHandler(input: CreateEgressProxyHandlerInput) {
             additionalHeaders: egressGrant.additionalHeaders,
           });
         }
-
-        applyAuthInjection({
-          upstreamUrl,
-          outgoingHeaders,
-          authInjectionType: egressGrant.authInjectionType,
-          authInjectionTarget: egressGrant.authInjectionTarget,
-          ...(egressGrant.authInjectionUsername === undefined
-            ? {}
-            : { authInjectionUsername: egressGrant.authInjectionUsername }),
-          secretValue: resolvedCredentialValue,
-        });
-
         const outgoingBody = await readOutgoingRequestBody(ctx);
+
+        if (egressGrant.authInjectionType === "aws_sigv4") {
+          await applyAwsSigV4AuthInjection({
+            method: ctx.req.method,
+            upstreamUrl,
+            outgoingHeaders,
+            outgoingBody,
+            service: egressGrant.authInjectionService,
+            region: egressGrant.authInjectionRegion,
+            credential: resolveAwsSessionCredentialOrThrow({
+              credential: resolvedCredential,
+              context: "HTTP SigV4 auth injection",
+            }),
+          });
+        } else {
+          const staticAuthInjection = resolveStaticAuthInjectionOrThrow(egressGrant);
+
+          applyAuthInjection({
+            upstreamUrl,
+            outgoingHeaders,
+            ...staticAuthInjection,
+            secretValue: resolveStaticCredentialValueOrThrow({
+              credential: resolvedCredential,
+              context: "HTTP egress auth injection",
+            }),
+          });
+        }
 
         let upstreamResponse: Response;
         try {
