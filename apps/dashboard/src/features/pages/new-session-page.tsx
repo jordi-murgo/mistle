@@ -26,31 +26,26 @@ import { FormPageActionBar, FormPageSection, FormPageStack } from "../shared/for
 import { FormPageFrame } from "../shared/page-frame.js";
 import { shouldClearSelectedProfile } from "./sessions-page.js";
 
-export type NewSessionPageRepositoryPreviewOption = {
+type NewSessionPageRepositoryOption = {
   value: string;
   label: string;
+  path: string;
 };
 
-const WorkspaceRootOption: NewSessionPageRepositoryPreviewOption = {
+const WorkspaceRootDescription = "workspace root";
+
+const WorkspaceRootOption: NewSessionPageRepositoryOption = {
   value: "__workspace_root__",
   label: "None",
+  path: WorkspaceRootDescription,
 };
 
-export type NewSessionPagePreviewState = {
-  initialSelectedProfileId?: string;
-  repositoryOptionsByProfileId?: Readonly<
-    Record<string, readonly NewSessionPageRepositoryPreviewOption[]>
-  >;
-};
-
-export function NewSessionPage(input?: {
-  previewState?: NewSessionPagePreviewState;
-}): React.JSX.Element {
+export function NewSessionPage(input?: { initialSelectedProfileId?: string }): React.JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [profileQueryText, setProfileQueryText] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    input?.previewState?.initialSelectedProfileId ?? null,
+    input?.initialSelectedProfileId ?? null,
   );
   const [selectedRepositoryValue, setSelectedRepositoryValue] = useState<string | null>(null);
   const [startErrorMessage, setStartErrorMessage] = useState<string | null>(null);
@@ -65,9 +60,11 @@ export function NewSessionPage(input?: {
       ? null
       : (selectableProfiles.find((profile) => profile.id === selectedProfileId) ?? null);
   const repositoryOptionsForProfile =
-    selectedProfileId === null
-      ? []
-      : [...(input?.previewState?.repositoryOptionsByProfileId?.[selectedProfileId] ?? [])];
+    selectedProfile?.repositoryOptions.map((option) => ({
+      value: option.id,
+      label: option.label,
+      path: option.path,
+    })) ?? [];
   const repositoryOptions =
     selectedProfile === null
       ? []
@@ -126,12 +123,7 @@ export function NewSessionPage(input?: {
     !selectableProfilesQuery.isError &&
     selectableProfiles.length === 0;
   const showsRepositoryPicker = selectedProfile !== null;
-  const selectedLocationPath =
-    selectedRepositoryOption === null
-      ? null
-      : selectedRepositoryOption.value === WorkspaceRootOption.value
-        ? "/root"
-        : selectedRepositoryOption.value;
+  const selectedLocationPath = selectedRepositoryOption?.path ?? null;
   const selectedNoneOption = selectedRepositoryOption?.value === WorkspaceRootOption.value;
 
   useEffect(() => {
@@ -274,7 +266,7 @@ export function NewSessionPage(input?: {
                         </FieldLabel>
                       </FieldHeader>
                       <FieldContent>
-                        <Combobox<NewSessionPageRepositoryPreviewOption>
+                        <Combobox<NewSessionPageRepositoryOption>
                           autoHighlight
                           disabled={
                             selectableProfilesQuery.isPending || startSessionMutation.isPending
@@ -316,8 +308,14 @@ export function NewSessionPage(input?: {
               {selectedLocationPath === null ? null : (
                 <div className="text-muted-foreground flex flex-col gap-1 text-sm">
                   <p>
-                    The agent will start its session in{" "}
-                    <span className="font-mono text-foreground">{selectedLocationPath}</span>.
+                    {selectedNoneOption ? (
+                      "The agent will start its session at the workspace root."
+                    ) : (
+                      <>
+                        The agent will start its session in{" "}
+                        <span className="font-mono text-foreground">{selectedLocationPath}</span>.
+                      </>
+                    )}
                   </p>
                   <p>
                     {selectedNoneOption
