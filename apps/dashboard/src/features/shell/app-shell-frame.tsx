@@ -18,6 +18,7 @@ import { SettingsBackButton } from "../settings/settings-back-button.js";
 import { SettingsSectionNav } from "../settings/settings-section-nav.js";
 import { AppShellView } from "./app-shell-view.js";
 import { OrganizationMenuTrigger } from "./organization-menu-trigger.js";
+import type { OrganizationSwitcherOption } from "./organization-switcher.js";
 import { TopLoadingBar } from "./top-loading-bar.js";
 
 function HomeNavIcon(props: { className?: string; "aria-hidden"?: boolean }): React.JSX.Element {
@@ -62,6 +63,7 @@ export function resolveAppShellFrame(input: {
   handleBackToApp: () => void;
   handleNavigateToSettings: () => void;
   handleSignOut: () => void;
+  handleSwitchOrganization: (organizationId: string) => void;
   inAutomations: boolean;
   inDashboardRoot: boolean;
   inIntegrations: boolean;
@@ -70,9 +72,13 @@ export function resolveAppShellFrame(input: {
   inSessions: boolean;
   inSettings: boolean;
   isSigningOut: boolean;
+  isSwitchingOrganization: boolean;
   locationPathname: string;
-  organizationErrorMessage: string | null;
+  organizationOptions: OrganizationSwitcherOption[];
+  organizationSummaryErrorMessage: string | null;
+  organizationSwitcherErrorMessage: string | null;
   organizationImageUrl: string | null;
+  activeOrganizationId: string;
   organizationName: string;
   pageMeta: AppPageMeta;
   signOutError: string | null;
@@ -125,12 +131,17 @@ export function resolveAppShellFrame(input: {
     sidebarFooterContent: <ErrorNotice message={input.signOutError} />,
     sidebarHeaderContent: showDedicatedSessionsSidebar ? null : (
       <OrganizationMenuTrigger
+        activeOrganizationId={input.activeOrganizationId}
         isSigningOut={input.isSigningOut}
+        isSwitchingOrganization={input.isSwitchingOrganization}
         onNavigateToSettings={input.handleNavigateToSettings}
         onSignOut={input.handleSignOut}
-        organizationErrorMessage={input.organizationErrorMessage}
+        onSwitchOrganization={input.handleSwitchOrganization}
+        organizationSummaryErrorMessage={input.organizationSummaryErrorMessage}
+        organizationSwitcherErrorMessage={input.organizationSwitcherErrorMessage}
         organizationImageUrl={input.organizationImageUrl}
         organizationName={input.organizationName}
+        organizations={input.organizationOptions}
       />
     ),
     topLoadingBar: <TopLoadingBar />,

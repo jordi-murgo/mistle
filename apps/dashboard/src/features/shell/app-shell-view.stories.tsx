@@ -233,12 +233,16 @@ const meta = {
     sidebarFooterContent: <ErrorNotice message={null} />,
     sidebarHeaderContent: (
       <OrganizationMenuTrigger
+        activeOrganizationId="org_mistle"
         isSigningOut={false}
+        onSwitchOrganization={function onSwitchOrganization() {}}
         onNavigateToSettings={function onNavigateToSettings() {}}
         onSignOut={function onSignOut() {}}
-        organizationErrorMessage={null}
+        organizationSummaryErrorMessage={null}
+        organizationSwitcherErrorMessage={null}
         organizationImageUrl={null}
         organizationName="Mistle Labs"
+        organizations={[{ id: "org_mistle", name: "Mistle Labs" }]}
       />
     ),
     topLoadingBar: <div className="h-0" />,
