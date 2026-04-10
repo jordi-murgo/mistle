@@ -32,6 +32,9 @@ const routeHandler = async (
         id: user.id,
       },
       source: "dashboard",
+      ...(body.primaryRepositoryId === undefined
+        ? {}
+        : { primaryRepositoryId: body.primaryRepositoryId }),
       ...(body.idempotencyKey === undefined ? {} : { idempotencyKey: body.idempotencyKey }),
       image: {
         imageId: sandboxConfig.defaultBaseImage,
