@@ -5,6 +5,7 @@
 //! This module owns the shared parsing, validation, frame encoding, flow-control,
 //! and JSON serialization used by those channel implementations.
 
+use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,10 @@ pub const STREAM_RESET_CODE_STREAM_WINDOW_EXHAUSTED: &str = "stream_window_exhau
 pub const STREAM_RESET_CODE_EXEC_COMMAND_FAILED: &str = "exec_command_failed";
 /// `stream.reset` code for processes streams whose snapshot cannot be produced.
 pub const STREAM_RESET_CODE_PROCESSES_SNAPSHOT_FAILED: &str = "processes_snapshot_failed";
+/// `ports.target.authorize.result` failure reason for targets that cannot be reached.
+pub const PORT_ACCESS_AUTHORIZE_REASON_PORT_UNREACHABLE: &str = "port_unreachable";
+/// `ports.target.authorize.result` failure reason for reachable non-HTTP(S) targets.
+pub const PORT_ACCESS_AUTHORIZE_REASON_UNSUPPORTED_PROTOCOL: &str = "unsupported_protocol";
 
 /// `stream.reset` code for file uploads whose declared size is exceeded.
 pub const FILE_UPLOAD_RESET_CODE_BYTE_COUNT_EXCEEDED: &str = "byte_count_exceeded";
@@ -297,6 +302,204 @@ pub struct ProcessesSnapshot {
 pub enum ProcessesStreamMessage {
     Refresh(ProcessesRefresh),
     Snapshot(ProcessesSnapshot),
+}
+
+/// Exact port target carried by `ports.*` control and transport messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortAccessTarget {
+    pub kind: String,
+    pub port: u16,
+}
+
+/// Inbound `ports.target.authorize` request from the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsTargetAuthorize {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub request_id: String,
+    pub target: PortAccessTarget,
+}
+
+/// Outbound successful `ports.target.authorize.result`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsTargetAuthorizeSuccessResult {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub request_id: String,
+    pub authorized: bool,
+    pub upstream_protocol: String,
+    pub websocket_capable: bool,
+}
+
+/// Outbound failed `ports.target.authorize.result`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsTargetAuthorizeFailureResult {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub request_id: String,
+    pub authorized: bool,
+    pub reason: String,
+}
+
+/// Repeated HTTP header values carried by `ports.http.*` messages.
+pub type RepeatedHeaderValues = BTreeMap<String, Vec<String>>;
+
+/// Inbound `ports.http.open` request from the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsHttpOpen {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub target: PortAccessTarget,
+    pub upstream_protocol: String,
+    pub request: PortsHttpRequest,
+}
+
+/// Request metadata carried by `ports.http.open`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsHttpRequest {
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
+    pub headers: RepeatedHeaderValues,
+}
+
+/// Outbound `ports.http.response.start` payload sent by sandboxd.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsHttpResponseStart {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub status: u16,
+    pub headers: RepeatedHeaderValues,
+}
+
+/// One base64-encoded HTTP body chunk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsHttpBodyChunk {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub direction: String,
+    pub bytes: String,
+    pub encoding: String,
+}
+
+/// One HTTP body completion signal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsHttpBodyEnd {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub direction: String,
+}
+
+/// Inbound `ports.ws.open` request from the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsWsOpen {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub target: PortAccessTarget,
+    pub upstream_protocol: String,
+    pub request: PortsWsRequest,
+}
+
+/// Websocket handshake metadata carried by `ports.ws.open`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsWsRequest {
+    pub path: String,
+    pub query: Option<String>,
+    pub headers: RepeatedHeaderValues,
+}
+
+/// Outbound `ports.ws.accept` payload sent by sandboxd after upstream upgrade.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsWsAccept {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub headers: RepeatedHeaderValues,
+}
+
+/// One base64-encoded websocket frame.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsWsFrame {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub direction: String,
+    pub opcode: String,
+    pub bytes: String,
+    pub encoding: String,
+}
+
+/// One websocket close signal propagated through the tunnel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsWsClose {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub direction: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// One transport-close signal shared by `ports.http.*` and `ports.ws.*`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsStreamClose {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+}
+
+/// One transport error message shared by `ports.http.*` and `ports.ws.*`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortsStreamError {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub stream_id: u32,
+    pub code: String,
+    pub message: String,
+}
+
+/// Inbound `ports.*` control messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortsControlMessage {
+    TargetAuthorize(PortsTargetAuthorize),
+}
+
+/// `ports.http.*` transport messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortsTransportMessage {
+    HttpOpen(PortsHttpOpen),
+    HttpResponseStart(PortsHttpResponseStart),
+    HttpBodyChunk(PortsHttpBodyChunk),
+    HttpBodyEnd(PortsHttpBodyEnd),
+    WsOpen(PortsWsOpen),
+    WsAccept(PortsWsAccept),
+    WsFrame(PortsWsFrame),
+    WsClose(PortsWsClose),
+    StreamClose(PortsStreamClose),
+    StreamError(PortsStreamError),
 }
 
 /// PTY-specific control messages consumed by the PTY relay.
@@ -655,6 +858,108 @@ pub fn parse_processes_stream_message(
     }
 }
 
+/// Parses one inbound `ports.*` control message.
+pub fn parse_ports_control_message(
+    payload: &str,
+) -> Result<Option<PortsControlMessage>, TunnelProtocolError> {
+    let parsed_payload: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+        TunnelProtocolError::new(format!(
+            "ports control message must be valid json: {error}"
+        ))
+    })?;
+    let Some(message_type) = parsed_payload.get("type").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+
+    match message_type {
+        "ports.target.authorize" => {
+            let message: PortsTargetAuthorize = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_target_authorize(&message)?;
+            Ok(Some(PortsControlMessage::TargetAuthorize(message)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Parses one inbound `ports.http.*` / `ports.ws.*` transport message.
+pub fn parse_ports_transport_message(
+    payload: &str,
+) -> Result<Option<PortsTransportMessage>, TunnelProtocolError> {
+    let parsed_payload: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+        TunnelProtocolError::new(format!(
+            "ports transport message must be valid json: {error}"
+        ))
+    })?;
+    let Some(message_type) = parsed_payload.get("type").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+
+    match message_type {
+        "ports.http.open" => {
+            let message: PortsHttpOpen = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_http_open(&message)?;
+            Ok(Some(PortsTransportMessage::HttpOpen(message)))
+        }
+        "ports.http.response.start" => {
+            let message: PortsHttpResponseStart = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_http_response_start(&message)?;
+            Ok(Some(PortsTransportMessage::HttpResponseStart(message)))
+        }
+        "ports.http.body.chunk" => {
+            let message: PortsHttpBodyChunk = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_http_body_chunk(&message)?;
+            Ok(Some(PortsTransportMessage::HttpBodyChunk(message)))
+        }
+        "ports.http.body.end" => {
+            let message: PortsHttpBodyEnd = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_http_body_end(&message)?;
+            Ok(Some(PortsTransportMessage::HttpBodyEnd(message)))
+        }
+        "ports.ws.open" => {
+            let message: PortsWsOpen = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_ws_open(&message)?;
+            Ok(Some(PortsTransportMessage::WsOpen(message)))
+        }
+        "ports.ws.accept" => {
+            let message: PortsWsAccept = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_ws_accept(&message)?;
+            Ok(Some(PortsTransportMessage::WsAccept(message)))
+        }
+        "ports.ws.frame" => {
+            let message: PortsWsFrame = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_ws_frame(&message)?;
+            Ok(Some(PortsTransportMessage::WsFrame(message)))
+        }
+        "ports.ws.close" => {
+            let message: PortsWsClose = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_ws_close(&message)?;
+            Ok(Some(PortsTransportMessage::WsClose(message)))
+        }
+        "ports.stream.close" => {
+            let message: PortsStreamClose = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_stream_close(&message)?;
+            Ok(Some(PortsTransportMessage::StreamClose(message)))
+        }
+        "ports.stream.error" => {
+            let message: PortsStreamError = serde_json::from_value(parsed_payload)
+                .map_err(|error| TunnelProtocolError::new(error.to_string()))?;
+            validate_ports_stream_error(&message)?;
+            Ok(Some(PortsTransportMessage::StreamError(message)))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Parses one inbound bootstrap telemetry control message.
 pub fn parse_bootstrap_telemetry_control_message(
     payload: &str,
@@ -780,6 +1085,31 @@ pub fn stream_complete(stream_id: u32) -> String {
     serialize_json(&StreamComplete {
         message_type: "stream.complete",
         stream_id,
+    })
+}
+
+/// Builds one successful `ports.target.authorize.result` payload.
+pub fn ports_target_authorize_success_result(
+    request_id: &str,
+    upstream_protocol: &str,
+    websocket_capable: bool,
+) -> String {
+    serialize_json(&PortsTargetAuthorizeSuccessResult {
+        message_type: "ports.target.authorize.result".to_string(),
+        request_id: request_id.to_string(),
+        authorized: true,
+        upstream_protocol: upstream_protocol.to_string(),
+        websocket_capable,
+    })
+}
+
+/// Builds one failed `ports.target.authorize.result` payload.
+pub fn ports_target_authorize_failure_result(request_id: &str, reason: &str) -> String {
+    serialize_json(&PortsTargetAuthorizeFailureResult {
+        message_type: "ports.target.authorize.result".to_string(),
+        request_id: request_id.to_string(),
+        authorized: false,
+        reason: reason.to_string(),
     })
 }
 
@@ -1088,6 +1418,292 @@ fn validate_stream_window(message: &StreamWindow) -> Result<(), TunnelProtocolEr
     Ok(())
 }
 
+fn validate_port_access_target(target: &PortAccessTarget) -> Result<(), TunnelProtocolError> {
+    if target.kind != "port" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports target kind must be 'port', got '{}'",
+            target.kind
+        )));
+    }
+    if target.port == 0 {
+        return Err(TunnelProtocolError::new(
+            "ports target port must be greater than zero",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_ports_target_authorize(
+    message: &PortsTargetAuthorize,
+) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.target.authorize" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.target.authorize message type must be 'ports.target.authorize', got '{}'",
+            message.message_type
+        )));
+    }
+    if message.request_id.trim().is_empty() {
+        return Err(TunnelProtocolError::new(
+            "ports.target.authorize requestId is required",
+        ));
+    }
+    validate_port_access_target(&message.target)
+}
+
+fn validate_repeated_header_values(
+    headers: &RepeatedHeaderValues,
+    field_name: &str,
+) -> Result<(), TunnelProtocolError> {
+    for (header_name, values) in headers {
+        if header_name.trim().is_empty() {
+            return Err(TunnelProtocolError::new(format!(
+                "{field_name} header names must be non-empty",
+            )));
+        }
+        if values.iter().any(|value| value.trim().is_empty()) {
+            return Err(TunnelProtocolError::new(format!(
+                "{field_name} header values must be non-empty",
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_ports_http_open(message: &PortsHttpOpen) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.http.open" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.open message type must be 'ports.http.open', got '{}'",
+            message.message_type
+        )));
+    }
+    validate_port_access_target(&message.target)?;
+    if message.upstream_protocol != "http" && message.upstream_protocol != "https" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.open upstreamProtocol must be 'http' or 'https', got '{}'",
+            message.upstream_protocol
+        )));
+    }
+    if message.request.method.trim().is_empty() {
+        return Err(TunnelProtocolError::new(
+            "ports.http.open request method is required",
+        ));
+    }
+    if message.request.path.trim().is_empty() {
+        return Err(TunnelProtocolError::new(
+            "ports.http.open request path is required",
+        ));
+    }
+    if message
+        .request
+        .query
+        .as_ref()
+        .is_some_and(|query| query.trim().is_empty())
+    {
+        return Err(TunnelProtocolError::new(
+            "ports.http.open request query must be non-empty when present",
+        ));
+    }
+    validate_repeated_header_values(&message.request.headers, "ports.http.open request")
+}
+
+fn validate_ports_http_response_start(
+    message: &PortsHttpResponseStart,
+) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.http.response.start" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.response.start message type must be 'ports.http.response.start', got '{}'",
+            message.message_type
+        )));
+    }
+    if message.status == 0 {
+        return Err(TunnelProtocolError::new(
+            "ports.http.response.start status must be greater than zero",
+        ));
+    }
+    validate_repeated_header_values(&message.headers, "ports.http.response.start")
+}
+
+fn validate_ports_http_body_chunk(message: &PortsHttpBodyChunk) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.http.body.chunk" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.body.chunk message type must be 'ports.http.body.chunk', got '{}'",
+            message.message_type
+        )));
+    }
+    if message.direction != "request" && message.direction != "response" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.body.chunk direction must be 'request' or 'response', got '{}'",
+            message.direction
+        )));
+    }
+    if message.encoding != "base64" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.body.chunk encoding must be 'base64', got '{}'",
+            message.encoding
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_ports_http_body_end(message: &PortsHttpBodyEnd) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.http.body.end" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.body.end message type must be 'ports.http.body.end', got '{}'",
+            message.message_type
+        )));
+    }
+    if message.direction != "request" && message.direction != "response" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.http.body.end direction must be 'request' or 'response', got '{}'",
+            message.direction
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_ports_ws_open(message: &PortsWsOpen) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.ws.open" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.open message type must be 'ports.ws.open', got '{}'",
+            message.message_type
+        )));
+    }
+    validate_port_access_target(&message.target)?;
+    validate_stream_id(message.stream_id)?;
+    if message.upstream_protocol != "http" && message.upstream_protocol != "https" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.open upstreamProtocol must be 'http' or 'https', got '{}'",
+            message.upstream_protocol
+        )));
+    }
+    if message.request.path.trim().is_empty() {
+        return Err(TunnelProtocolError::new(
+            "ports.ws.open request path is required",
+        ));
+    }
+    if let Some(query) = &message.request.query
+        && query.trim().is_empty()
+    {
+        return Err(TunnelProtocolError::new(
+            "ports.ws.open request query must be non-empty when present",
+        ));
+    }
+    validate_repeated_header_values(&message.request.headers, "ports.ws.open request")
+}
+
+fn validate_ports_ws_accept(message: &PortsWsAccept) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.ws.accept" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.accept message type must be 'ports.ws.accept', got '{}'",
+            message.message_type
+        )));
+    }
+    validate_stream_id(message.stream_id)?;
+    validate_repeated_header_values(&message.headers, "ports.ws.accept")
+}
+
+fn validate_ports_ws_frame(message: &PortsWsFrame) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.ws.frame" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.frame message type must be 'ports.ws.frame', got '{}'",
+            message.message_type
+        )));
+    }
+    validate_stream_id(message.stream_id)?;
+    if message.direction != "request" && message.direction != "response" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.frame direction must be 'request' or 'response', got '{}'",
+            message.direction
+        )));
+    }
+    if message.opcode != "text"
+        && message.opcode != "binary"
+        && message.opcode != "ping"
+        && message.opcode != "pong"
+    {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.frame opcode must be 'text', 'binary', 'ping', or 'pong', got '{}'",
+            message.opcode
+        )));
+    }
+    if message.encoding != "base64" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.frame encoding must be 'base64', got '{}'",
+            message.encoding
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_ports_ws_close(message: &PortsWsClose) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.ws.close" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.close message type must be 'ports.ws.close', got '{}'",
+            message.message_type
+        )));
+    }
+    validate_stream_id(message.stream_id)?;
+    if message.direction != "request" && message.direction != "response" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.ws.close direction must be 'request' or 'response', got '{}'",
+            message.direction
+        )));
+    }
+    if message.reason.is_some() && message.code.is_none() {
+        return Err(TunnelProtocolError::new(
+            "ports.ws.close reason requires a close code",
+        ));
+    }
+    if let Some(reason) = &message.reason
+        && reason.trim().is_empty()
+    {
+        return Err(TunnelProtocolError::new(
+            "ports.ws.close reason must be non-empty when present",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_ports_stream_close(message: &PortsStreamClose) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.stream.close" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.stream.close message type must be 'ports.stream.close', got '{}'",
+            message.message_type
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_ports_stream_error(message: &PortsStreamError) -> Result<(), TunnelProtocolError> {
+    if message.message_type != "ports.stream.error" {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.stream.error message type must be 'ports.stream.error', got '{}'",
+            message.message_type
+        )));
+    }
+    if message.code != "upstream_connect_failed"
+        && message.code != "upstream_handshake_failed"
+        && message.code != "upstream_io_error"
+    {
+        return Err(TunnelProtocolError::new(format!(
+            "ports.stream.error code is invalid: '{}'",
+            message.code
+        )));
+    }
+    if message.message.trim().is_empty() {
+        return Err(TunnelProtocolError::new("ports.stream.error message is required"));
+    }
+
+    Ok(())
+}
+
 fn validate_telemetry_open_ok(message: &TelemetryOpenOk) -> Result<(), TunnelProtocolError> {
     if message.message_type != "telemetry.open.ok" {
         return Err(TunnelProtocolError::new(
@@ -1163,7 +1779,9 @@ mod tests {
         ProcessesStreamMessage, PtyControlMessage, StreamControlMessage, StreamSendWindow,
         decode_stream_data_frame, encode_stream_data_frame, exec_result_event,
         file_upload_completed_event, parse_bootstrap_telemetry_control_message,
+        parse_ports_control_message, parse_ports_transport_message,
         parse_processes_stream_message, parse_pty_control_message, parse_stream_control_message,
+        ports_target_authorize_failure_result, ports_target_authorize_success_result,
         pty_exit_event, stream_complete, stream_open_error, stream_open_ok, stream_reset,
         stream_window, telemetry_close, telemetry_open,
     };
@@ -1225,6 +1843,123 @@ mod tests {
     }
 
     #[test]
+    fn parses_valid_ports_control_messages() {
+        let authorize = parse_ports_control_message(
+            r#"{"type":"ports.target.authorize","requestId":"req_port_access_1","target":{"kind":"port","port":5173}}"#,
+        )
+        .expect("ports.target.authorize should parse");
+        assert!(matches!(
+            authorize,
+            Some(crate::tunnel::protocol::PortsControlMessage::TargetAuthorize(_))
+        ));
+    }
+
+    #[test]
+    fn parses_valid_ports_http_transport_messages() {
+        let http_open = parse_ports_transport_message(
+            r#"{"type":"ports.http.open","streamId":41,"target":{"kind":"port","port":5173},"upstreamProtocol":"https","request":{"method":"GET","path":"/src/main.ts","query":"import=1","headers":{"accept":["text/plain"]}}}"#,
+        )
+        .expect("ports.http.open should parse");
+        assert!(matches!(
+            http_open,
+            Some(crate::tunnel::protocol::PortsTransportMessage::HttpOpen(_))
+        ));
+
+        let response_start = parse_ports_transport_message(
+            r#"{"type":"ports.http.response.start","streamId":41,"status":200,"headers":{"content-type":["text/plain"]}}"#,
+        )
+        .expect("ports.http.response.start should parse");
+        assert!(matches!(
+            response_start,
+            Some(crate::tunnel::protocol::PortsTransportMessage::HttpResponseStart(_))
+        ));
+
+        let body_chunk = parse_ports_transport_message(
+            r#"{"type":"ports.http.body.chunk","streamId":41,"direction":"response","bytes":"SGVsbG8=","encoding":"base64"}"#,
+        )
+        .expect("ports.http.body.chunk should parse");
+        assert!(matches!(
+            body_chunk,
+            Some(crate::tunnel::protocol::PortsTransportMessage::HttpBodyChunk(_))
+        ));
+
+        let body_end = parse_ports_transport_message(
+            r#"{"type":"ports.http.body.end","streamId":41,"direction":"response"}"#,
+        )
+        .expect("ports.http.body.end should parse");
+        assert!(matches!(
+            body_end,
+            Some(crate::tunnel::protocol::PortsTransportMessage::HttpBodyEnd(_))
+        ));
+
+        let stream_close = parse_ports_transport_message(
+            r#"{"type":"ports.stream.close","streamId":41}"#,
+        )
+        .expect("ports.stream.close should parse");
+        assert!(matches!(
+            stream_close,
+            Some(crate::tunnel::protocol::PortsTransportMessage::StreamClose(_))
+        ));
+
+        let stream_error = parse_ports_transport_message(
+            r#"{"type":"ports.stream.error","streamId":41,"code":"upstream_io_error","message":"upstream closed early"}"#,
+        )
+        .expect("ports.stream.error should parse");
+        assert!(matches!(
+            stream_error,
+            Some(crate::tunnel::protocol::PortsTransportMessage::StreamError(_))
+        ));
+    }
+
+    #[test]
+    fn parses_valid_ports_websocket_transport_messages() {
+        let ws_open = parse_ports_transport_message(
+            r#"{"type":"ports.ws.open","streamId":55,"target":{"kind":"port","port":5173},"upstreamProtocol":"https","request":{"path":"/hmr","query":"token=1","headers":{"connection":["Upgrade"],"upgrade":["websocket"]}}}"#,
+        )
+        .expect("ports.ws.open should parse");
+        assert!(matches!(
+            ws_open,
+            Some(crate::tunnel::protocol::PortsTransportMessage::WsOpen(_))
+        ));
+
+        let ws_accept = parse_ports_transport_message(
+            r#"{"type":"ports.ws.accept","streamId":55,"headers":{"sec-websocket-accept":["digest"]}}"#,
+        )
+        .expect("ports.ws.accept should parse");
+        assert!(matches!(
+            ws_accept,
+            Some(crate::tunnel::protocol::PortsTransportMessage::WsAccept(_))
+        ));
+
+        let ws_frame = parse_ports_transport_message(
+            r#"{"type":"ports.ws.frame","streamId":55,"direction":"response","opcode":"text","bytes":"SGVsbG8=","encoding":"base64"}"#,
+        )
+        .expect("ports.ws.frame should parse");
+        assert!(matches!(
+            ws_frame,
+            Some(crate::tunnel::protocol::PortsTransportMessage::WsFrame(_))
+        ));
+
+        let ws_close = parse_ports_transport_message(
+            r#"{"type":"ports.ws.close","streamId":55,"direction":"request","code":1000,"reason":"normal"}"#,
+        )
+        .expect("ports.ws.close should parse");
+        assert!(matches!(
+            ws_close,
+            Some(crate::tunnel::protocol::PortsTransportMessage::WsClose(_))
+        ));
+
+        let ws_close_without_code = parse_ports_transport_message(
+            r#"{"type":"ports.ws.close","streamId":56,"direction":"response"}"#,
+        )
+        .expect("ports.ws.close without a code should parse");
+        assert!(matches!(
+            ws_close_without_code,
+            Some(crate::tunnel::protocol::PortsTransportMessage::WsClose(_))
+        ));
+    }
+
+    #[test]
     fn round_trips_data_frames() {
         let encoded = encode_stream_data_frame(9, PAYLOAD_KIND_WEBSOCKET_TEXT, b"hello")
             .expect("frame should encode");
@@ -1258,6 +1993,14 @@ mod tests {
             r#"{"type":"stream.complete","streamId":7}"#
         );
         assert_eq!(
+            ports_target_authorize_success_result("req_port_access_1", "https", true),
+            r#"{"type":"ports.target.authorize.result","requestId":"req_port_access_1","authorized":true,"upstreamProtocol":"https","websocketCapable":true}"#
+        );
+        assert_eq!(
+            ports_target_authorize_failure_result("req_port_access_2", "unsupported_protocol"),
+            r#"{"type":"ports.target.authorize.result","requestId":"req_port_access_2","authorized":false,"reason":"unsupported_protocol"}"#
+        );
+        assert_eq!(
             pty_exit_event(7, 3),
             r#"{"type":"stream.event","streamId":7,"event":{"type":"pty.exit","exitCode":3}}"#
         );
@@ -1284,6 +2027,143 @@ mod tests {
         assert_eq!(
             telemetry_close(42),
             r#"{"type":"telemetry.close","streamId":42}"#
+        );
+    }
+
+    #[test]
+    fn serializes_ports_http_transport_messages() {
+        assert_eq!(
+            super::serialize_json(&super::PortsHttpOpen {
+                message_type: "ports.http.open".to_string(),
+                stream_id: 41,
+                target: super::PortAccessTarget {
+                    kind: "port".to_string(),
+                    port: 5173,
+                },
+                upstream_protocol: "https".to_string(),
+                request: super::PortsHttpRequest {
+                    method: "GET".to_string(),
+                    path: "/src/main.ts".to_string(),
+                    query: Some("import=1".to_string()),
+                    headers: std::collections::BTreeMap::from([(
+                        "accept".to_string(),
+                        vec!["text/plain".to_string()],
+                    )]),
+                },
+            }),
+            r#"{"type":"ports.http.open","streamId":41,"target":{"kind":"port","port":5173},"upstreamProtocol":"https","request":{"method":"GET","path":"/src/main.ts","query":"import=1","headers":{"accept":["text/plain"]}}}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsHttpResponseStart {
+                message_type: "ports.http.response.start".to_string(),
+                stream_id: 41,
+                status: 200,
+                headers: std::collections::BTreeMap::from([(
+                    "content-type".to_string(),
+                    vec!["text/plain".to_string()],
+                )]),
+            }),
+            r#"{"type":"ports.http.response.start","streamId":41,"status":200,"headers":{"content-type":["text/plain"]}}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsHttpBodyChunk {
+                message_type: "ports.http.body.chunk".to_string(),
+                stream_id: 41,
+                direction: "response".to_string(),
+                bytes: "SGVsbG8=".to_string(),
+                encoding: "base64".to_string(),
+            }),
+            r#"{"type":"ports.http.body.chunk","streamId":41,"direction":"response","bytes":"SGVsbG8=","encoding":"base64"}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsHttpBodyEnd {
+                message_type: "ports.http.body.end".to_string(),
+                stream_id: 41,
+                direction: "response".to_string(),
+            }),
+            r#"{"type":"ports.http.body.end","streamId":41,"direction":"response"}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsStreamClose {
+                message_type: "ports.stream.close".to_string(),
+                stream_id: 41,
+            }),
+            r#"{"type":"ports.stream.close","streamId":41}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsStreamError {
+                message_type: "ports.stream.error".to_string(),
+                stream_id: 41,
+                code: "upstream_io_error".to_string(),
+                message: "upstream closed early".to_string(),
+            }),
+            r#"{"type":"ports.stream.error","streamId":41,"code":"upstream_io_error","message":"upstream closed early"}"#
+        );
+    }
+
+    #[test]
+    fn serializes_ports_websocket_transport_messages() {
+        assert_eq!(
+            super::serialize_json(&super::PortsWsOpen {
+                message_type: "ports.ws.open".to_string(),
+                stream_id: 55,
+                target: super::PortAccessTarget {
+                    kind: "port".to_string(),
+                    port: 5173,
+                },
+                upstream_protocol: "https".to_string(),
+                request: super::PortsWsRequest {
+                    path: "/hmr".to_string(),
+                    query: Some("token=1".to_string()),
+                    headers: std::collections::BTreeMap::from([
+                        ("connection".to_string(), vec!["Upgrade".to_string()]),
+                        ("upgrade".to_string(), vec!["websocket".to_string()]),
+                    ]),
+                },
+            }),
+            r#"{"type":"ports.ws.open","streamId":55,"target":{"kind":"port","port":5173},"upstreamProtocol":"https","request":{"path":"/hmr","query":"token=1","headers":{"connection":["Upgrade"],"upgrade":["websocket"]}}}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsWsAccept {
+                message_type: "ports.ws.accept".to_string(),
+                stream_id: 55,
+                headers: std::collections::BTreeMap::from([(
+                    "sec-websocket-accept".to_string(),
+                    vec!["digest".to_string()],
+                )]),
+            }),
+            r#"{"type":"ports.ws.accept","streamId":55,"headers":{"sec-websocket-accept":["digest"]}}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsWsFrame {
+                message_type: "ports.ws.frame".to_string(),
+                stream_id: 55,
+                direction: "response".to_string(),
+                opcode: "text".to_string(),
+                bytes: "SGVsbG8=".to_string(),
+                encoding: "base64".to_string(),
+            }),
+            r#"{"type":"ports.ws.frame","streamId":55,"direction":"response","opcode":"text","bytes":"SGVsbG8=","encoding":"base64"}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsWsClose {
+                message_type: "ports.ws.close".to_string(),
+                stream_id: 55,
+                direction: "request".to_string(),
+                code: Some(1000),
+                reason: Some("normal".to_string()),
+            }),
+            r#"{"type":"ports.ws.close","streamId":55,"direction":"request","code":1000,"reason":"normal"}"#
+        );
+        assert_eq!(
+            super::serialize_json(&super::PortsWsClose {
+                message_type: "ports.ws.close".to_string(),
+                stream_id: 56,
+                direction: "response".to_string(),
+                code: None,
+                reason: None,
+            }),
+            r#"{"type":"ports.ws.close","streamId":56,"direction":"response"}"#
         );
     }
 

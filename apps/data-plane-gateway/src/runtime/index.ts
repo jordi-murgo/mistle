@@ -10,6 +10,9 @@ import { createApp, stopApp } from "../app.js";
 import { SandboxIdleControllerRegistry } from "../idle/sandbox-idle-controller-registry.js";
 import { LocalSandboxIdleController } from "../idle/sandbox-idle-controller.js";
 import { registerSandboxRuntimeStateRoute } from "../internal/runtime-state/register-sandbox-runtime-state-route.js";
+import { PortAccessTransportService } from "../publishing/port-access-transport.js";
+import { PortsTargetAuthorizeService } from "../publishing/ports-target-authorize-service.js";
+import { registerPortAccessRoutes } from "../publishing/register-port-access-routes.js";
 import { InMemorySandboxKeepaliveStore } from "../runtime-state/adapters/in-memory-sandbox-keepalive-store.js";
 import { InMemorySandboxPresenceStore } from "../runtime-state/adapters/in-memory-sandbox-presence-store.js";
 import { InMemorySandboxRuntimeAttachmentStore } from "../runtime-state/adapters/in-memory-sandbox-runtime-attachment-store.js";
@@ -136,6 +139,11 @@ export function createDataPlaneGatewayRuntime(
     sandboxOwnerResolver,
     gatewayForwardingClient,
   );
+  const portsTargetAuthorizeService = new PortsTargetAuthorizeService(
+    relayCoordinator,
+    systemScheduler,
+  );
+  const portAccessTransportService = new PortAccessTransportService(relayCoordinator);
   const sandboxOwnerLeaseHeartbeat = new SandboxOwnerLeaseHeartbeat(
     sandboxOwnerStore,
     systemScheduler,
@@ -196,6 +204,8 @@ export function createDataPlaneGatewayRuntime(
       tokenIssuer: config.sandbox.connect.tokenIssuer,
       tokenAudience: config.sandbox.connect.tokenAudience,
     } satisfies ConnectionTokenConfig,
+    portAccessTransportService,
+    portsTargetAuthorizeService,
     interactiveStreamRouter,
     relayCoordinator,
     tunnelSessionRegistry,
@@ -224,6 +234,24 @@ export function createDataPlaneGatewayRuntime(
       tokenAudience: config.sandbox.bootstrap.tokenAudience,
     },
   });
+  registerPortAccessRoutes({
+    app,
+    upgradeWebSocket: nodeWebSocket.upgradeWebSocket,
+    bootstrapTokenConfig: {
+      tokenSecret: config.sandbox.publish.access.tokenSecret,
+      tokenIssuer: config.sandbox.publish.access.tokenIssuer,
+      tokenAudience: config.sandbox.publish.access.tokenAudience,
+    },
+    hostConfig: {
+      baseDomain: config.sandbox.publish.baseDomain,
+    },
+    portAccessTransportService,
+    sessionConfig: {
+      cookieSigningSecret: config.sandbox.publish.session.cookieSigningSecret,
+    },
+    portsTargetAuthorizeService,
+    clock: systemClock,
+  });
 
   let startedServer: StartedServer | undefined;
   let stopPromise: Promise<void> | undefined;
@@ -249,6 +277,10 @@ export function createDataPlaneGatewayRuntime(
 
   return {
     app,
+    internals: {
+      portAccessTransportService,
+      portsTargetAuthorizeService,
+    },
     request: async (path, init) => app.request(path, init),
     start: async () => {
       if (stopped) {

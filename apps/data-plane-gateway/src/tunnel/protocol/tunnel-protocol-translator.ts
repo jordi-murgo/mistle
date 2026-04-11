@@ -3,6 +3,8 @@ import {
   PayloadKindWebSocketBinary,
   PayloadKindWebSocketText,
   parseBootstrapControlMessage,
+  parsePortsControlMessage,
+  parsePortsTransportMessage,
   parseStreamControlMessage,
   parseTelemetryControlMessage,
   type BootstrapControlMessage,
@@ -13,6 +15,8 @@ import {
   type TelemetryOpen,
 } from "@mistle/sandbox-session-protocol";
 
+import { PortAccessTransportService } from "../../publishing/port-access-transport.js";
+import { PortsTargetAuthorizeService } from "../../publishing/ports-target-authorize-service.js";
 import { BootstrapTunnelNotConnectedError } from "../bootstrap-tunnel-not-connected-error.js";
 import type { InteractiveStreamRouter } from "../gateway-forwarding/index.js";
 import {
@@ -411,6 +415,8 @@ export class TunnelProtocolViolationError extends Error {
 export class TunnelProtocolTranslator {
   public constructor(
     private readonly interactiveStreamRouter: InteractiveStreamRouter,
+    private readonly portsTargetAuthorizeService: PortsTargetAuthorizeService,
+    private readonly portAccessTransportService: PortAccessTransportService,
     private readonly frameCodec: FrameCodec = new FrameCodec(),
   ) {}
 
@@ -586,6 +592,48 @@ export class TunnelProtocolTranslator {
   private async translateBootstrapTextPayload(
     input: TranslateTunnelInboundMessageInput & { payload: string; sourcePeerSide: "bootstrap" },
   ): Promise<TunnelProtocolTranslation> {
+    const portsControlMessage = parsePortsControlMessage(input.payload);
+    if (portsControlMessage?.type === "ports.target.authorize.result") {
+      this.portsTargetAuthorizeService.resolveTargetAuthorizeResult({
+        sandboxInstanceId: input.sandboxInstanceId,
+        result: portsControlMessage,
+      });
+
+      return createTranslation({
+        delivery: {
+          kind: "drop",
+        },
+      });
+    }
+
+    const portsTransportMessage = parsePortsTransportMessage(input.payload);
+    if (portsTransportMessage !== undefined) {
+      if (
+        portsTransportMessage.type === "ports.http.response.start" ||
+        portsTransportMessage.type === "ports.http.body.chunk" ||
+        portsTransportMessage.type === "ports.http.body.end" ||
+        portsTransportMessage.type === "ports.ws.accept" ||
+        portsTransportMessage.type === "ports.ws.frame" ||
+        portsTransportMessage.type === "ports.ws.close" ||
+        portsTransportMessage.type === "ports.stream.error"
+      ) {
+        await this.portAccessTransportService.handleBootstrapTransportMessage({
+          sandboxInstanceId: input.sandboxInstanceId,
+          message: portsTransportMessage,
+        });
+
+        return createTranslation({
+          delivery: {
+            kind: "drop",
+          },
+        });
+      }
+
+      throw new TunnelProtocolViolationError(
+        `Bootstrap websocket cannot send ports transport message type '${portsTransportMessage.type}'.`,
+      );
+    }
+
     const controlMessage = parseBootstrapControlMessage(input.payload);
     if (controlMessage === undefined) {
       throw new TunnelProtocolViolationError(createUnsupportedTextPayloadErrorMessage("bootstrap"));

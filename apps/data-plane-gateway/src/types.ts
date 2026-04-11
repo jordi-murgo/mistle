@@ -3,6 +3,11 @@ import { AppIds, type loadConfig } from "@mistle/config";
 import type { DataPlaneDatabase } from "@mistle/db/data-plane";
 import type { Context, Hono } from "hono";
 
+import type {
+  PortAccessTransportService,
+  PortAccessWebSocketHandle,
+} from "./publishing/port-access-transport.js";
+import type { PortsTargetAuthorizeService } from "./publishing/ports-target-authorize-service.js";
 import type { AdmittedSandboxTunnelWebSocketRequest } from "./tunnel/admission/sandbox-tunnel-websocket-admission.js";
 
 type LoadDataPlaneGatewayConfigResult = ReturnType<
@@ -25,6 +30,7 @@ export type AppContextBindings = {
 export type AppContextVariables = {
   config: DataPlaneGatewayConfig;
   db: DataPlaneDatabase;
+  portAccessWebSocketHandle?: PortAccessWebSocketHandle;
   sandboxTunnelAdmission?: AdmittedSandboxTunnelWebSocketRequest;
 };
 
@@ -44,6 +50,10 @@ export type StartedServer = {
 
 export type DataPlaneGatewayRuntime = {
   app: DataPlaneGatewayApp;
+  internals: {
+    portAccessTransportService: PortAccessTransportService;
+    portsTargetAuthorizeService: PortsTargetAuthorizeService;
+  };
   request: (path: string, init?: RequestInit) => Promise<Response>;
   start: () => Promise<void>;
   stop: () => Promise<void>;
