@@ -234,6 +234,43 @@
                                 "type": "string"
                               }
                             },
+                            "additionalCredentialHeaders": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "header": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "credentialResolver": {
+                                    "type": "object",
+                                    "properties": {
+                                      "connectionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "secretType": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "slotKey": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "resolverKey": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": ["connectionId", "secretType"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": ["header", "credentialResolver"],
+                                "additionalProperties": false
+                              }
+                            },
                             "credentialResolver": {
                               "type": "object",
                               "properties": {
@@ -1428,6 +1465,43 @@
                                 "type": "object",
                                 "additionalProperties": {
                                   "type": "string"
+                                }
+                              },
+                              "additionalCredentialHeaders": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "header": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "credentialResolver": {
+                                      "type": "object",
+                                      "properties": {
+                                        "connectionId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "secretType": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "slotKey": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "resolverKey": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": ["connectionId", "secretType"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": ["header", "credentialResolver"],
+                                  "additionalProperties": false
                                 }
                               },
                               "credentialResolver": {
