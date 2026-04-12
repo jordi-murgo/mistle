@@ -37,12 +37,14 @@ export function createOAuth2AuthorizationCodeCredentialSlotKeys(input: {
 }): {
   accessToken: string;
   refreshToken: string;
+  clientSecret: string;
 } {
   const prefix = `${input.familyId}.${input.variantId}.${IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE}`;
 
   return {
     accessToken: `${prefix}.access-token`,
     refreshToken: `${prefix}.refresh-token`,
+    clientSecret: `${prefix}.client-secret`,
   };
 }
 
@@ -676,6 +678,7 @@ export type IntegrationOAuth2AuthorizationCodeStartAuthorizationInput<
 
 export type IntegrationOAuth2AuthorizationCodeStartAuthorizationResult = {
   authorizationUrl: string;
+  providerState?: Record<string, unknown>;
 };
 
 export type IntegrationOAuth2AuthorizationCodeCompleteGrantInput<
@@ -688,6 +691,7 @@ export type IntegrationOAuth2AuthorizationCodeCompleteGrantInput<
   query: URLSearchParams;
   redirectUrl: string;
   pkceVerifier?: string;
+  providerState?: Record<string, unknown>;
 };
 
 export type IntegrationOAuth2AuthorizationCodeCompleteGrantResult = {
@@ -697,6 +701,7 @@ export type IntegrationOAuth2AuthorizationCodeCompleteGrantResult = {
   accessTokenExpiresAt?: string;
   refreshToken?: string;
   refreshTokenExpiresAt?: string;
+  clientSecret?: string;
   credentialMetadata?: Record<string, unknown>;
 };
 
@@ -712,6 +717,7 @@ export type IntegrationOAuth2AuthorizationCodeRefreshAccessTokenInput<
     config: TConnectionConfig;
   };
   refreshToken: string;
+  clientSecret?: string;
 };
 
 export type IntegrationOAuth2AuthorizationCodeRefreshAccessTokenResult = {

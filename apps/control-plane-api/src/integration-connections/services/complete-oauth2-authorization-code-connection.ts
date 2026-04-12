@@ -79,6 +79,31 @@ function resolvePkceVerifier(input: {
   });
 }
 
+function resolveProviderState(input: {
+  providerStateEncrypted: string | null;
+  masterEncryptionKeys: Record<string, string>;
+}): Record<string, unknown> | undefined {
+  if (input.providerStateEncrypted === null) {
+    return undefined;
+  }
+
+  const plaintext = decryptRedirectSessionSecretUtf8({
+    ciphertext: input.providerStateEncrypted,
+    masterEncryptionKeys: input.masterEncryptionKeys,
+  });
+  const parsed = JSON.parse(plaintext);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("OAuth 2.0 (Authorization Code) provider state must decode to an object.");
+  }
+
+  const providerState: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    providerState[key] = value;
+  }
+
+  return providerState;
+}
+
 export async function completeOAuth2AuthorizationCodeConnection(
   ctx: {
     db: ControlPlaneDatabase;
@@ -149,6 +174,10 @@ export async function completeOAuth2AuthorizationCodeConnection(
     pkceVerifierEncrypted: redirectSession.pkceVerifierEncrypted,
     masterEncryptionKeys: integrationsConfig.masterEncryptionKeys,
   });
+  const providerState = resolveProviderState({
+    providerStateEncrypted: redirectSession.providerStateEncrypted,
+    masterEncryptionKeys: integrationsConfig.masterEncryptionKeys,
+  });
   const completedOAuth2AuthorizationCodeConnection =
     await resolved.oauth2AuthorizationCode.completeAuthorizationCodeGrant({
       organizationId: redirectSession.organizationId,
@@ -157,6 +186,7 @@ export async function completeOAuth2AuthorizationCodeConnection(
       query: queryParams,
       redirectUrl,
       ...(pkceVerifier === undefined ? {} : { pkceVerifier }),
+      ...(providerState === undefined ? {} : { providerState }),
     });
 
   return db.transaction(async (tx) => {
@@ -268,11 +298,22 @@ export async function completeOAuth2AuthorizationCodeConnection(
         throw new Error("Failed to create OAuth 2.0 (Authorization Code) access token credential.");
       }
 
-      await tx.insert(integrationConnectionCredentials).values({
-        connectionId: createdConnection.id,
-        credentialId: createdAccessTokenCredential.id,
-        slotKey: oauth2AuthorizationCodeSlotKeys.accessToken,
-      });
+      const [createdAccessTokenCredentialLink] = await tx
+        .insert(integrationConnectionCredentials)
+        .values({
+          connectionId: createdConnection.id,
+          credentialId: createdAccessTokenCredential.id,
+          slotKey: oauth2AuthorizationCodeSlotKeys.accessToken,
+        })
+        .returning({
+          connectionId: integrationConnectionCredentials.connectionId,
+        });
+
+      if (createdAccessTokenCredentialLink === undefined) {
+        throw new Error(
+          "Failed to link OAuth 2.0 (Authorization Code) access token credential to the connection.",
+        );
+      }
 
       if (completedOAuth2AuthorizationCodeConnection.refreshToken !== undefined) {
         const encryptedRefreshToken = encryptCredentialUtf8({
@@ -307,11 +348,68 @@ export async function completeOAuth2AuthorizationCodeConnection(
           );
         }
 
-        await tx.insert(integrationConnectionCredentials).values({
-          connectionId: createdConnection.id,
-          credentialId: createdRefreshTokenCredential.id,
-          slotKey: oauth2AuthorizationCodeSlotKeys.refreshToken,
+        const [createdRefreshTokenCredentialLink] = await tx
+          .insert(integrationConnectionCredentials)
+          .values({
+            connectionId: createdConnection.id,
+            credentialId: createdRefreshTokenCredential.id,
+            slotKey: oauth2AuthorizationCodeSlotKeys.refreshToken,
+          })
+          .returning({
+            connectionId: integrationConnectionCredentials.connectionId,
+          });
+
+        if (createdRefreshTokenCredentialLink === undefined) {
+          throw new Error(
+            "Failed to link OAuth 2.0 (Authorization Code) refresh token credential to the connection.",
+          );
+        }
+      }
+
+      if (completedOAuth2AuthorizationCodeConnection.clientSecret !== undefined) {
+        const encryptedClientSecret = encryptCredentialUtf8({
+          plaintext: completedOAuth2AuthorizationCodeConnection.clientSecret,
+          organizationCredentialKey: unwrappedOrganizationCredentialKey,
         });
+        const [createdClientSecretCredential] = await tx
+          .insert(integrationCredentials)
+          .values({
+            organizationId: redirectSession.organizationId,
+            secretKind: IntegrationCredentialSecretKinds.OAUTH2_CLIENT_SECRET,
+            ciphertext: encryptedClientSecret.ciphertext,
+            nonce: encryptedClientSecret.nonce,
+            organizationCredentialKeyVersion: organizationCredentialKey.version,
+            intendedFamilyId: resolved.target.familyId,
+            ...(completedOAuth2AuthorizationCodeConnection.credentialMetadata === undefined
+              ? {}
+              : { metadata: completedOAuth2AuthorizationCodeConnection.credentialMetadata }),
+          })
+          .returning({
+            id: integrationCredentials.id,
+          });
+
+        if (createdClientSecretCredential === undefined) {
+          throw new Error(
+            "Failed to create OAuth 2.0 (Authorization Code) client secret credential.",
+          );
+        }
+
+        const [createdClientSecretCredentialLink] = await tx
+          .insert(integrationConnectionCredentials)
+          .values({
+            connectionId: createdConnection.id,
+            credentialId: createdClientSecretCredential.id,
+            slotKey: oauth2AuthorizationCodeSlotKeys.clientSecret,
+          })
+          .returning({
+            connectionId: integrationConnectionCredentials.connectionId,
+          });
+
+        if (createdClientSecretCredentialLink === undefined) {
+          throw new Error(
+            "Failed to link OAuth 2.0 (Authorization Code) client secret credential to the connection.",
+          );
+        }
       }
     } finally {
       unwrappedOrganizationCredentialKey.fill(0);
