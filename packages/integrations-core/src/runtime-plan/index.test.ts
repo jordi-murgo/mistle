@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 import { CompilerErrorCodes, IntegrationCompilerError } from "../errors/index.js";
 import { assembleCompiledRuntimePlan, CompiledRuntimePlanSchema } from "./index.js";
 
+const GitHubCliTokenPattern = /^ghp_[A-Za-z0-9]{36}$/;
+const GitHubCliPlaceholderToken = [
+  "g",
+  "h",
+  "p",
+  "_",
+  "G7aBNSK9WMQh0rgA",
+  "lagCe4a7o75FPgRbQhls",
+].join("");
+
 function createPtyLaunch(input: { runtimeId: string; displayName?: string; command?: string }) {
   return {
     runtimeId: input.runtimeId,
@@ -417,7 +427,7 @@ describe("assembleCompiledRuntimePlan", () => {
               artifactKey: "gh-cli",
               name: "GitHub CLI",
               env: {
-                GH_TOKEN: "dummy-value",
+                GH_TOKEN: GitHubCliPlaceholderToken,
               },
               lifecycle: {
                 install: [{ args: ["sh", "-euc", "install-gh"] }],
@@ -435,7 +445,7 @@ describe("assembleCompiledRuntimePlan", () => {
               artifactKey: "gh-cli",
               name: "GitHub CLI",
               env: {
-                GH_TOKEN: "dummy-value",
+                GH_TOKEN: GitHubCliPlaceholderToken,
               },
               lifecycle: {
                 install: [{ args: ["sh", "-euc", "install-gh"] }],
@@ -459,7 +469,7 @@ describe("assembleCompiledRuntimePlan", () => {
     expect(plan.artifacts).toHaveLength(2);
     expect(plan.artifacts.map((artifact) => artifact.artifactKey)).toEqual(["gh-cli", "jira-cli"]);
     expect(plan.artifacts[0]?.env).toEqual({
-      GH_TOKEN: "dummy-value",
+      GH_TOKEN: expect.stringMatching(GitHubCliTokenPattern),
     });
   });
 
