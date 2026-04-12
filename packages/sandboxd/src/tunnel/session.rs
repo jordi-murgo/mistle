@@ -4436,8 +4436,10 @@ mod tests {
         let listener_port = reserve_available_port();
         let server_marker = format!("mistle_processes_stream_server_{}", std::process::id());
         let idle_marker = format!("mistle_processes_stream_idle_{}", std::process::id());
-        let mut server =
-            spawn_node_fixture("http-listener.js", &[&listener_port.to_string(), &server_marker]);
+        let mut server = spawn_node_fixture(
+            "http-listener.js",
+            &[&listener_port.to_string(), &server_marker, "0.0.0.0"],
+        );
         let mut idle = spawn_node_fixture("idle-process.js", &[&idle_marker]);
         wait_until_listening(listener_port);
 
@@ -6044,23 +6046,18 @@ mod tests {
                 .iter()
                 .any(|listener| {
                     listener["port"] == Value::Number(listener_port.into())
-                        && listener["bindAddress"] == Value::String("127.0.0.1".to_string())
+                        && listener["bindAddress"] == Value::String("0.0.0.0".to_string())
                 }),
-            "server process should expose the expected loopback listener"
+            "server process should expose the expected local-bind listener"
         );
 
-        let idle_process = processes
-            .iter()
-            .find(|process| {
+        assert!(
+            !processes.iter().any(|process| {
                 process["command"]
                     .as_str()
                     .is_some_and(|command| command.contains(idle_marker))
-            })
-            .expect("snapshot should include the idle process");
-        assert_eq!(
-            idle_process["listeners"],
-            Value::Array(Vec::new()),
-            "idle process should not report loopback listeners"
+            }),
+            "snapshot should omit processes without local-bind listeners"
         );
     }
 
