@@ -1,5 +1,3 @@
-import { Badge, Button } from "@mistle/ui";
-import { GitDiffIcon, TerminalIcon } from "@phosphor-icons/react";
 import { useMemo } from "react";
 import { useLocation, useParams } from "react-router";
 
@@ -15,10 +13,12 @@ import {
 import { SessionDiffPanel } from "./session-diff-panel.js";
 import { SessionPortAccessPopover } from "./session-port-access-popover.js";
 import { SessionTerminalPanel } from "./session-terminal-panel.js";
+import { SessionWorkbenchHeaderActions } from "./session-workbench-header-actions.js";
 import {
   SessionWorkbenchPageView,
   type SessionWorkbenchAlert,
 } from "./session-workbench-page-view.js";
+import { SessionRepositoryNoneValue } from "./use-session-primary-repository-state.js";
 import { useSessionWorkbenchController } from "./use-session-workbench-controller.js";
 
 export function SessionWorkbenchPage(): React.JSX.Element {
@@ -51,87 +51,84 @@ function SessionWorkbenchPageContent(input: {
   const cliButtonTitle = workbench.primaryPanelState.isCliToggleActive
     ? "Return to chat"
     : (workbench.primaryPanelState.disabledReason ?? "Open Codex CLI");
-  const isErrorHeaderStatus = workbench.workbenchStatus.kind === "error";
-  const headerStatusLabel = isErrorHeaderStatus
-    ? "Error"
-    : resolveSandboxStatusBadgeUi(workbench.sandboxLifecycleStatus).label;
-  const headerStatusClassName =
-    workbench.workbenchStatus.kind === "connected"
-      ? "border-emerald-600 bg-emerald-600"
-      : "border-stone-300 bg-stone-300";
+  const headerStatusKind = workbench.workbenchStatus.kind;
+  const headerStatusLabel =
+    headerStatusKind === "error"
+      ? "Error"
+      : resolveSandboxStatusBadgeUi(workbench.sandboxLifecycleStatus).label;
   const headerActions = useMemo(
     () => (
-      <div className="flex items-center gap-2">
-        {isErrorHeaderStatus ? (
-          <Badge aria-label={headerStatusLabel} title={headerStatusLabel} variant="destructive">
-            {headerStatusLabel}
-          </Badge>
-        ) : (
-          <span
-            aria-label={headerStatusLabel}
-            className={`inline-block size-2.5 rounded-full border ${headerStatusClassName}`}
-            role="status"
-            title={headerStatusLabel}
-          />
-        )}
-        <span aria-hidden className="h-5 w-px bg-stone-200" />
-        <Button
-          aria-label={cliButtonLabel}
-          aria-pressed={workbench.primaryPanelState.isCliToggleActive}
-          className={
-            workbench.primaryPanelState.isCliToggleActive
-              ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
-              : "bg-transparent text-foreground shadow-none hover:bg-stone-100"
-          }
-          disabled={
+      <SessionWorkbenchHeaderActions
+        cliControl={{
+          ariaLabel: cliButtonLabel,
+          className: workbench.primaryPanelState.isCliToggleActive
+            ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
+            : "bg-transparent text-foreground shadow-none hover:bg-stone-100",
+          disabled:
             !workbench.primaryPanelState.canEnterCli &&
-            !workbench.primaryPanelState.isCliToggleActive
-          }
-          onClick={() => {
+            !workbench.primaryPanelState.isCliToggleActive,
+          onClick: () => {
             if (workbench.primaryPanelState.isCliToggleActive) {
               void workbench.primaryPanelState.exitCliMode();
               return;
             }
 
             void workbench.primaryPanelState.enterCliMode();
-          }}
-          size="sm"
-          title={cliButtonTitle}
-          type="button"
-          variant="ghost"
-        >
-          CLI
-        </Button>
-        <Button
-          aria-label={diffButtonLabel}
-          aria-pressed={workbench.diffPanelState.isVisible}
-          className={
-            workbench.diffPanelState.isVisible
-              ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
-              : "bg-transparent text-foreground shadow-none hover:bg-stone-100"
-          }
-          disabled={isDiffOpenDisabled}
-          onClick={() => {
+          },
+          pressed: workbench.primaryPanelState.isCliToggleActive,
+          title: cliButtonTitle,
+        }}
+        diffControl={{
+          ariaLabel: diffButtonLabel,
+          className: workbench.diffPanelState.isVisible
+            ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
+            : "bg-transparent text-foreground shadow-none hover:bg-stone-100",
+          disabled: isDiffOpenDisabled,
+          onClick: () => {
             workbench.diffPanelState.togglePanel();
-          }}
-          size="icon-sm"
-          title={diffButtonTitle}
-          type="button"
-          variant="ghost"
-        >
-          <GitDiffIcon className="size-4" />
-        </Button>
-        <SessionPortAccessPopover state={workbench.portAccessState} />
-        <Button
-          aria-label={terminalButtonLabel}
-          aria-pressed={workbench.terminalPanelState.isVisible}
-          className={
-            workbench.terminalPanelState.isVisible
-              ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
-              : "bg-transparent text-foreground shadow-none hover:bg-stone-100"
-          }
-          disabled={isTerminalOpenDisabled}
-          onClick={() => {
+          },
+          pressed: workbench.diffPanelState.isVisible,
+          title: diffButtonTitle,
+        }}
+        extraActions={<SessionPortAccessPopover state={workbench.portAccessState} />}
+        repositoryControl={{
+          ariaLabel: "Primary repository",
+          disabled:
+            !workbench.connectionReadiness.canConnect ||
+            workbench.primaryRepositoryState.isLoading ||
+            workbench.primaryRepositoryControlState.isSwitching ||
+            workbench.primaryRepositoryControlState.disabledReason !== null,
+          onValueChange: (nextValue) => {
+            void workbench.primaryRepositoryControlState.switchPrimaryRepository(
+              nextValue === SessionRepositoryNoneValue ? null : nextValue,
+            );
+          },
+          options: workbench.primaryRepositoryState.options,
+          selectedValue:
+            workbench.primaryRepositoryState.selectedRepositoryPath ?? SessionRepositoryNoneValue,
+          title:
+            workbench.primaryRepositoryState.errorMessage ??
+            workbench.primaryRepositoryControlState.disabledReason ??
+            (!workbench.connectionReadiness.canConnect
+              ? (workbench.stoppedSessionMessage ??
+                "Primary repository is available only when the sandbox is running.")
+              : workbench.primaryRepositoryControlState.isSwitching
+                ? "Switching the active chat thread for the selected repository."
+                : workbench.primaryRepositoryState.isLoading
+                  ? "Loading repositories from the active sandbox."
+                  : "Primary repository"),
+        }}
+        status={{
+          kind: headerStatusKind,
+          label: headerStatusLabel,
+        }}
+        terminalControl={{
+          ariaLabel: terminalButtonLabel,
+          className: workbench.terminalPanelState.isVisible
+            ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
+            : "bg-transparent text-foreground shadow-none hover:bg-stone-100",
+          disabled: isTerminalOpenDisabled,
+          onClick: () => {
             if (workbench.terminalPanelState.isVisible) {
               workbench.terminalPanelState.closePanel();
               void workbench.ptyState.actions.disconnectPty();
@@ -139,15 +136,11 @@ function SessionWorkbenchPageContent(input: {
             }
 
             workbench.terminalPanelState.openPanel();
-          }}
-          size="icon-sm"
-          title={terminalButtonTitle}
-          type="button"
-          variant="ghost"
-        >
-          <TerminalIcon className="size-4" />
-        </Button>
-      </div>
+          },
+          pressed: workbench.terminalPanelState.isVisible,
+          title: terminalButtonTitle,
+        }}
+      />
     ),
     [
       isTerminalOpenDisabled,
@@ -155,14 +148,21 @@ function SessionWorkbenchPageContent(input: {
       cliButtonTitle,
       diffButtonLabel,
       diffButtonTitle,
-      headerStatusClassName,
+      headerStatusKind,
       headerStatusLabel,
-      isErrorHeaderStatus,
       terminalButtonLabel,
       terminalButtonTitle,
+      workbench.connectionReadiness.canConnect,
       workbench.diffPanelState.isVisible,
       workbench.diffPanelState.togglePanel,
       workbench.portAccessState,
+      workbench.primaryRepositoryState.errorMessage,
+      workbench.primaryRepositoryState.isLoading,
+      workbench.primaryRepositoryState.options,
+      workbench.primaryRepositoryState.selectedRepositoryPath,
+      workbench.primaryRepositoryControlState.disabledReason,
+      workbench.primaryRepositoryControlState.isSwitching,
+      workbench.primaryRepositoryControlState.switchPrimaryRepository,
       workbench.sandboxLifecycleStatus,
       workbench.primaryPanelState.canEnterCli,
       workbench.primaryPanelState.disabledReason,
@@ -170,6 +170,7 @@ function SessionWorkbenchPageContent(input: {
       workbench.primaryPanelState.exitCliMode,
       workbench.primaryPanelState.isCliToggleActive,
       workbench.ptyState.actions.disconnectPty,
+      workbench.stoppedSessionMessage,
       workbench.terminalPanelState.closePanel,
       workbench.terminalPanelState.isVisible,
       workbench.terminalPanelState.openPanel,
@@ -279,6 +280,7 @@ function SessionWorkbenchPageContent(input: {
       bottomPanel={
         <SessionTerminalPanel
           key={terminalPanelKey}
+          cwd={workbench.primaryRepositoryState.selectedRepositoryPath}
           isConnectionReady={workbench.connectionReadiness.canConnect}
           isVisible={workbench.terminalPanelState.isVisible}
           onHide={workbench.terminalPanelState.closePanel}
