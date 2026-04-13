@@ -6,9 +6,9 @@ import { useEffect, useState } from "react";
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import type {
   IntegrationConnectionDeviceAuthorizationPendingState,
-  IntegrationConnectionDialogState,
+  IntegrationConnectionEditorState,
   IntegrationConnectionMethodId,
-} from "../integrations/integration-connection-dialog.js";
+} from "../integrations/integration-connection-editor.js";
 import type { IntegrationConnectionMethod } from "../integrations/integrations-service-shared.js";
 import {
   cancelDeviceAuthorizationAttempt,
@@ -19,17 +19,27 @@ import {
   updateFormIntegrationConnection,
   updateIntegrationConnection,
 } from "../integrations/integrations-service.js";
-import type { OpenIntegrationConnectionDialogInput } from "./integration-connection-dialog-state-types.js";
+import type { OpenIntegrationConnectionEditorInput } from "./integration-connection-editor-state-types.js";
 import {
-  createClosedIntegrationConnectionDialogDraft,
-  createOpenIntegrationConnectionDialogState,
-  hasIntegrationConnectionDialogChanges,
+  createInitialIntegrationConnectionEditorState,
+  hasIntegrationConnectionEditorChanges,
   isIntegrationConnectionDisplayNameChanged,
   resolveConnectionMethodFormUiModel,
   resolveDefaultMethodId,
-  resolveIntegrationConnectionDialogValidationError,
+  resolveIntegrationConnectionEditorValidationError,
   resolveNextDraftForMethodChange,
-} from "./use-integration-connection-dialog-state-helpers.js";
+} from "./use-integration-connection-editor-state-helpers.js";
+
+type IntegrationConnectionSubmitSuccessInput = {
+  editor: IntegrationConnectionEditorState;
+};
+
+type UseIntegrationConnectionEditorStateInput = {
+  initialEditorInput: OpenIntegrationConnectionEditorInput;
+  onClose?: () => void | Promise<void>;
+  onSubmitSuccess?: (input: IntegrationConnectionSubmitSuccessInput) => void | Promise<void>;
+  queryKey: readonly unknown[];
+};
 
 function isRedirectConnectionMethodId(
   methodId: IntegrationConnectionMethodId,
@@ -44,26 +54,33 @@ function isDeviceAuthorizationMethod(
 }
 
 function resolveSelectedMethod(input: {
-  dialog: IntegrationConnectionDialogState;
+  editor: IntegrationConnectionEditorState;
   methodId: IntegrationConnectionMethodId;
 }): IntegrationConnectionMethod | null {
-  if (input.dialog.mode === "update") {
-    return input.dialog.currentMethod.id === input.methodId ? input.dialog.currentMethod : null;
+  if (input.editor.mode === "update") {
+    return input.editor.currentMethod.id === input.methodId ? input.editor.currentMethod : null;
   }
 
-  return input.dialog.methods.find((method) => method.id === input.methodId) ?? null;
+  return input.editor.methods.find((method) => method.id === input.methodId) ?? null;
 }
 
 const DeviceAuthorizationPollFloorMs = 2_000;
 
-export function useIntegrationConnectionDialogState(input: { queryKey: readonly unknown[] }) {
+export function useIntegrationConnectionEditorState(
+  input: UseIntegrationConnectionEditorStateInput,
+) {
   const queryClient = useQueryClient();
-  const [dialog, setDialog] = useState<IntegrationConnectionDialogState | null>(null);
+  const initialState = createInitialIntegrationConnectionEditorState({
+    defaultMethodId:
+      input.initialEditorInput.mode === "create"
+        ? resolveDefaultMethodId(input.initialEditorInput.methods)
+        : input.initialEditorInput.currentMethod.id,
+    initialEditorInput: input.initialEditorInput,
+  });
+  const editor = initialState.editor;
   const [deviceAuthorizationPending, setDeviceAuthorizationPending] =
     useState<IntegrationConnectionDeviceAuthorizationPendingState | null>(null);
-  const [draft, setDraft] = useState(() =>
-    createClosedIntegrationConnectionDialogDraft(IntegrationConnectionMethodIds.API_KEY),
-  );
+  const [draft, setDraft] = useState(() => initialState.draft);
 
   const createFormMutation = useMutation({
     mutationFn: async (mutationInput: {
@@ -112,44 +129,35 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
   });
 
   const configForm: ReturnType<typeof resolveConnectionMethodFormUiModel> =
-    dialog === null
-      ? {
-          mode: "none",
-        }
-      : resolveConnectionMethodFormUiModel({
-          dialog,
-          methodId: draft.methodId,
-          currentValue: draft.configValue,
-        });
-
-  function closeDialog(): void {
-    setDialog(null);
-    setDeviceAuthorizationPending(null);
-    setDraft(createClosedIntegrationConnectionDialogDraft(IntegrationConnectionMethodIds.API_KEY));
-  }
-
-  function openDialog(openInput: OpenIntegrationConnectionDialogInput): void {
-    const nextState = createOpenIntegrationConnectionDialogState({
-      defaultMethodId:
-        openInput.mode === "create"
-          ? resolveDefaultMethodId(openInput.methods)
-          : openInput.currentMethod.id,
-      openInput,
+    resolveConnectionMethodFormUiModel({
+      editor,
+      methodId: draft.methodId,
+      currentValue: draft.configValue,
     });
-    setDialog(nextState.dialog);
+  const submitPending =
+    createFormMutation.isPending ||
+    startDeviceAuthorizationMutation.isPending ||
+    startRedirectMutation.isPending ||
+    updateConnectionMetadataMutation.isPending ||
+    updateFormMutation.isPending;
+  const closePending = submitPending || cancelDeviceAuthorizationMutation.isPending;
+
+  function closeEditor(): void {
+    if (closePending) {
+      return;
+    }
+
     setDeviceAuthorizationPending(null);
-    setDraft(nextState.draft);
+    void input.onClose?.();
   }
 
-  function closeDialogWithoutCancellingPendingAttempt(): void {
-    setDialog(null);
+  function closeEditorWithoutCancellingPendingAttempt(): void {
     setDeviceAuthorizationPending(null);
-    setDraft(createClosedIntegrationConnectionDialogDraft(IntegrationConnectionMethodIds.API_KEY));
   }
 
   async function cancelPendingDeviceAuthorizationAndClose(): Promise<void> {
     if (deviceAuthorizationPending === null) {
-      closeDialogWithoutCancellingPendingAttempt();
+      closeEditorWithoutCancellingPendingAttempt();
       return;
     }
 
@@ -162,11 +170,22 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
       queryKey: input.queryKey,
     });
 
-    closeDialogWithoutCancellingPendingAttempt();
+    closeEditorWithoutCancellingPendingAttempt();
+    void input.onClose?.();
+  }
+
+  async function handleSubmitSuccess(
+    successInput: IntegrationConnectionSubmitSuccessInput,
+  ): Promise<void> {
+    closeEditorWithoutCancellingPendingAttempt();
+
+    if (input.onSubmitSuccess !== undefined) {
+      await input.onSubmitSuccess(successInput);
+    }
   }
 
   useEffect(() => {
-    if (dialog === null || deviceAuthorizationPending === null) {
+    if (deviceAuthorizationPending === null) {
       return;
     }
 
@@ -207,7 +226,9 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
                 queryKey: input.queryKey,
               });
               if (!disposed) {
-                closeDialogWithoutCancellingPendingAttempt();
+                await handleSubmitSuccess({
+                  editor,
+                });
               }
               return;
             }
@@ -222,7 +243,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
             }
 
             setDeviceAuthorizationPending(null);
-            closeDialogWithoutCancellingPendingAttempt();
+            closeEditorWithoutCancellingPendingAttempt();
           })
           .catch((pollError: unknown) => {
             if (disposed) {
@@ -249,15 +270,11 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
       disposed = true;
       systemScheduler.cancel(timer);
     };
-  }, [deviceAuthorizationPending, dialog, input.queryKey, queryClient]);
+  }, [deviceAuthorizationPending, editor, input.queryKey, queryClient]);
 
   async function runSubmit(): Promise<void> {
-    if (dialog === null) {
-      throw new Error("Connection dialog is required to run this action.");
-    }
-
-    const validationError = resolveIntegrationConnectionDialogValidationError({
-      dialog,
+    const validationError = resolveIntegrationConnectionEditorValidationError({
+      editor,
       methodId: draft.methodId,
       connectionDisplayNameValue: draft.connectionDisplayNameValue,
       secrets: draft.secrets,
@@ -272,7 +289,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
 
     const normalizedConnectionDisplayName = draft.connectionDisplayNameValue.trim();
     const selectedMethod = resolveSelectedMethod({
-      dialog,
+      editor,
       methodId: draft.methodId,
     });
 
@@ -288,16 +305,16 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
         {},
       );
 
-      if (dialog.mode === "update") {
+      if (editor.mode === "update") {
         await updateFormMutation.mutateAsync({
-          connectionId: dialog.connectionId,
+          connectionId: editor.connectionId,
           displayName: normalizedConnectionDisplayName,
           config: draft.configValue,
           ...(Object.keys(normalizedSecrets).length === 0 ? {} : { secrets: normalizedSecrets }),
         });
       } else {
         await createFormMutation.mutateAsync({
-          targetKey: dialog.targetKey,
+          targetKey: editor.targetKey,
           displayName: normalizedConnectionDisplayName,
           methodId: draft.methodId,
           config: draft.configValue,
@@ -309,13 +326,15 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
         queryKey: input.queryKey,
       });
 
-      closeDialog();
+      await handleSubmitSuccess({
+        editor,
+      });
       return;
     }
 
-    if (dialog.mode === "update") {
+    if (editor.mode === "update") {
       await updateConnectionMetadataMutation.mutateAsync({
-        connectionId: dialog.connectionId,
+        connectionId: editor.connectionId,
         displayName: normalizedConnectionDisplayName,
       });
 
@@ -323,13 +342,15 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
         queryKey: input.queryKey,
       });
 
-      closeDialog();
+      await handleSubmitSuccess({
+        editor,
+      });
       return;
     }
 
     if (isDeviceAuthorizationMethod(selectedMethod)) {
       const started = await startDeviceAuthorizationMutation.mutateAsync({
-        targetKey: dialog.targetKey,
+        targetKey: editor.targetKey,
         methodId: draft.methodId,
         ...(normalizedConnectionDisplayName.length === 0
           ? {}
@@ -337,7 +358,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
       });
 
       setDeviceAuthorizationPending({
-        targetKey: dialog.targetKey,
+        targetKey: editor.targetKey,
         attemptId: started.attemptId,
         verificationUrl: started.verificationUrl,
         userCode: started.userCode,
@@ -353,7 +374,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
     }
 
     const started = await startRedirectMutation.mutateAsync({
-      targetKey: dialog.targetKey,
+      targetKey: editor.targetKey,
       methodId: draft.methodId,
       ...(Object.keys(draft.configValue).length === 0 ? {} : { config: draft.configValue }),
       ...(normalizedConnectionDisplayName.length === 0
@@ -363,7 +384,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
     globalThis.location.assign(started.authorizationUrl);
   }
 
-  function submitDialog(): void {
+  function submitEditor(): void {
     setDraft((currentDraft) => ({
       ...currentDraft,
       error: null,
@@ -374,7 +395,7 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
         error: resolveApiErrorMessage({
           error: submitError,
           fallbackMessage:
-            dialog?.mode === "update"
+            editor.mode === "update"
               ? "Could not update connection."
               : "Could not start integration connection.",
         }),
@@ -385,22 +406,17 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
   return {
     configForm,
     configValue: draft.configValue,
-    dialog,
+    editor,
     methodId: draft.methodId,
     connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
     connectionDisplayNameValue: draft.connectionDisplayNameValue,
     secrets: draft.secrets,
     error: draft.error,
     deviceAuthorizationPending,
-    pending:
-      createFormMutation.isPending ||
-      startDeviceAuthorizationMutation.isPending ||
-      startRedirectMutation.isPending ||
-      cancelDeviceAuthorizationMutation.isPending ||
-      updateConnectionMetadataMutation.isPending ||
-      updateFormMutation.isPending,
-    hasChanges: hasIntegrationConnectionDialogChanges({
-      dialog,
+    pending: submitPending,
+    closeDisabled: closePending,
+    hasChanges: hasIntegrationConnectionEditorChanges({
+      editor,
       connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
       connectionDisplayNameValue: draft.connectionDisplayNameValue,
       configValue: draft.configValue,
@@ -409,12 +425,11 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
     }),
     isSecretChanged: Object.values(draft.secrets).some((value) => value.trim().length > 0),
     isConnectionDisplayNameChanged: isIntegrationConnectionDisplayNameChanged({
-      dialog,
+      editor,
       connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
       connectionDisplayNameValue: draft.connectionDisplayNameValue,
     }),
-    openDialog,
-    closeDialog: (): void => {
+    closeEditor: (): void => {
       if (deviceAuthorizationPending !== null) {
         void cancelPendingDeviceAuthorizationAndClose().catch((cancelError: unknown) => {
           setDraft((currentDraft) => ({
@@ -428,9 +443,9 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
         return;
       }
 
-      closeDialog();
+      closeEditor();
     },
-    submitDialog,
+    submitEditor,
     onConfigChange: (value: Record<string, unknown>): void => {
       setDraft((currentDraft) => ({
         ...currentDraft,
@@ -456,13 +471,9 @@ export function useIntegrationConnectionDialogState(input: { queryKey: readonly 
       }));
     },
     onMethodChange: (nextMethodId: IntegrationConnectionMethodId): void => {
-      if (dialog === null) {
-        return;
-      }
-
       setDraft((currentDraft) =>
         resolveNextDraftForMethodChange({
-          dialog,
+          editor,
           nextMethodId,
           currentDraft,
         }),

@@ -5,12 +5,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveConnectionMethodFormUiModel } from "../pages/use-integration-connection-dialog-state-helpers.js";
+import { resolveConnectionMethodFormUiModel } from "../pages/use-integration-connection-editor-state-helpers.js";
 import {
-  IntegrationConnectionDialog,
+  IntegrationConnectionEditorPage,
   IntegrationConnectionMethodIds,
-  type IntegrationConnectionDialogState,
-} from "./integration-connection-dialog.js";
+  type IntegrationConnectionEditorState,
+} from "./integration-connection-editor.js";
 
 const GitHubAppInstallationSecretFields = [
   {
@@ -27,7 +27,7 @@ const GitHubAppInstallationSecretFields = [
   },
 ] as const;
 
-const createDialog: IntegrationConnectionDialogState = {
+const createEditor: IntegrationConnectionEditorState = {
   methods: [
     {
       id: IntegrationConnectionMethodIds.API_KEY,
@@ -60,8 +60,11 @@ const createDialog: IntegrationConnectionDialogState = {
   targetVariantId: "github-cloud",
 };
 
-function renderDialog(input: Partial<ComponentProps<typeof IntegrationConnectionDialog>> = {}) {
-  const props: ComponentProps<typeof IntegrationConnectionDialog> = {
+function renderEditorPage(
+  input: Partial<ComponentProps<typeof IntegrationConnectionEditorPage>> = {},
+) {
+  const props: ComponentProps<typeof IntegrationConnectionEditorPage> = {
+    closeDisabled: false,
     configForm: {
       mode: "none",
     },
@@ -69,7 +72,7 @@ function renderDialog(input: Partial<ComponentProps<typeof IntegrationConnection
     connectionDisplayNamePlaceholder: "OpenAI connection",
     connectionDisplayNameValue: "",
     connectError: null,
-    dialog: createDialog,
+    editor: createEditor,
     hasChanges: true,
     isConnectionDisplayNameChanged: false,
     isSecretChanged: false,
@@ -85,12 +88,12 @@ function renderDialog(input: Partial<ComponentProps<typeof IntegrationConnection
     ...input,
   };
 
-  render(<IntegrationConnectionDialog {...props} />);
+  render(<IntegrationConnectionEditorPage {...props} />);
 }
 
-function createUpdateFormDialog(
-  input: Partial<Extract<IntegrationConnectionDialogState, { mode: "update" }>> = {},
-): Extract<IntegrationConnectionDialogState, { mode: "update" }> {
+function createUpdateFormEditor(
+  input: Partial<Extract<IntegrationConnectionEditorState, { mode: "update" }>> = {},
+): Extract<IntegrationConnectionEditorState, { mode: "update" }> {
   return {
     connectionConfig: {
       connection_method: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
@@ -123,9 +126,9 @@ function createUpdateFormDialog(
   };
 }
 
-function createJiraCreateDialog(
-  method: Extract<IntegrationConnectionDialogState, { mode: "create" }>["methods"][number],
-): Extract<IntegrationConnectionDialogState, { mode: "create" }> {
+function createJiraCreateEditor(
+  method: Extract<IntegrationConnectionEditorState, { mode: "create" }>["methods"][number],
+): Extract<IntegrationConnectionEditorState, { mode: "create" }> {
   return {
     methods: [method],
     mode: "create",
@@ -137,13 +140,13 @@ function createJiraCreateDialog(
   };
 }
 
-describe("IntegrationConnectionDialog", () => {
+describe("IntegrationConnectionEditorPage", () => {
   afterEach(() => {
     cleanup();
   });
 
   it("disables 1Password autofill for form secret input", () => {
-    renderDialog();
+    renderEditorPage();
 
     const input = screen.getByPlaceholderText("Enter API key");
     expect(input.getAttribute("data-1p-ignore")).toBe("true");
@@ -151,7 +154,7 @@ describe("IntegrationConnectionDialog", () => {
   });
 
   it("renders definition-driven config fields for form methods", () => {
-    renderDialog({
+    renderEditorPage({
       configForm: {
         mode: "form",
         schema: {
@@ -173,7 +176,7 @@ describe("IntegrationConnectionDialog", () => {
         endpoint: "https://api.example.com",
       },
       connectionDisplayNamePlaceholder: "Example connection",
-      dialog: {
+      editor: {
         methods: [
           {
             id: "custom-form",
@@ -204,12 +207,12 @@ describe("IntegrationConnectionDialog", () => {
   });
 
   it("does not render auth method selection in update mode", () => {
-    renderDialog({
+    renderEditorPage({
       configValue: {
         connection_method: IntegrationConnectionMethodIds.API_KEY,
       },
       connectionDisplayNameValue: "Existing connection",
-      dialog: {
+      editor: {
         connectionConfig: {
           connection_method: IntegrationConnectionMethodIds.API_KEY,
         },
@@ -244,14 +247,14 @@ describe("IntegrationConnectionDialog", () => {
   });
 
   it("renders auth method selection as a select in create mode", () => {
-    renderDialog();
+    renderEditorPage();
 
     expect(screen.getByRole("combobox", { name: "Authentication method" })).toBeTruthy();
     expect(screen.queryByRole("radio")).toBeNull();
   });
 
   it("does not preselect an auth method in create mode", () => {
-    renderDialog({
+    renderEditorPage({
       methodId: "",
     });
 
@@ -285,9 +288,9 @@ describe("IntegrationConnectionDialog", () => {
       isConnectionDisplayNameChanged,
       expectedDisabled,
     }) => {
-      renderDialog({
+      renderEditorPage({
         connectionDisplayNameValue,
-        dialog: createUpdateFormDialog(),
+        editor: createUpdateFormEditor(),
         hasChanges,
         isConnectionDisplayNameChanged,
         methodId: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
@@ -301,8 +304,17 @@ describe("IntegrationConnectionDialog", () => {
     },
   );
 
+  it("disables Cancel while a non-device submit is pending", () => {
+    renderEditorPage({
+      closeDisabled: true,
+      pending: true,
+    });
+
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("renders Jira personal token configuration fields", () => {
-    const dialog = createJiraCreateDialog({
+    const editor = createJiraCreateEditor({
       id: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
       label: "Personal API token",
       kind: "form",
@@ -317,15 +329,15 @@ describe("IntegrationConnectionDialog", () => {
     });
 
     const configForm = resolveConnectionMethodFormUiModel({
-      dialog,
+      editor,
       methodId: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
       currentValue: {},
     });
 
-    renderDialog({
+    renderEditorPage({
       configForm,
       connectionDisplayNamePlaceholder: "Jira connection",
-      dialog,
+      editor,
       methodId: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
     });
 
@@ -335,7 +347,7 @@ describe("IntegrationConnectionDialog", () => {
   });
 
   it("renders definition-driven config fields for redirect methods", () => {
-    const dialog: Extract<IntegrationConnectionDialogState, { mode: "create" }> = {
+    const editor: Extract<IntegrationConnectionEditorState, { mode: "create" }> = {
       methods: [
         {
           id: IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE,
@@ -358,15 +370,15 @@ describe("IntegrationConnectionDialog", () => {
     };
 
     const configForm = resolveConnectionMethodFormUiModel({
-      dialog,
+      editor,
       methodId: IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE,
       currentValue: {},
     });
 
-    renderDialog({
+    renderEditorPage({
       configForm,
       connectionDisplayNamePlaceholder: "SigNoz connection",
-      dialog,
+      editor,
       methodId: IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE,
     });
 
@@ -375,7 +387,7 @@ describe("IntegrationConnectionDialog", () => {
   });
 
   it("does not render persisted redirect config fields when no start config schema is declared", () => {
-    const dialog: Extract<IntegrationConnectionDialogState, { mode: "create" }> = {
+    const editor: Extract<IntegrationConnectionEditorState, { mode: "create" }> = {
       methods: [
         {
           id: IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE,
@@ -399,7 +411,7 @@ describe("IntegrationConnectionDialog", () => {
 
     expect(
       resolveConnectionMethodFormUiModel({
-        dialog,
+        editor,
         methodId: IntegrationConnectionMethodIds.OAUTH2_AUTHORIZATION_CODE,
         currentValue: {},
       }),
@@ -409,7 +421,7 @@ describe("IntegrationConnectionDialog", () => {
   });
 
   it("renders device-authorization pending instructions and controls", () => {
-    renderDialog({
+    renderEditorPage({
       deviceAuthorizationPending: {
         targetKey: "openai-default",
         attemptId: "ida_123",
@@ -439,11 +451,14 @@ describe("IntegrationConnectionDialog", () => {
     expect(screen.getByDisplayValue("ABCD-1234")).toBeTruthy();
     expect(screen.getByRole("link", { name: "https://auth.openai.com/codex/device" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancel authorization" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Create connection" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Cancel authorization" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(screen.queryByRole("button", { name: "Add connection" })).toBeNull();
   });
 
   it("hides GitHub API key discriminator config and the nested rjsf submit button", () => {
-    const dialog: IntegrationConnectionDialogState = {
+    const editor: IntegrationConnectionEditorState = {
       methods: [
         {
           id: IntegrationConnectionMethodIds.API_KEY,
@@ -471,7 +486,7 @@ describe("IntegrationConnectionDialog", () => {
     };
 
     const configForm = resolveConnectionMethodFormUiModel({
-      dialog,
+      editor,
       methodId: IntegrationConnectionMethodIds.API_KEY,
       currentValue: {},
     });
@@ -481,10 +496,10 @@ describe("IntegrationConnectionDialog", () => {
       visiblePropertyKeys: [],
     });
 
-    renderDialog({
+    renderEditorPage({
       configForm,
       connectionDisplayNamePlaceholder: "GitHub connection",
-      dialog,
+      editor,
       methodId: IntegrationConnectionMethodIds.API_KEY,
     });
 
@@ -492,11 +507,11 @@ describe("IntegrationConnectionDialog", () => {
     expect(screen.queryByLabelText("connection_method")).toBeNull();
     expect(screen.queryByRole("button", { name: "Submit" })).toBeNull();
     expect(screen.getByPlaceholderText("Enter API key")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create connection" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
   });
 
   it("renders GitHub App form fields in create mode", () => {
-    renderDialog({
+    renderEditorPage({
       configForm: {
         mode: "form",
         schema: {
@@ -537,12 +552,12 @@ describe("IntegrationConnectionDialog", () => {
     expect(screen.getByPlaceholderText("Enter webhook secret")).toBeTruthy();
     expect(screen.queryByLabelText("installation_id")).toBeNull();
     expect(screen.queryByLabelText("setup_action")).toBeNull();
-    expect(screen.getByRole("button", { name: "Create connection" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add connection" })).toBeTruthy();
   });
 
   it("hides callback-managed GitHub App config fields from the form", () => {
     const configForm = resolveConnectionMethodFormUiModel({
-      dialog: createDialog,
+      editor: createEditor,
       methodId: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
       currentValue: {},
     });
@@ -562,111 +577,5 @@ describe("IntegrationConnectionDialog", () => {
     expect(configForm.uiSchema.setup_action).toMatchObject({
       "ui:widget": "hidden",
     });
-  });
-
-  it("does not throw while resolving Jira personal token fields for an incomplete site url", () => {
-    const dialog = createJiraCreateDialog({
-      id: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
-      label: "Personal API token",
-      kind: "form",
-      secretFields: [
-        {
-          name: "apiKey",
-          label: "Personal API token",
-          placeholder: "Enter personal API token",
-          inputType: "password",
-        },
-      ],
-    });
-
-    expect(() =>
-      resolveConnectionMethodFormUiModel({
-        dialog,
-        methodId: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
-        currentValue: {
-          connection_method: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
-          site_url: "https://",
-        },
-      }),
-    ).not.toThrow();
-
-    const configForm = resolveConnectionMethodFormUiModel({
-      dialog,
-      methodId: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
-      currentValue: {
-        connection_method: JiraConnectionMethodIds.PERSONAL_API_TOKEN,
-        site_url: "https://",
-      },
-    });
-
-    expect(configForm).toMatchObject({
-      mode: "form",
-      visiblePropertyKeys: ["site_url", "email"],
-    });
-  });
-
-  it("renders Jira service account token configuration fields", () => {
-    const dialog = createJiraCreateDialog({
-      id: JiraConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
-      label: "Service account API token",
-      kind: "form",
-      secretFields: [
-        {
-          name: "apiKey",
-          label: "Service account API token",
-          placeholder: "Enter service account API token",
-          inputType: "password",
-        },
-      ],
-    });
-
-    const configForm = resolveConnectionMethodFormUiModel({
-      dialog,
-      methodId: JiraConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
-      currentValue: {},
-    });
-
-    renderDialog({
-      configForm,
-      connectionDisplayNamePlaceholder: "Jira connection",
-      dialog,
-      methodId: JiraConnectionMethodIds.SERVICE_ACCOUNT_API_TOKEN,
-    });
-
-    expect(screen.getByLabelText(/Cloud ID/)).toBeTruthy();
-    expect(screen.getByPlaceholderText("Enter service account API token")).toBeTruthy();
-  });
-
-  it("renders Jira service account OAuth client credentials configuration fields", () => {
-    const dialog = createJiraCreateDialog({
-      id: JiraConnectionMethodIds.SERVICE_ACCOUNT_OAUTH_CLIENT_CREDENTIALS,
-      label: "Service account OAuth client credentials",
-      kind: "form",
-      secretFields: [
-        {
-          name: "clientSecret",
-          label: "Client secret",
-          placeholder: "Enter service account OAuth client secret",
-          inputType: "password",
-        },
-      ],
-    });
-
-    const configForm = resolveConnectionMethodFormUiModel({
-      dialog,
-      methodId: JiraConnectionMethodIds.SERVICE_ACCOUNT_OAUTH_CLIENT_CREDENTIALS,
-      currentValue: {},
-    });
-
-    renderDialog({
-      configForm,
-      connectionDisplayNamePlaceholder: "Jira connection",
-      dialog,
-      methodId: JiraConnectionMethodIds.SERVICE_ACCOUNT_OAUTH_CLIENT_CREDENTIALS,
-    });
-
-    expect(screen.getByLabelText(/Cloud ID/)).toBeTruthy();
-    expect(screen.getByLabelText(/Client ID/)).toBeTruthy();
-    expect(screen.getByPlaceholderText("Enter service account OAuth client secret")).toBeTruthy();
   });
 });

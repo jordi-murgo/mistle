@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { resetDashboardConfigForTest } from "../../config.js";
 import { cleanupTestQueryClients, createTestQueryClient } from "../../test-support/query-client.js";
-import { useIntegrationConnectionDialogState } from "./use-integration-connection-dialog-state.js";
+import { useIntegrationConnectionEditorState } from "./use-integration-connection-editor-state.js";
 
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: React.PropsWithChildren): React.JSX.Element {
@@ -36,10 +36,15 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
 }
 
 async function startControlPlaneTestServer(input: {
-  handler: (request: ServerRequestRecord) => {
-    status: number;
-    body: unknown;
-  };
+  handler: (request: ServerRequestRecord) =>
+    | {
+        status: number;
+        body: unknown;
+      }
+    | Promise<{
+        status: number;
+        body: unknown;
+      }>;
 }): Promise<{
   origin: string;
   requests: ServerRequestRecord[];
@@ -54,7 +59,7 @@ async function startControlPlaneTestServer(input: {
     };
     requests.push(requestRecord);
 
-    const handled = input.handler(requestRecord);
+    const handled = await input.handler(requestRecord);
     response.statusCode = handled.status;
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify(handled.body));
@@ -101,7 +106,7 @@ function setControlPlaneOrigin(origin: string): void {
   resetDashboardConfigForTest();
 }
 
-function openAiCreateDialogInput() {
+function openAiCreateEditorInput() {
   return {
     mode: "create" as const,
     methods: [
@@ -134,8 +139,8 @@ afterEach(async () => {
   resetDashboardConfigForTest();
 });
 
-describe("useIntegrationConnectionDialogState", () => {
-  it("starts device authorization and closes after completion is observed", async () => {
+describe("useIntegrationConnectionEditorState", () => {
+  it("starts device authorization and calls submit success after completion is observed", async () => {
     const server = await startControlPlaneTestServer({
       handler: (request) => {
         if (
@@ -177,9 +182,14 @@ describe("useIntegrationConnectionDialogState", () => {
     try {
       setControlPlaneOrigin(server.origin);
       const queryClient = createTestQueryClient();
+      let submittedTargetKey: string | null = null;
       const { result } = renderHook(
         () =>
-          useIntegrationConnectionDialogState({
+          useIntegrationConnectionEditorState({
+            initialEditorInput: openAiCreateEditorInput(),
+            onSubmitSuccess: ({ editor }) => {
+              submittedTargetKey = editor.targetKey;
+            },
             queryKey: ["integrations"],
           }),
         {
@@ -188,13 +198,10 @@ describe("useIntegrationConnectionDialogState", () => {
       );
 
       act(() => {
-        result.current.openDialog(openAiCreateDialogInput());
-      });
-      act(() => {
         result.current.onConnectionDisplayNameChange("OpenAI Personal");
       });
       act(() => {
-        result.current.submitDialog();
+        result.current.submitEditor();
       });
 
       await waitFor(() => {
@@ -203,7 +210,8 @@ describe("useIntegrationConnectionDialogState", () => {
 
       await waitFor(
         () => {
-          expect(result.current.dialog).toBeNull();
+          expect(submittedTargetKey).toBe("openai-default");
+          expect(result.current.deviceAuthorizationPending).toBeNull();
         },
         {
           timeout: 5_000,
@@ -231,7 +239,7 @@ describe("useIntegrationConnectionDialogState", () => {
     }
   });
 
-  it("surfaces device-authorization failure back into the dialog", async () => {
+  it("surfaces device-authorization failure back into the editor", async () => {
     const server = await startControlPlaneTestServer({
       handler: (request) => {
         if (
@@ -278,7 +286,8 @@ describe("useIntegrationConnectionDialogState", () => {
       const queryClient = createTestQueryClient();
       const { result } = renderHook(
         () =>
-          useIntegrationConnectionDialogState({
+          useIntegrationConnectionEditorState({
+            initialEditorInput: openAiCreateEditorInput(),
             queryKey: ["integrations"],
           }),
         {
@@ -287,19 +296,16 @@ describe("useIntegrationConnectionDialogState", () => {
       );
 
       act(() => {
-        result.current.openDialog(openAiCreateDialogInput());
-      });
-      act(() => {
         result.current.onConnectionDisplayNameChange("OpenAI Personal");
       });
       act(() => {
-        result.current.submitDialog();
+        result.current.submitEditor();
       });
 
       await waitFor(
         () => {
           expect(result.current.deviceAuthorizationPending).toBeNull();
-          expect(result.current.dialog?.mode).toBe("create");
+          expect(result.current.editor.mode).toBe("create");
           expect(result.current.error).toBe(
             "The device authorization attempt expired before approval completed.",
           );
@@ -313,7 +319,7 @@ describe("useIntegrationConnectionDialogState", () => {
     }
   });
 
-  it("cancels the pending attempt when the dialog is closed", async () => {
+  it("cancels the pending attempt when the editor is closed", async () => {
     const server = await startControlPlaneTestServer({
       handler: (request) => {
         if (
@@ -354,9 +360,14 @@ describe("useIntegrationConnectionDialogState", () => {
     try {
       setControlPlaneOrigin(server.origin);
       const queryClient = createTestQueryClient();
+      let closeCount = 0;
       const { result } = renderHook(
         () =>
-          useIntegrationConnectionDialogState({
+          useIntegrationConnectionEditorState({
+            initialEditorInput: openAiCreateEditorInput(),
+            onClose: () => {
+              closeCount += 1;
+            },
             queryKey: ["integrations"],
           }),
         {
@@ -365,13 +376,10 @@ describe("useIntegrationConnectionDialogState", () => {
       );
 
       act(() => {
-        result.current.openDialog(openAiCreateDialogInput());
-      });
-      act(() => {
         result.current.onConnectionDisplayNameChange("OpenAI Personal");
       });
       act(() => {
-        result.current.submitDialog();
+        result.current.submitEditor();
       });
 
       await waitFor(() => {
@@ -379,11 +387,12 @@ describe("useIntegrationConnectionDialogState", () => {
       });
 
       act(() => {
-        result.current.closeDialog();
+        result.current.closeEditor();
       });
 
       await waitFor(() => {
-        expect(result.current.dialog).toBeNull();
+        expect(closeCount).toBe(1);
+        expect(result.current.deviceAuthorizationPending).toBeNull();
       });
 
       expect(server.requests).toContainEqual({

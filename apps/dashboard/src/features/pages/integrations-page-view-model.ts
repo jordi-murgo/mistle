@@ -9,12 +9,12 @@ import {
   IntegrationConnectionMethodIds,
   type IntegrationConnectionMethod,
   type IntegrationConnectionMethodId,
-} from "../integrations/integration-connection-dialog.js";
+} from "../integrations/integration-connection-editor.js";
 import type {
   IntegrationConnection,
   IntegrationConnectionResource,
 } from "../integrations/integrations-service.js";
-import type { OpenIntegrationConnectionDialogInput } from "./integration-connection-dialog-state-types.js";
+import type { OpenIntegrationConnectionEditorInput } from "./integration-connection-editor-state-types.js";
 import type { OrganizationIntegrationsSettingsPageCard } from "./organization-integrations-settings-page-view.js";
 
 const GitHubAppInstallationCompletePath = "/p/integration/callbacks/github-app-installation";
@@ -56,7 +56,7 @@ export function buildConnectedIntegrationViewCards(input: {
 
 export function buildAvailableIntegrationViewCards(input: {
   cards: readonly IntegrationCardViewModel[];
-  onOpenCreateDialog: (input: OpenIntegrationConnectionDialogInput) => void;
+  onOpenCreatePage: (targetKey: string) => void;
 }): readonly OrganizationIntegrationsSettingsPageCard[] {
   return input.cards.map((card) => {
     const methods = toConnectionMethods(card.target.connectionMethods);
@@ -70,18 +70,24 @@ export function buildAvailableIntegrationViewCards(input: {
       actionDisabled: methods.length === 0,
       actionLabel: "Add",
       onAction: () => {
-        input.onOpenCreateDialog({
-          targetConfig: resolveTargetConfig(card.target.config),
-          targetKey: card.target.targetKey,
-          targetDisplayName: card.displayName,
-          targetFamilyId: card.target.familyId,
-          targetVariantId: card.target.variantId,
-          methods,
-          mode: "create",
-        });
+        input.onOpenCreatePage(card.target.targetKey);
       },
     };
   });
+}
+
+export function buildOpenCreateIntegrationConnectionInput(
+  card: IntegrationCardViewModel,
+): OpenIntegrationConnectionEditorInput {
+  return {
+    targetConfig: resolveTargetConfig(card.target.config),
+    targetKey: card.target.targetKey,
+    targetDisplayName: card.displayName,
+    targetFamilyId: card.target.familyId,
+    targetVariantId: card.target.variantId,
+    methods: toConnectionMethods(card.target.connectionMethods),
+    mode: "create",
+  };
 }
 
 export function resolveEditableConnectionMethodId(

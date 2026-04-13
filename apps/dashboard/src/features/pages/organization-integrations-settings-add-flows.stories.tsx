@@ -3,39 +3,22 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { withDashboardPageStory } from "../../storybook/decorators.js";
 import {
   AddFlowStorySpecs,
-  createAvailableCardsOverview,
   IntegrationSettingsAddFlowStory,
 } from "./organization-integrations-settings-page-story-support.js";
-import { OrganizationIntegrationsSettingsPageView } from "./organization-integrations-settings-page-view.js";
+
+function OrganizationIntegrationsAddFlowStory(): React.JSX.Element {
+  return <IntegrationSettingsAddFlowStory {...AddFlowStorySpecs.GitHubCloud} />;
+}
 
 const meta = {
   title: "Dashboard/Integrations/AddFlows",
-  component: OrganizationIntegrationsSettingsPageView,
+  component: OrganizationIntegrationsAddFlowStory,
   decorators: [withDashboardPageStory],
-  args: {
-    availableCards: [],
-    connectedCards: [],
-    isLoading: false,
-    loadErrorMessage: null,
-  },
-} satisfies Meta<typeof OrganizationIntegrationsSettingsPageView>;
+} satisfies Meta<typeof OrganizationIntegrationsAddFlowStory>;
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
-
-export const Overview: Story = {
-  render: function RenderStory() {
-    return (
-      <OrganizationIntegrationsSettingsPageView
-        availableCards={createAvailableCardsOverview()}
-        connectedCards={[]}
-        isLoading={false}
-        loadErrorMessage={null}
-      />
-    );
-  },
-};
 
 export const GitHubCloud: Story = {
   name: "GitHub Cloud",

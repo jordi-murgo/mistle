@@ -4,7 +4,7 @@ import type { IntegrationCardViewModel } from "../integrations/directory-model.j
 import {
   IntegrationConnectionMethodIds,
   type IntegrationConnectionMethod,
-} from "../integrations/integration-connection-dialog.js";
+} from "../integrations/integration-connection-editor.js";
 import type { IntegrationConnection } from "../integrations/integrations-service.js";
 import {
   buildAvailableIntegrationViewCards,
@@ -12,6 +12,7 @@ import {
   buildIntegrationConnectionDetailItems,
   buildIntegrationConnectionResourceItemsByKey,
   buildIntegrationConnectionResourceRequests,
+  buildOpenCreateIntegrationConnectionInput,
   createIntegrationConnectionResourceKey,
   createRefreshingResourceKey,
   getIntegrationConnectionResourceSummaries,
@@ -21,7 +22,7 @@ import {
 } from "./integrations-page-view-model.js";
 
 describe("integrations page view model", () => {
-  it("passes through connection methods for the dialog", () => {
+  it("passes through connection methods for the editor", () => {
     expect(
       toConnectionMethods([
         {
@@ -120,33 +121,63 @@ describe("integrations page view model", () => {
   });
 
   it("builds available integration cards with add actions and disabled invalid entries", () => {
-    let openedDialogInput: {
-      targetKey: string;
-      targetFamilyId: string;
-      targetVariantId: string;
-      targetConfig: Record<string, unknown>;
-    } | null = null;
+    let openedTargetKey: string | null = null;
 
     const [card] = buildAvailableIntegrationViewCards({
       cards: [createCard({ description: "Bring GitHub into Mistle.", connectionMethods: [] })],
-      onOpenCreateDialog: (input) => {
-        openedDialogInput = {
-          targetKey: input.targetKey,
-          targetFamilyId: input.targetFamilyId,
-          targetVariantId: input.targetVariantId,
-          targetConfig: input.targetConfig,
-        };
+      onOpenCreatePage: (targetKey) => {
+        openedTargetKey = targetKey;
       },
     });
 
     expect(card?.actionLabel).toBe("Add");
     expect(card?.actionDisabled).toBe(true);
     card?.onAction();
-    expect(openedDialogInput).toEqual({
-      targetKey: "github",
-      targetFamilyId: "github",
-      targetVariantId: "github-cloud",
+    expect(openedTargetKey).toBe("github");
+  });
+
+  it("builds create inputs from integration cards", () => {
+    const input = buildOpenCreateIntegrationConnectionInput(
+      createCard({
+        description: "Bring GitHub into Mistle.",
+        connectionMethods: [
+          {
+            id: IntegrationConnectionMethodIds.API_KEY,
+            label: "API key",
+            kind: "form",
+            secretFields: [
+              {
+                name: "apiKey",
+                label: "API key",
+                inputType: "password",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(input).toEqual({
+      mode: "create",
+      methods: [
+        {
+          id: IntegrationConnectionMethodIds.API_KEY,
+          label: "API key",
+          kind: "form",
+          secretFields: [
+            {
+              name: "apiKey",
+              label: "API key",
+              inputType: "password",
+            },
+          ],
+        },
+      ],
       targetConfig: {},
+      targetDisplayName: "GitHub",
+      targetFamilyId: "github",
+      targetKey: "github",
+      targetVariantId: "github-cloud",
     });
   });
 

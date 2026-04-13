@@ -5,24 +5,22 @@ import { useState } from "react";
 import type React from "react";
 
 import {
-  IntegrationConnectionDialog,
+  IntegrationConnectionEditorPage,
   type IntegrationConnectionMethodId,
-} from "../integrations/integration-connection-dialog.js";
+} from "../integrations/integration-connection-editor.js";
 import type { IntegrationConnectionMethod } from "../integrations/integrations-service-shared.js";
-import type { OpenIntegrationConnectionDialogInput } from "./integration-connection-dialog-state-types.js";
+import { FormPageFrame } from "../shared/page-frame.js";
+import type { OpenIntegrationConnectionEditorInput } from "./integration-connection-editor-state-types.js";
+import type { OrganizationIntegrationsSettingsPageCard } from "./organization-integrations-settings-page-view.js";
 import {
-  type OrganizationIntegrationsSettingsPageCard,
-  OrganizationIntegrationsSettingsPageView,
-} from "./organization-integrations-settings-page-view.js";
-import {
-  createOpenIntegrationConnectionDialogState,
-  hasIntegrationConnectionDialogChanges,
+  createInitialIntegrationConnectionEditorState,
+  hasIntegrationConnectionEditorChanges,
   isIntegrationConnectionDisplayNameChanged,
   resolveConnectionMethodFormUiModel,
   resolveDefaultMethodId,
-  resolveIntegrationConnectionDialogValidationError,
+  resolveIntegrationConnectionEditorValidationError,
   resolveNextDraftForMethodChange,
-} from "./use-integration-connection-dialog-state-helpers.js";
+} from "./use-integration-connection-editor-state-helpers.js";
 
 const IntegrationRegistry = createBrowserIntegrationRegistry();
 type BuiltInIntegrationVariantId =
@@ -33,7 +31,6 @@ type BuiltInIntegrationVariantId =
   | "openai-default";
 
 type StoryIntegrationSpec = {
-  cardDescription?: string;
   connectError?: string | null;
   initialMethodId?: IntegrationConnectionMethodId;
   initialSecrets?: Record<string, string>;
@@ -171,23 +168,9 @@ function createTargetConfig(variantId: BuiltInIntegrationVariantId): Record<stri
   return {};
 }
 
-function createConnectedCards(): readonly OrganizationIntegrationsSettingsPageCard[] {
-  return [
-    {
-      actionLabel: "View",
-      configStatus: "valid",
-      description: "1 connection",
-      displayName: "GitHub",
-      logoKey: "github",
-      onAction: () => {},
-      targetKey: "github-cloud",
-    },
-  ];
-}
-
-function createDialogInput(
+function createEditorInput(
   spec: StoryIntegrationSpec,
-): Extract<OpenIntegrationConnectionDialogInput, { mode: "create" }> {
+): Extract<OpenIntegrationConnectionEditorInput, { mode: "create" }> {
   const definition = getStoryDefinitionOrThrow(spec.variantId);
   const methods = resolveConnectionMethodsOrThrow(definition);
 
@@ -227,18 +210,18 @@ export function createAvailableCardsOverview(): readonly OrganizationIntegration
 }
 
 export function IntegrationSettingsAddFlowStory(spec: StoryIntegrationSpec): React.JSX.Element {
-  const openInput = createDialogInput(spec);
+  const initialEditorInput = createEditorInput(spec);
   const defaultMethodId =
     spec.initialMethodId ??
     resolveDefaultMethodId(
       resolveConnectionMethodsOrThrow(getStoryDefinitionOrThrow(spec.variantId)),
     );
-  const initialState = createOpenIntegrationConnectionDialogState({
+  const initialState = createInitialIntegrationConnectionEditorState({
     defaultMethodId,
-    openInput,
+    initialEditorInput,
   });
   const startsWithoutSelectedMethod =
-    openInput.methods.length > 1 && spec.initialMethodId === undefined;
+    initialEditorInput.methods.length > 1 && spec.initialMethodId === undefined;
   const [draft, setDraft] = useState(() => ({
     ...initialState.draft,
     connectionDisplayNameValue: "",
@@ -247,112 +230,95 @@ export function IntegrationSettingsAddFlowStory(spec: StoryIntegrationSpec): Rea
     secrets: spec.initialSecrets ?? initialState.draft.secrets,
   }));
 
-  const dialog = initialState.dialog;
+  const editor = initialState.editor;
   const configForm =
     draft.methodId.length === 0
       ? {
           mode: "none" as const,
         }
       : resolveConnectionMethodFormUiModel({
-          dialog,
+          editor,
           methodId: draft.methodId,
           currentValue: draft.configValue,
         });
-  const definition = getStoryDefinitionOrThrow(spec.variantId);
-  const availableCards: readonly OrganizationIntegrationsSettingsPageCard[] = [
-    {
-      actionLabel: "Add",
-      configStatus: "valid",
-      description: spec.cardDescription ?? resolveDescriptionOrThrow(definition),
-      displayName: openInput.targetDisplayName,
-      ...(definition.logoKey === undefined ? {} : { logoKey: definition.logoKey }),
-      onAction: () => {},
-      targetKey: openInput.targetKey,
-    },
-  ];
 
   return (
-    <OrganizationIntegrationsSettingsPageView
-      availableCards={availableCards}
-      connectedCards={createConnectedCards()}
-      connectionDialog={
-        <IntegrationConnectionDialog
-          configForm={configForm}
-          configValue={draft.configValue}
-          connectionDisplayNamePlaceholder={draft.connectionDisplayNamePlaceholder}
-          connectionDisplayNameValue={draft.connectionDisplayNameValue}
-          connectError={draft.error}
-          dialog={dialog}
-          hasChanges={hasIntegrationConnectionDialogChanges({
-            dialog,
-            configValue: draft.configValue,
-            connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
-            connectionDisplayNameValue: draft.connectionDisplayNameValue,
-            initialConfigValue: draft.initialConfigValue,
-            secrets: draft.secrets,
-          })}
-          isConnectionDisplayNameChanged={isIntegrationConnectionDisplayNameChanged({
-            dialog,
-            connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
-            connectionDisplayNameValue: draft.connectionDisplayNameValue,
-          })}
-          isSecretChanged={Object.values(draft.secrets).some((value) => value.trim().length > 0)}
-          methodId={draft.methodId}
-          onClose={() => {}}
-          onConfigChange={(value) => {
-            setDraft((currentDraft) => ({
-              ...currentDraft,
-              configValue: value,
-              error: null,
-            }));
-          }}
-          onConnectionDisplayNameChange={(value) => {
-            setDraft((currentDraft) => ({
-              ...currentDraft,
-              connectionDisplayNameValue: value,
-              error: null,
-            }));
-          }}
-          onMethodChange={(methodId) => {
-            setDraft((currentDraft) =>
-              resolveNextDraftForMethodChange({
-                dialog,
-                nextMethodId: methodId,
-                currentDraft,
-              }),
-            );
-          }}
-          onSecretChange={(name, value) => {
-            setDraft((currentDraft) => ({
-              ...currentDraft,
-              error: null,
-              secrets: {
-                ...currentDraft.secrets,
-                [name]: value,
-              },
-            }));
-          }}
-          onSubmit={() => {
-            setDraft((currentDraft) => ({
-              ...currentDraft,
-              error:
-                currentDraft.methodId.length === 0
-                  ? "Authentication method is required."
-                  : (resolveIntegrationConnectionDialogValidationError({
-                      dialog,
-                      methodId: currentDraft.methodId,
-                      connectionDisplayNameValue: currentDraft.connectionDisplayNameValue,
-                      secrets: currentDraft.secrets,
-                    }) ?? null),
-            }));
-          }}
-          pending={spec.pending ?? false}
-          secrets={draft.secrets}
-        />
-      }
-      isLoading={false}
-      loadErrorMessage={null}
-    />
+    <FormPageFrame title={`Add ${initialEditorInput.targetDisplayName} Connection`}>
+      <IntegrationConnectionEditorPage
+        configForm={configForm}
+        configValue={draft.configValue}
+        closeDisabled={spec.pending ?? false}
+        connectionDisplayNamePlaceholder={draft.connectionDisplayNamePlaceholder}
+        connectionDisplayNameValue={draft.connectionDisplayNameValue}
+        connectError={draft.error}
+        editor={editor}
+        hasChanges={hasIntegrationConnectionEditorChanges({
+          editor,
+          configValue: draft.configValue,
+          connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
+          connectionDisplayNameValue: draft.connectionDisplayNameValue,
+          initialConfigValue: draft.initialConfigValue,
+          secrets: draft.secrets,
+        })}
+        isConnectionDisplayNameChanged={isIntegrationConnectionDisplayNameChanged({
+          editor,
+          connectionDisplayNamePlaceholder: draft.connectionDisplayNamePlaceholder,
+          connectionDisplayNameValue: draft.connectionDisplayNameValue,
+        })}
+        isSecretChanged={Object.values(draft.secrets).some((value) => value.trim().length > 0)}
+        methodId={draft.methodId}
+        onClose={() => {}}
+        onConfigChange={(value) => {
+          setDraft((currentDraft) => ({
+            ...currentDraft,
+            configValue: value,
+            error: null,
+          }));
+        }}
+        onConnectionDisplayNameChange={(value) => {
+          setDraft((currentDraft) => ({
+            ...currentDraft,
+            connectionDisplayNameValue: value,
+            error: null,
+          }));
+        }}
+        onMethodChange={(methodId) => {
+          setDraft((currentDraft) =>
+            resolveNextDraftForMethodChange({
+              editor,
+              nextMethodId: methodId,
+              currentDraft,
+            }),
+          );
+        }}
+        onSecretChange={(name, value) => {
+          setDraft((currentDraft) => ({
+            ...currentDraft,
+            error: null,
+            secrets: {
+              ...currentDraft.secrets,
+              [name]: value,
+            },
+          }));
+        }}
+        onSubmit={() => {
+          setDraft((currentDraft) => ({
+            ...currentDraft,
+            error:
+              currentDraft.methodId.length === 0
+                ? "Authentication method is required."
+                : (resolveIntegrationConnectionEditorValidationError({
+                    editor,
+                    methodId: currentDraft.methodId,
+                    connectionDisplayNameValue: currentDraft.connectionDisplayNameValue,
+                    secrets: currentDraft.secrets,
+                  }) ?? null),
+          }));
+        }}
+        pending={spec.pending ?? false}
+        secrets={draft.secrets}
+      />
+    </FormPageFrame>
   );
 }
 
