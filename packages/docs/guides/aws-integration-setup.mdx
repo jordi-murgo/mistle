@@ -1,0 +1,38 @@
+---
+title: AWS
+description: Connect AWS to Mistle
+icon: /icons/integrations/aws.svg
+---
+
+## Overview
+
+Connect to AWS by using an IAM user's access key to assume the IAM role you specify.
+
+## Configuring AWS Access
+
+Before creating the connection, make sure:
+
+1. You have an IAM user or IAM principal that can call `sts:AssumeRole`.
+2. You have an IAM role with the permissions you want to use.
+3. That role's trust policy allows that principal to assume it.
+4. If you use third-party-style cross-account protection, you have the `ExternalId` value ready for the connection.
+
+## Connect In Mistle
+
+Open **Integrations** in the dashboard, choose **AWS**, then select **Access key + AssumeRole**.
+
+Enter:
+
+| Field             | Value                                                   |
+| ----------------- | ------------------------------------------------------- |
+| `accessKeyId`     | IAM user access key ID                                  |
+| `secretAccessKey` | IAM user secret access key                              |
+| `roleArn`         | Role ARN that Mistle should assume                      |
+| `externalId`      | Optional external ID if your trust policy requires one  |
+| `durationSeconds` | Optional STS session duration between `900` and `43200` |
+
+## Official References
+
+- [AWS IAM access keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html)
+- [Create a role using custom trust policies](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-custom.html)
+- [Granting third-party access with IAM roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_third-party.html)

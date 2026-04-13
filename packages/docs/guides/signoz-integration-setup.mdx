@@ -1,0 +1,32 @@
+---
+title: SigNoz
+description: Connect SigNoz to Mistle
+icon: /icons/integrations/signoz.svg
+---
+
+## Overview
+
+Connect to SigNoz through a SigNoz OAuth flow. The connection also needs the SigNoz Cloud region so the hosted MCP issuer URL can be built correctly.
+
+## Connect In Mistle
+
+Open **Integrations** in the dashboard, choose **SigNoz**, then select **SigNoz OAuth**.
+
+When prompted, enter:
+
+| Field    | Value                                 |
+| -------- | ------------------------------------- |
+| `region` | SigNoz Cloud region, for example `us` |
+
+That region is used to build the hosted issuer and MCP URLs:
+
+- Issuer: `https://mcp.<region>.signoz.cloud`
+- MCP: `https://mcp.<region>.signoz.cloud/mcp`
+
+After that, the user completes the OAuth redirect flow in SigNoz.
+
+## Official References
+
+- [SigNoz MCP Server](https://signoz.io/docs/signoz-mcp-server/)
+
+The region-specific hosted MCP and OAuth behavior above is inferred from the current SigNoz integration implementation. SigNoz's public docs currently document the MCP server more directly than this hosted OAuth flow.

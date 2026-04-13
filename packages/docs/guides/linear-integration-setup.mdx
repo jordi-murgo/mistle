@@ -1,0 +1,36 @@
+---
+title: Linear
+description: Connect Linear to Mistle
+icon: /icons/integrations/linear.svg
+---
+
+## Overview
+
+Connect to Linear by providing a personal API key for the user account that should back the connection.
+
+## Create A Linear API Key
+
+Create a Linear personal API key for the user account that should back the Mistle connection.
+
+According to Linear's docs:
+
+- admins can control whether members are allowed to create their own API keys
+- existing API keys can be viewed and revoked from `Settings > Administration > API`
+- admins and permitted members can create personal API keys from `Settings > Account > Security & Access`
+
+When creating the key, Linear lets you choose either full access or restricted permissions, and you can limit the key to specific teams.
+
+## Connect In Mistle
+
+Open **Integrations** in the dashboard, choose **Linear**, then select **API key**.
+
+Enter:
+
+| Field    | Value          |
+| -------- | -------------- |
+| `apiKey` | Linear API key |
+
+## Official References
+
+- [Linear API and Webhooks](https://linear.app/docs/api-and-webhooks)
+- [Linear Security & Access](https://linear.app/docs/security-and-access)
