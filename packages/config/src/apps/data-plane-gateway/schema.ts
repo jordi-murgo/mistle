@@ -30,6 +30,16 @@ export const DataPlaneGatewayRuntimeStateValkeyConfigSchema = z
   })
   .strict();
 
+export const DataPlaneGatewayLifecycleConfigSchema = z
+  .object({
+    idleTimeoutMs: z.number().int().positive(),
+    bootstrapDisconnectGraceMs: z.number().int().positive(),
+  })
+  .strict();
+
+export const PartialDataPlaneGatewayLifecycleConfigSchema =
+  DataPlaneGatewayLifecycleConfigSchema.partial();
+
 export const PartialDataPlaneGatewayRuntimeStateValkeyConfigSchema =
   DataPlaneGatewayRuntimeStateValkeyConfigSchema.partial();
 
@@ -76,6 +86,7 @@ export const DataPlaneGatewayConfigSchema = z
     database: DataPlaneGatewayDatabaseConfigSchema,
     runtimeState: DataPlaneGatewayRuntimeStateConfigSchema,
     dataPlaneApi: DataPlaneGatewayDataPlaneApiConfigSchema,
+    lifecycle: DataPlaneGatewayLifecycleConfigSchema.optional(),
   })
   .strict();
 
@@ -85,6 +96,7 @@ export const PartialDataPlaneGatewayConfigSchema = z
     database: DataPlaneGatewayDatabaseConfigSchema.partial().optional(),
     runtimeState: PartialDataPlaneGatewayRuntimeStateConfigSchema.optional(),
     dataPlaneApi: DataPlaneGatewayDataPlaneApiConfigSchema.partial().optional(),
+    lifecycle: PartialDataPlaneGatewayLifecycleConfigSchema.optional(),
   })
   .strict();
 

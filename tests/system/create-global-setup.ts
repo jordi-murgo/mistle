@@ -18,6 +18,8 @@ const CONFIG_PATH_IN_CONTAINER = DockerIntegrationConfigPathInContainer;
 const APP_STARTUP_TIMEOUT_MS = 120_000;
 const AUTH_ORIGIN = "http://localhost:5100";
 const INTERNAL_AUTH_SERVICE_TOKEN = "system-internal-service-token";
+const DATA_PLANE_GATEWAY_IDLE_TIMEOUT_MS = 20_000;
+const DATA_PLANE_GATEWAY_BOOTSTRAP_DISCONNECT_GRACE_MS = 8_000;
 const TestContextId = "system";
 
 function createTelemetryEnvironmentOverrides(input: {
@@ -33,6 +35,22 @@ function createTelemetryEnvironmentOverrides(input: {
     MISTLE_GLOBAL_TELEMETRY_LOGS_ENDPOINT: input.logsEndpoint,
     MISTLE_GLOBAL_TELEMETRY_METRICS_ENDPOINT: input.metricsEndpoint,
   };
+}
+
+function readGatewayLifecycleOrThrow(input: {
+  environment: Awaited<ReturnType<typeof startFullSystemEnvironment>>;
+}): {
+  idleTimeoutMs: number;
+  bootstrapDisconnectGraceMs: number;
+} {
+  const lifecycle = input.environment.dataPlaneGatewayLifecycle;
+  if (lifecycle === undefined) {
+    throw new Error(
+      "Expected full system environment to expose data-plane-gateway lifecycle values.",
+    );
+  }
+
+  return lifecycle;
 }
 
 export function createSystemGlobalSetup(): () => Promise<() => Promise<void>> {
@@ -66,11 +84,23 @@ export function createSystemGlobalSetup(): () => Promise<() => Promise<void>> {
       controlPlaneWorkerEnvironment: telemetryEnvironmentOverrides,
       dataPlaneApiEnvironment: telemetryEnvironmentOverrides,
       dataPlaneWorkerEnvironment: telemetryEnvironmentOverrides,
-      dataPlaneGatewayEnvironment: telemetryEnvironmentOverrides,
+      dataPlaneGatewayEnvironment: {
+        ...telemetryEnvironmentOverrides,
+        MISTLE_APPS_DATA_PLANE_GATEWAY_LIFECYCLE_IDLE_TIMEOUT_MS: String(
+          DATA_PLANE_GATEWAY_IDLE_TIMEOUT_MS,
+        ),
+        MISTLE_APPS_DATA_PLANE_GATEWAY_LIFECYCLE_BOOTSTRAP_DISCONNECT_GRACE_MS: String(
+          DATA_PLANE_GATEWAY_BOOTSTRAP_DISCONNECT_GRACE_MS,
+        ),
+      },
       tokenizerProxyEnvironment: telemetryEnvironmentOverrides,
     });
 
     try {
+      const gatewayLifecycle = readGatewayLifecycleOrThrow({
+        environment,
+      });
+
       await writeTestContext({
         id: TestContextId,
         value: {
@@ -91,6 +121,8 @@ export function createSystemGlobalSetup(): () => Promise<() => Promise<void>> {
           internalAuthServiceToken: INTERNAL_AUTH_SERVICE_TOKEN,
           otlpTraceCaptureFilePath,
           sandboxNetworkName: environment.sandboxNetworkName,
+          dataPlaneGatewayIdleTimeoutMs: gatewayLifecycle.idleTimeoutMs,
+          dataPlaneGatewayBootstrapDisconnectGraceMs: gatewayLifecycle.bootstrapDisconnectGraceMs,
         },
       });
     } catch (error) {
