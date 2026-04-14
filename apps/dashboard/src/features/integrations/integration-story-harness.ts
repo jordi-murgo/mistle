@@ -1,9 +1,70 @@
+import type { AnyIntegrationDefinition } from "@mistle/integrations-core";
+import { createBrowserIntegrationRegistry } from "@mistle/integrations-definitions/browser";
+
 import {
   buildIntegrationConnectionDetailItems,
   buildIntegrationConnectionResourceItemsByKey,
   createRefreshingResourceKey,
 } from "../pages/integrations-page-view-model.js";
-import type { IntegrationConnection } from "./integrations-service.js";
+import type { IntegrationWebhookSourceSectionState } from "../pages/use-integration-webhook-source-state.js";
+import type { IntegrationConnectionDetailViewProps } from "./integration-connection-detail-view.js";
+import type {
+  IntegrationConnection,
+  IntegrationConnectionResource,
+  IntegrationWebhookSource,
+} from "./integrations-service.js";
+
+const IntegrationRegistry = createBrowserIntegrationRegistry();
+
+type StoryAuthMethodSpec = {
+  familyId: string;
+  methodId: string;
+  variantId: string;
+};
+
+function getDefinitionOrThrow(input: {
+  familyId: string;
+  variantId: string;
+}): AnyIntegrationDefinition {
+  const definition = IntegrationRegistry.getDefinition(input);
+  if (definition === null) {
+    throw new Error(
+      `Missing browser integration definition '${input.familyId}/${input.variantId}' for Storybook.`,
+    );
+  }
+
+  if (definition === undefined) {
+    throw new Error(
+      `Browser integration definition '${input.familyId}/${input.variantId}' resolved to undefined.`,
+    );
+  }
+
+  return definition;
+}
+
+function resolveAuthMethodOrThrow(input: StoryAuthMethodSpec): {
+  authMethodId: string;
+  authMethodLabel: string;
+} {
+  const definition = getDefinitionOrThrow({
+    familyId: input.familyId,
+    variantId: input.variantId,
+  });
+  const method = definition.connectionMethods?.find((connectionMethod) => {
+    return connectionMethod.id === input.methodId;
+  });
+
+  if (method === undefined) {
+    throw new Error(
+      `Missing connection method '${input.methodId}' for '${input.familyId}/${input.variantId}' in Storybook.`,
+    );
+  }
+
+  return {
+    authMethodId: method.id,
+    authMethodLabel: method.label,
+  };
+}
 
 export const DemoIntegrationConnections: readonly IntegrationConnection[] = [
   {
@@ -139,4 +200,589 @@ export function createRefreshingDetailViewStoryProps() {
       }),
     ]),
   });
+}
+
+export function createGitHubAppDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  const connectionId = "icn_github_dense";
+
+  return {
+    connections: [
+      {
+        id: connectionId,
+        ...resolveAuthMethodOrThrow({
+          familyId: "github",
+          methodId: "github-app-installation",
+          variantId: "github-cloud",
+        }),
+        bindingCount: 3,
+        canDelete: false,
+        contextItems: [
+          {
+            label: "App ID",
+            value: "3079908",
+          },
+          {
+            label: "App slug",
+            value: "jon-mistle-github-app",
+          },
+          {
+            label: "Installation",
+            value: "116007157",
+          },
+        ],
+        displayName: "GH",
+        installActionLabel: "Manage installation",
+        resources: [
+          {
+            count: 11,
+            kind: "repository",
+            lastSyncedAt: "2026-04-13T15:37:00.000Z",
+            syncState: "ready",
+          },
+          {
+            count: 45,
+            kind: "branch",
+            lastSyncedAt: "2026-04-13T15:37:00.000Z",
+            syncState: "ready",
+          },
+          {
+            count: 5,
+            kind: "user",
+            lastSyncedAt: "2026-04-13T15:37:00.000Z",
+            syncState: "ready",
+          },
+        ],
+        status: "active",
+        webhookInstructions:
+          "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
+      },
+    ],
+    onRefreshResource: () => {},
+    resourceItemsByKey: buildIntegrationConnectionResourceItemsByKey([
+      {
+        connectionId,
+        state: {
+          errorMessage: null,
+          isLoading: false,
+          items: [
+            {
+              id: "repo_dense_1",
+              familyId: "github",
+              kind: "repository",
+              handle: "mistlehq/company-os",
+              displayName: "mistlehq/company-os",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "repo_dense_2",
+              familyId: "github",
+              kind: "repository",
+              handle: "mistlehq/e2e-test-repo",
+              displayName: "mistlehq/e2e-test-repo",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "repo_dense_3",
+              familyId: "github",
+              kind: "repository",
+              handle: "mistlehq/mistle",
+              displayName: "mistlehq/mistle",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "repo_dense_4",
+              familyId: "github",
+              kind: "repository",
+              handle: "mistlehq/tools",
+              displayName: "mistlehq/tools",
+              status: "accessible",
+              metadata: {},
+            },
+          ],
+          kind: "repository",
+        },
+      },
+      {
+        connectionId,
+        state: {
+          errorMessage: null,
+          isLoading: false,
+          items: [
+            {
+              id: "branch_dense_1",
+              familyId: "github",
+              kind: "branch",
+              handle: "main",
+              displayName: "main",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "branch_dense_2",
+              familyId: "github",
+              kind: "branch",
+              handle: "integration-form-page",
+              displayName: "integration-form-page",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "branch_dense_3",
+              familyId: "github",
+              kind: "branch",
+              handle: "feat/sandbox-followup-orchestration",
+              displayName: "feat/sandbox-followup-orchestration",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "branch_dense_4",
+              familyId: "github",
+              kind: "branch",
+              handle: "session-primary-repo-cli-cwd",
+              displayName: "session-primary-repo-cli-cwd",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "branch_dense_5",
+              familyId: "github",
+              kind: "branch",
+              handle: "normalize-uploaded-image-followup",
+              displayName: "normalize-uploaded-image-followup",
+              status: "accessible",
+              metadata: {},
+            },
+          ],
+          kind: "branch",
+        },
+      },
+      {
+        connectionId,
+        state: {
+          errorMessage: null,
+          isLoading: false,
+          items: [
+            {
+              id: "user_dense_1",
+              familyId: "github",
+              kind: "user",
+              handle: "blacksmith-sh[bot]",
+              displayName: "blacksmith-sh[bot]",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "user_dense_2",
+              familyId: "github",
+              kind: "user",
+              handle: "dependabot[bot]",
+              displayName: "dependabot[bot]",
+              status: "accessible",
+              metadata: {},
+            },
+            {
+              id: "user_dense_3",
+              familyId: "github",
+              kind: "user",
+              handle: "jlowhy",
+              displayName: "jlowhy",
+              status: "accessible",
+              metadata: {},
+            },
+          ],
+          kind: "user",
+        },
+      },
+    ]),
+    showWebhookSources: true,
+    webhookSourceStateByConnectionId: new Map<string, IntegrationWebhookSourceSectionState>([
+      [
+        connectionId,
+        {
+          createErrorMessage: null,
+          deleteErrorMessage: null,
+          deletingWebhookSourceId: null,
+          isCreating: false,
+          isLoading: false,
+          items: [
+            {
+              callbackUrl:
+                "http://localhost:5100/p/integration/webhooks/github-cloud/-uV97vES3GH033SdR8524w",
+              createdAt: "2026-04-13T15:37:00.000Z",
+              displayName: "GitHub App webhook",
+              endpointKey: "github-cloud",
+              id: "iws_01densegithubsource",
+              integrationConnectionId: connectionId,
+              providerMetadata: {},
+              status: "active",
+              targetKey: "github-cloud",
+              updatedAt: "2026-04-13T15:37:00.000Z",
+            },
+          ],
+          loadErrorMessage: null,
+          revealedWebhookSecret: null,
+        },
+      ],
+    ]),
+  };
+}
+
+type ScenarioDetailStorySpec = {
+  authMethod?: StoryAuthMethodSpec;
+  bindingCount?: number;
+  connectionId: string;
+  contextItems?: readonly {
+    label: string;
+    value: string;
+  }[];
+  displayName: string;
+  familyId?: string;
+  installActionLabel?: string;
+  resources?: readonly {
+    count: number;
+    items: readonly string[];
+    kind: string;
+    lastErrorMessage?: string;
+    lastSyncedAt?: string;
+    syncState: "never-synced" | "syncing" | "ready" | "error";
+  }[];
+  setupDescription?: string;
+  setupStatusLabel?: string;
+  showCreateWebhookSource?: boolean;
+  status?: "active" | "error" | "revoked";
+  webhookInstructions?: string;
+  webhookSources?: readonly IntegrationWebhookSource[];
+};
+
+function createResourceItems(
+  input: ScenarioDetailStorySpec,
+): IntegrationConnectionDetailViewProps["resourceItemsByKey"] {
+  const resources = input.resources ?? [];
+  const familyId = input.familyId ?? "integration";
+
+  return buildIntegrationConnectionResourceItemsByKey(
+    resources.map((resource) => ({
+      connectionId: input.connectionId,
+      state: {
+        errorMessage: null,
+        isLoading: false,
+        items: resource.items.map(
+          (item, index): IntegrationConnectionResource => ({
+            id: `${input.connectionId}:${resource.kind}:${String(index + 1)}`,
+            displayName: item,
+            familyId,
+            handle: item,
+            kind: resource.kind,
+            metadata: {},
+            status: "accessible",
+          }),
+        ),
+        kind: resource.kind,
+      },
+    })),
+  );
+}
+
+function createWebhookSourceSectionState(
+  input: ScenarioDetailStorySpec,
+): IntegrationConnectionDetailViewProps["webhookSourceStateByConnectionId"] | undefined {
+  if (input.webhookSources === undefined) {
+    return undefined;
+  }
+
+  return new Map<string, IntegrationWebhookSourceSectionState>([
+    [
+      input.connectionId,
+      {
+        createErrorMessage: null,
+        deleteErrorMessage: null,
+        deletingWebhookSourceId: null,
+        isCreating: false,
+        isLoading: false,
+        items: input.webhookSources,
+        loadErrorMessage: null,
+        revealedWebhookSecret: null,
+      },
+    ],
+  ]);
+}
+
+function createScenarioDetailViewStoryProps(
+  input: ScenarioDetailStorySpec,
+): IntegrationConnectionDetailViewProps {
+  const authMethod =
+    input.authMethod === undefined ? undefined : resolveAuthMethodOrThrow(input.authMethod);
+  const resourceItemsByKey = createResourceItems(input);
+  const webhookSourceStateByConnectionId = createWebhookSourceSectionState(input);
+
+  return {
+    connections: [
+      {
+        bindingCount: input.bindingCount ?? 0,
+        canDelete: input.bindingCount === undefined || input.bindingCount === 0,
+        ...(authMethod === undefined ? {} : authMethod),
+        ...(input.contextItems === undefined ? {} : { contextItems: input.contextItems }),
+        displayName: input.displayName,
+        id: input.connectionId,
+        ...(input.installActionLabel === undefined
+          ? {}
+          : { installActionLabel: input.installActionLabel }),
+        resources: (input.resources ?? []).map((resource) => ({
+          count: resource.count,
+          isRefreshing: false,
+          kind: resource.kind,
+          ...(resource.lastErrorMessage === undefined
+            ? {}
+            : { lastErrorMessage: resource.lastErrorMessage }),
+          ...(resource.lastSyncedAt === undefined ? {} : { lastSyncedAt: resource.lastSyncedAt }),
+          syncState: resource.syncState,
+        })),
+        ...(input.setupDescription === undefined
+          ? {}
+          : { setupDescription: input.setupDescription }),
+        ...(input.setupStatusLabel === undefined
+          ? {}
+          : { setupStatusLabel: input.setupStatusLabel }),
+        status: input.status ?? "active",
+        ...(input.webhookInstructions === undefined
+          ? {}
+          : { webhookInstructions: input.webhookInstructions }),
+      },
+    ],
+    onEditApiKey: () => {},
+    onRefreshResource: () => {},
+    ...(resourceItemsByKey === undefined ? {} : { resourceItemsByKey }),
+    ...(webhookSourceStateByConnectionId === undefined
+      ? {}
+      : {
+          showCreateWebhookSource: input.showCreateWebhookSource ?? false,
+          showWebhookSources: true,
+          webhookSourceStateByConnectionId,
+        }),
+  };
+}
+
+const DenseStoryLastSyncedAt = "2026-04-13T15:37:00.000Z";
+
+export function createGitHubEnterpriseServerDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    familyId: "github",
+    authMethod: {
+      familyId: "github",
+      methodId: "github-app-installation",
+      variantId: "github-enterprise-server",
+    },
+    bindingCount: 2,
+    connectionId: "icn_github_ghes_dense",
+    contextItems: [
+      { label: "App ID", value: "88421" },
+      { label: "App slug", value: "mistle-ghes" },
+      { label: "Installation", value: "992144" },
+    ],
+    displayName: "GitHub Enterprise",
+    installActionLabel: "Manage installation",
+    resources: [
+      {
+        count: 7,
+        items: [
+          "platform/control-plane",
+          "platform/dashboard",
+          "platform/data-plane",
+          "platform/agents",
+        ],
+        kind: "repository",
+        lastSyncedAt: DenseStoryLastSyncedAt,
+        syncState: "ready",
+      },
+      {
+        count: 18,
+        items: ["main", "release/2026.04", "feat/self-hosted-webhooks", "ops/incident-runbook"],
+        kind: "branch",
+        lastSyncedAt: DenseStoryLastSyncedAt,
+        syncState: "ready",
+      },
+    ],
+    webhookInstructions:
+      "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
+    webhookSources: [
+      {
+        callbackUrl:
+          "https://control-plane.example.com/p/integration/webhooks/github-enterprise-server/ep_ghes_123",
+        createdAt: DenseStoryLastSyncedAt,
+        displayName: "GitHub Enterprise App webhook",
+        endpointKey: "github-enterprise-server",
+        id: "iws_ghes_123",
+        integrationConnectionId: "icn_github_ghes_dense",
+        providerMetadata: {},
+        status: "active",
+        targetKey: "github-enterprise-server",
+        updatedAt: DenseStoryLastSyncedAt,
+      },
+    ],
+  });
+}
+
+export function createJiraDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "jira",
+      methodId: "jira-personal-api-token",
+      variantId: "jira-default",
+    },
+    bindingCount: 1,
+    connectionId: "icn_jira_dense",
+    displayName: "Jira Production",
+    showCreateWebhookSource: true,
+    webhookSources: [
+      {
+        callbackUrl:
+          "https://control-plane.example.com/p/integration/webhooks/jira-default/ep_jira_dense",
+        createdAt: DenseStoryLastSyncedAt,
+        displayName: "Jira admin webhook",
+        endpointKey: "ep_jira_dense",
+        id: "iws_jira_dense",
+        integrationConnectionId: "icn_jira_dense",
+        providerMetadata: {},
+        remoteRegistrationId: "10001",
+        status: "active",
+        targetKey: "jira-default",
+        updatedAt: DenseStoryLastSyncedAt,
+      },
+    ],
+  });
+}
+
+export function createLinearDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "linear",
+      methodId: "api-key",
+      variantId: "linear-default",
+    },
+    connectionId: "icn_linear_dense",
+    displayName: "Linear Workspace",
+  });
+}
+
+export function createSlackDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "slack",
+      methodId: "slack-bot-token",
+      variantId: "slack-default",
+    },
+    bindingCount: 2,
+    connectionId: "icn_slack_dense",
+    displayName: "Slack Engineering",
+    webhookSources: [
+      {
+        callbackUrl:
+          "https://control-plane.example.com/p/integration/webhooks/slack-default/ep_slack_dense",
+        createdAt: DenseStoryLastSyncedAt,
+        displayName: "Slack Events API webhook",
+        endpointKey: "ep_slack_dense",
+        id: "iws_slack_dense",
+        integrationConnectionId: "icn_slack_dense",
+        providerMetadata: {},
+        status: "active",
+        targetKey: "slack-default",
+        updatedAt: DenseStoryLastSyncedAt,
+      },
+    ],
+  });
+}
+
+export function createOpenAiDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "openai",
+      methodId: "api-key",
+      variantId: "openai-default",
+    },
+    connectionId: "icn_openai_dense",
+    displayName: "OpenAI Production",
+  });
+}
+
+export function createAwsDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "aws",
+      methodId: "aws-assume-role",
+      variantId: "aws-cli-default",
+    },
+    connectionId: "icn_aws_dense",
+    displayName: "AWS Engineering",
+  });
+}
+
+export function createDatadogDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "datadog",
+      methodId: "api-key",
+      variantId: "datadog-default",
+    },
+    connectionId: "icn_datadog_dense",
+    displayName: "Datadog Production",
+  });
+}
+
+export function createPlanetScaleDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "planetscale",
+      methodId: "oauth2-authorization-code",
+      variantId: "planetscale-mcp",
+    },
+    connectionId: "icn_planetscale_dense",
+    displayName: "PlanetScale Hosted MCP",
+  });
+}
+
+export function createSigNozDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "signoz",
+      methodId: "oauth2-authorization-code",
+      variantId: "signoz-mcp",
+    },
+    connectionId: "icn_signoz_dense",
+    displayName: "SigNoz Hosted MCP",
+  });
+}
+
+export function createIntegrationGalleryStoryProps(): IntegrationConnectionDetailViewProps {
+  const storyProps = [
+    createGitHubAppDetailViewStoryProps(),
+    createGitHubEnterpriseServerDetailViewStoryProps(),
+    createJiraDetailViewStoryProps(),
+    createLinearDetailViewStoryProps(),
+    createSlackDetailViewStoryProps(),
+    createOpenAiDetailViewStoryProps(),
+    createAwsDetailViewStoryProps(),
+    createDatadogDetailViewStoryProps(),
+    createPlanetScaleDetailViewStoryProps(),
+    createSigNozDetailViewStoryProps(),
+  ];
+
+  return {
+    connections: storyProps.flatMap((story) => story.connections),
+    onEditApiKey: () => {},
+    onRefreshResource: () => {},
+    resourceItemsByKey: new Map(
+      storyProps.flatMap((story) => Array.from(story.resourceItemsByKey?.entries() ?? [])),
+    ),
+    showCreateWebhookSource: true,
+    showWebhookSources: true,
+    webhookSourceStateByConnectionId: new Map(
+      storyProps.flatMap((story) =>
+        Array.from(story.webhookSourceStateByConnectionId?.entries() ?? []),
+      ),
+    ),
+  };
 }

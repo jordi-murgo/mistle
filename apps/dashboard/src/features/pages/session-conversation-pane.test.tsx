@@ -762,6 +762,12 @@ describe("SessionConversationBottomPanel", () => {
     await waitFor(() => {
       expect(scrollContainerElement.scrollTop).toBe(228);
     });
+    await waitFor(() => {
+      const spacerElement = scrollContainerElement.querySelector(
+        '[data-slot="conversation-bottom-spacer"]',
+      );
+      expect(spacerElement?.getAttribute("style")).toBe("height: 240px;");
+    });
 
     defineElementRect(newestTurnElement, {
       height: 260,
@@ -782,8 +788,7 @@ describe("SessionConversationBottomPanel", () => {
         '[data-slot="conversation-bottom-spacer"]',
       );
       expect(spacerElement?.getAttribute("style")).toBe("height: 160px;");
+      expect(scrollContainerElement.scrollTop).toBe(228);
     });
-
-    expect(scrollContainerElement.scrollTop).toBe(228);
   });
 });
