@@ -5,6 +5,7 @@
 //! supervision module starts and stops for the active sandbox session.
 
 pub mod adapters;
+mod artifact_install;
 mod plan;
 pub mod readiness;
 mod runtime_file;
@@ -12,31 +13,28 @@ mod workspace_source;
 
 use std::fmt;
 
-use crate::command::{CommandSpec, DEFAULT_COMMAND_POLL_INTERVAL, run_command};
 use crate::protocol::startup::StartupInput;
-use crate::time::{SystemClock, ThreadSleeper};
 
 pub use plan::{
     CompiledAgentRuntime, CompiledEgressRoute, CompiledEgressRouteAuthInjection,
     CompiledEgressRouteAuthInjectionType, CompiledEgressRouteCredentialResolver,
     CompiledEgressRouteMatch, CompiledEgressRouteUpstream, CompiledRuntimeArtifact,
-    CompiledRuntimePlan,
-    CompiledWorkspaceSource,
-    RuntimeArtifactCommand, RuntimeArtifactLifecycle, RuntimeClient, RuntimeClientConnectionMode,
-    RuntimeClientEndpoint,
+    CompiledRuntimePlan, CompiledWorkspaceSource, RuntimeArtifactInstallStep,
+    RuntimeArtifactLifecycle, RuntimeClient, RuntimeClientConnectionMode, RuntimeClientEndpoint,
     RuntimeClientEndpointTransport, RuntimeClientProcess, RuntimeClientProcessReadiness,
     RuntimeClientProcessStopPolicy, RuntimeClientProcessStopSignal, RuntimeClientSetup,
-    RuntimeClientSetupFile, WorkspaceSourceResourceKind,
+    RuntimeClientSetupFile, RuntimeExecCommand, WorkspaceSourceResourceKind,
 };
 
 /// Describes why one runtime-plan setup step failed while applying startup input.
 #[derive(Debug)]
 pub enum RuntimePlanApplyError {
     InvalidRuntimePlan(serde_json::Error),
-    ArtifactCommand {
+    ArtifactInstall {
         artifact_index: usize,
-        command_index: usize,
+        install_index: usize,
         artifact_key: String,
+        op: &'static str,
         error: String,
     },
     WorkspaceSource {
@@ -61,14 +59,15 @@ impl fmt::Display for RuntimePlanApplyError {
             Self::InvalidRuntimePlan(error) => {
                 write!(f, "runtime plan is invalid: {error}")
             }
-            Self::ArtifactCommand {
+            Self::ArtifactInstall {
                 artifact_index,
-                command_index,
+                install_index,
                 artifact_key,
+                op,
                 error,
             } => write!(
                 f,
-                "runtime plan artifacts[{artifact_index}] lifecycle.install[{command_index}] failed (artifactKey={artifact_key}): {error}"
+                "runtime plan artifacts[{artifact_index}] lifecycle.install[{install_index}] failed (artifactKey={artifact_key} op={op}): {error}"
             ),
             Self::WorkspaceSource {
                 source_index,
@@ -112,23 +111,15 @@ pub fn apply_compiled_runtime_plan(
     // Materialize artifacts, workspace sources, and setup files before later PRs add
     // long-lived process supervision on top of this state.
     for (artifact_index, artifact) in runtime_plan.artifacts.iter().enumerate() {
-        for (command_index, command) in artifact.lifecycle.install.iter().enumerate() {
-            run_command(
-                CommandSpec {
-                    args: &command.args,
-                    env: command.env.as_ref(),
-                    cwd: command.cwd.as_deref(),
-                    timeout_ms: command.timeout_ms,
-                },
-                &SystemClock,
-                &ThreadSleeper,
-                DEFAULT_COMMAND_POLL_INTERVAL,
-            )
-            .map_err(|error| RuntimePlanApplyError::ArtifactCommand {
-                artifact_index,
-                command_index,
-                artifact_key: artifact.artifact_key.clone(),
-                error,
+        for (install_index, install_step) in artifact.lifecycle.install.iter().enumerate() {
+            artifact_install::apply_artifact_install_step(install_step).map_err(|error| {
+                RuntimePlanApplyError::ArtifactInstall {
+                    artifact_index,
+                    install_index,
+                    artifact_key: artifact.artifact_key.clone(),
+                    op: artifact_install::artifact_install_step_op(install_step),
+                    error,
+                }
             })?;
         }
     }

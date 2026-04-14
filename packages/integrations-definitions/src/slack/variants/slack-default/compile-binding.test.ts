@@ -1,4 +1,9 @@
-import type { RuntimeArtifactCommand, RuntimeArtifactSpec } from "@mistle/integrations-core";
+import type {
+  RuntimeArtifactGitHubReleaseInstallHelperInput,
+  RuntimeArtifactInstallStep,
+  RuntimeArtifactSpec,
+  RuntimeExecCommand,
+} from "@mistle/integrations-core";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -22,37 +27,38 @@ const SandboxPaths = {
 };
 
 function resolveArtifactLifecycleCommands(artifact: RuntimeArtifactSpec): {
-  install: ReadonlyArray<RuntimeArtifactCommand>;
+  install: ReadonlyArray<RuntimeArtifactInstallStep>;
 } {
   const refs = {
     command: {
-      exec(input: RuntimeArtifactCommand): RuntimeArtifactCommand {
-        return input;
+      exec(input: RuntimeExecCommand): RuntimeArtifactInstallStep {
+        return {
+          op: "exec",
+          command: input,
+        };
       },
     },
     sandboxPaths: SandboxPaths,
     artifactBinPath,
     mise: {
-      install(input: { tools: ReadonlyArray<string>; force?: boolean; timeoutMs?: number }) {
+      install(input: {
+        tools: ReadonlyArray<string>;
+        force?: boolean;
+        timeoutMs?: number;
+      }): RuntimeArtifactInstallStep {
         return {
-          args: ["mise", "install", ...input.tools],
+          op: "exec",
+          command: {
+            args: ["mise", "install", ...input.tools],
+          },
         };
       },
     },
     githubReleases: {
-      installLatestBinary() {
+      install(input: RuntimeArtifactGitHubReleaseInstallHelperInput): RuntimeArtifactInstallStep {
         return {
-          args: ["github-releases.installLatestBinary"],
-        };
-      },
-      installTaggedBinary() {
-        return {
-          args: ["github-releases.installTaggedBinary"],
-        };
-      },
-      installLatestTaggedAsset() {
-        return {
-          args: ["github-releases.installLatestTaggedAsset"],
+          op: "github_release_install",
+          ...input,
         };
       },
     },
@@ -145,7 +151,20 @@ describe("compileSlackBinding", () => {
     expect(resolveArtifactLifecycleCommands(artifact)).toEqual({
       install: [
         {
-          args: ["github-releases.installLatestTaggedAsset"],
+          op: "github_release_install",
+          repository: "mistlehq/tools",
+          release: {
+            kind: "tag",
+            match: "latest_matching_prefix",
+            prefix: "slack/",
+          },
+          asset: {
+            kind: "exact",
+            fileName: "slack-linux-amd64",
+            format: "binary",
+          },
+          installPath: "/usr/local/bin/slack",
+          timeoutMs: 120_000,
         },
       ],
     });

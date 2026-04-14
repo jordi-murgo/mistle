@@ -1,4 +1,8 @@
-import type { RuntimeArtifactCommand, RuntimeArtifactSpec } from "@mistle/integrations-core";
+import type {
+  RuntimeArtifactInstallStep,
+  RuntimeArtifactSpec,
+  RuntimeExecCommand,
+} from "@mistle/integrations-core";
 import { describe, expect, it } from "vitest";
 
 import { GitHubCredentialSlotKeys } from "../../shared/slot-keys.js";
@@ -19,37 +23,40 @@ const SandboxPaths = {
 } as const;
 
 function resolveArtifactLifecycleCommands(artifact: RuntimeArtifactSpec): {
-  install: ReadonlyArray<RuntimeArtifactCommand>;
+  install: ReadonlyArray<RuntimeArtifactInstallStep>;
 } {
   const refs = {
     command: {
-      exec(input: RuntimeArtifactCommand): RuntimeArtifactCommand {
-        return input;
+      exec(input: RuntimeExecCommand): RuntimeArtifactInstallStep {
+        return {
+          op: "exec",
+          command: input,
+        };
       },
     },
     sandboxPaths: SandboxPaths,
     artifactBinPath,
     mise: {
-      install(input: { tools: ReadonlyArray<string>; force?: boolean; timeoutMs?: number }) {
+      install(input: {
+        tools: ReadonlyArray<string>;
+        force?: boolean;
+        timeoutMs?: number;
+      }): RuntimeArtifactInstallStep {
         return {
-          args: ["mise", "install", ...input.tools],
+          op: "exec",
+          command: {
+            args: ["mise", "install", ...input.tools],
+          },
         };
       },
     },
     githubReleases: {
-      installLatestBinary() {
+      install(): RuntimeArtifactInstallStep {
         return {
-          args: ["github-releases.installLatestBinary"],
-        };
-      },
-      installTaggedBinary() {
-        return {
-          args: ["github-releases.installTaggedBinary"],
-        };
-      },
-      installLatestTaggedAsset() {
-        return {
-          args: ["github-releases.installLatestTaggedAsset"],
+          op: "exec",
+          command: {
+            args: ["github-releases.install"],
+          },
         };
       },
     },
@@ -164,8 +171,11 @@ describe("compileGitHubEnterpriseServerBinding", () => {
     expect(resolveArtifactLifecycleCommands(artifact)).toEqual({
       install: [
         {
-          args: ["sh", "-euc", expect.stringContaining("run_with_retry")],
-          timeoutMs: 120_000,
+          op: "exec",
+          command: {
+            args: ["sh", "-euc", expect.stringContaining("run_with_retry")],
+            timeoutMs: 120_000,
+          },
         },
       ],
     });

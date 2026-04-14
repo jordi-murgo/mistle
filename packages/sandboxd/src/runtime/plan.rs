@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// The subset of the compiled runtime plan that `sandboxd` currently understands.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -80,21 +80,325 @@ pub struct CompiledEgressRouteCredentialResolver {
     pub resolver_key: Option<String>,
 }
 
-/// One artifact lifecycle command or runtime client process command.
+/// One subprocess command used by runtime client processes and exec artifact installs.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RuntimeArtifactCommand {
+pub struct RuntimeExecCommand {
     pub args: Vec<String>,
     pub env: Option<BTreeMap<String, String>>,
     pub cwd: Option<String>,
     pub timeout_ms: Option<u64>,
 }
 
+fn deserialize_non_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::custom("string value must not be empty"));
+    }
+    Ok(value)
+}
+
+fn deserialize_non_empty_string_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<String>::deserialize(deserializer)?;
+    if values.is_empty() {
+        return Err(serde::de::Error::custom("string list must not be empty"));
+    }
+    if values.iter().any(String::is_empty) {
+        return Err(serde::de::Error::custom(
+            "string list entries must not be empty",
+        ));
+    }
+    Ok(values)
+}
+
+/// One GitHub release selector for a typed artifact install step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeArtifactGitHubReleaseSelector {
+    Latest,
+    Tag {
+        selector: RuntimeArtifactGitHubReleaseTagSelector,
+    },
+}
+
+impl<'de> Deserialize<'de> for RuntimeArtifactGitHubReleaseSelector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Wire {
+            Latest,
+            Tag {
+                #[serde(rename = "match")]
+                match_kind: RuntimeArtifactGitHubReleaseTagSelectorMatchWire,
+                tag: Option<String>,
+                prefix: Option<String>,
+            },
+        }
+
+        match Wire::deserialize(deserializer)? {
+            Wire::Latest => Ok(Self::Latest),
+            Wire::Tag {
+                match_kind,
+                tag,
+                prefix,
+            } => match match_kind {
+                RuntimeArtifactGitHubReleaseTagSelectorMatchWire::Exact => {
+                    let tag = parse_required_non_empty_string(tag, "tag")?;
+                    if prefix.is_some() {
+                        return Err(serde::de::Error::custom(
+                            "exact github release selectors must not include prefix",
+                        ));
+                    }
+                    Ok(Self::Tag {
+                        selector: RuntimeArtifactGitHubReleaseTagSelector::Exact { tag },
+                    })
+                }
+                RuntimeArtifactGitHubReleaseTagSelectorMatchWire::LatestMatchingPrefix => {
+                    let prefix = parse_required_non_empty_string(prefix, "prefix")?;
+                    if tag.is_some() {
+                        return Err(serde::de::Error::custom(
+                            "latest_matching_prefix github release selectors must not include tag",
+                        ));
+                    }
+                    Ok(Self::Tag {
+                        selector: RuntimeArtifactGitHubReleaseTagSelector::LatestMatchingPrefix {
+                            prefix,
+                        },
+                    })
+                }
+            },
+        }
+    }
+}
+
+/// The tag-selection payload for typed GitHub release install steps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeArtifactGitHubReleaseTagSelector {
+    Exact { tag: String },
+    LatestMatchingPrefix { prefix: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RuntimeArtifactGitHubReleaseTagSelectorMatchWire {
+    Exact,
+    LatestMatchingPrefix,
+}
+
+/// One concrete GitHub release asset shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeArtifactGitHubReleaseAssetShape {
+    Binary(RuntimeArtifactGitHubReleaseBinaryAssetShape),
+    TarGz(RuntimeArtifactGitHubReleaseTarGzAssetShape),
+}
+
+impl<'de> Deserialize<'de> for RuntimeArtifactGitHubReleaseAssetShape {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Shape {
+            #[serde(deserialize_with = "deserialize_non_empty_string")]
+            file_name: String,
+            format: RuntimeArtifactGitHubReleaseAssetFormatWire,
+            extracted_path: Option<String>,
+        }
+
+        let shape = Shape::deserialize(deserializer)?;
+        parse_github_release_asset_shape(shape.file_name, shape.format, shape.extracted_path)
+    }
+}
+
+/// One binary GitHub release asset shape.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeArtifactGitHubReleaseBinaryAssetShape {
+    #[serde(deserialize_with = "deserialize_non_empty_string")]
+    pub file_name: String,
+    pub format: RuntimeArtifactGitHubReleaseBinaryAssetFormat,
+}
+
+/// One tarball GitHub release asset shape.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeArtifactGitHubReleaseTarGzAssetShape {
+    #[serde(deserialize_with = "deserialize_non_empty_string")]
+    pub file_name: String,
+    pub format: RuntimeArtifactGitHubReleaseTarGzAssetFormat,
+    #[serde(deserialize_with = "deserialize_non_empty_string")]
+    pub extracted_path: String,
+}
+
+/// The supported binary GitHub release asset format marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum RuntimeArtifactGitHubReleaseBinaryAssetFormat {
+    #[serde(rename = "binary")]
+    Binary,
+}
+
+/// The supported tarball GitHub release asset format marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum RuntimeArtifactGitHubReleaseTarGzAssetFormat {
+    #[serde(rename = "tar.gz")]
+    TarGz,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+enum RuntimeArtifactGitHubReleaseAssetFormatWire {
+    #[serde(rename = "binary")]
+    Binary,
+    #[serde(rename = "tar.gz")]
+    TarGz,
+}
+
+/// The GitHub release asset selection for a typed install step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeArtifactGitHubReleaseInstallAsset {
+    Exact(RuntimeArtifactGitHubReleaseAssetShape),
+    ByArch {
+        x86_64: RuntimeArtifactGitHubReleaseAssetShape,
+        aarch64: RuntimeArtifactGitHubReleaseAssetShape,
+    },
+}
+
+impl<'de> Deserialize<'de> for RuntimeArtifactGitHubReleaseInstallAsset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Wire {
+            #[serde(rename = "exact")]
+            Exact {
+                #[serde(rename = "fileName")]
+                #[serde(deserialize_with = "deserialize_non_empty_string")]
+                file_name: String,
+                format: RuntimeArtifactGitHubReleaseAssetFormatWire,
+                #[serde(rename = "extractedPath")]
+                extracted_path: Option<String>,
+            },
+            #[serde(rename = "by_arch")]
+            ByArch {
+                #[serde(rename = "x86_64")]
+                x86_64: RuntimeArtifactGitHubReleaseAssetShape,
+                #[serde(rename = "aarch64")]
+                aarch64: RuntimeArtifactGitHubReleaseAssetShape,
+            },
+        }
+
+        match Wire::deserialize(deserializer)? {
+            Wire::Exact {
+                file_name,
+                format,
+                extracted_path,
+            } => Ok(Self::Exact(parse_github_release_asset_shape(
+                file_name,
+                format,
+                extracted_path,
+            )?)),
+            Wire::ByArch { x86_64, aarch64 } => Ok(Self::ByArch { x86_64, aarch64 }),
+        }
+    }
+}
+
+fn parse_github_release_asset_shape<E>(
+    file_name: String,
+    format: RuntimeArtifactGitHubReleaseAssetFormatWire,
+    extracted_path: Option<String>,
+) -> Result<RuntimeArtifactGitHubReleaseAssetShape, E>
+where
+    E: serde::de::Error,
+{
+    match (format, extracted_path) {
+        (RuntimeArtifactGitHubReleaseAssetFormatWire::Binary, None) => {
+            Ok(RuntimeArtifactGitHubReleaseAssetShape::Binary(
+                RuntimeArtifactGitHubReleaseBinaryAssetShape {
+                    file_name,
+                    format: RuntimeArtifactGitHubReleaseBinaryAssetFormat::Binary,
+                },
+            ))
+        }
+        (RuntimeArtifactGitHubReleaseAssetFormatWire::TarGz, Some(extracted_path)) => {
+            Ok(RuntimeArtifactGitHubReleaseAssetShape::TarGz(
+                RuntimeArtifactGitHubReleaseTarGzAssetShape {
+                    file_name,
+                    format: RuntimeArtifactGitHubReleaseTarGzAssetFormat::TarGz,
+                    extracted_path,
+                },
+            ))
+        }
+        (RuntimeArtifactGitHubReleaseAssetFormatWire::TarGz, None) => Err(
+            serde::de::Error::custom("tar.gz assets must include extractedPath"),
+        ),
+        (RuntimeArtifactGitHubReleaseAssetFormatWire::Binary, Some(_)) => {
+            Err(serde::de::Error::custom(
+                "binary assets must not include extractedPath",
+            ))
+        }
+    }
+}
+
+fn parse_required_non_empty_string<E>(value: Option<String>, field_name: &str) -> Result<String, E>
+where
+    E: serde::de::Error,
+{
+    let Some(value) = value else {
+        return Err(serde::de::Error::custom(format!(
+            "{field_name} must be present and non-empty"
+        )));
+    };
+    if value.is_empty() {
+        return Err(serde::de::Error::custom(format!(
+            "{field_name} must be present and non-empty"
+        )));
+    }
+    Ok(value)
+}
+
+/// One typed artifact install step.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RuntimeArtifactInstallStep {
+    #[serde(rename = "github_release_install")]
+    GitHubReleaseInstall {
+        #[serde(deserialize_with = "deserialize_non_empty_string")]
+        repository: String,
+        release: RuntimeArtifactGitHubReleaseSelector,
+        asset: RuntimeArtifactGitHubReleaseInstallAsset,
+        #[serde(rename = "installPath")]
+        #[serde(deserialize_with = "deserialize_non_empty_string")]
+        install_path: String,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: Option<u64>,
+    },
+    #[serde(rename = "mise_install")]
+    MiseInstall {
+        #[serde(deserialize_with = "deserialize_non_empty_string_vec")]
+        tools: Vec<String>,
+        force: Option<bool>,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: Option<u64>,
+    },
+    #[serde(rename = "exec")]
+    Exec { command: RuntimeExecCommand },
+}
+
 /// The install lifecycle for one compiled runtime artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeArtifactLifecycle {
-    pub install: Vec<RuntimeArtifactCommand>,
+    pub install: Vec<RuntimeArtifactInstallStep>,
 }
 
 /// One artifact that must be materialized before runtime clients start.
@@ -152,7 +456,7 @@ pub struct RuntimeClient {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeClientProcess {
     pub process_key: String,
-    pub command: RuntimeArtifactCommand,
+    pub command: RuntimeExecCommand,
     pub readiness: RuntimeClientProcessReadiness,
     pub stop: RuntimeClientProcessStopPolicy,
 }
@@ -266,4 +570,85 @@ pub enum CompiledWorkspaceSource {
 pub enum WorkspaceSourceResourceKind {
     #[serde(rename = "repository")]
     Repository,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RuntimeArtifactGitHubReleaseInstallAsset, RuntimeArtifactGitHubReleaseSelector,
+        RuntimeArtifactInstallStep,
+    };
+
+    #[test]
+    fn decodes_github_release_selector_exact_tag_shape() {
+        let selector =
+            serde_json::from_value::<RuntimeArtifactGitHubReleaseSelector>(serde_json::json!({
+              "kind": "tag",
+              "match": "exact",
+              "tag": "rust-v0.120.0"
+            }))
+            .expect("github release selector should decode");
+
+        assert!(matches!(
+            selector,
+            RuntimeArtifactGitHubReleaseSelector::Tag { .. }
+        ));
+    }
+
+    #[test]
+    fn decodes_github_release_asset_by_arch_shape() {
+        let asset =
+            serde_json::from_value::<RuntimeArtifactGitHubReleaseInstallAsset>(serde_json::json!({
+              "kind": "by_arch",
+              "x86_64": {
+                "fileName": "codex-x86_64-unknown-linux-musl.tar.gz",
+                "format": "tar.gz",
+                "extractedPath": "codex-x86_64-unknown-linux-musl"
+              },
+              "aarch64": {
+                "fileName": "codex-aarch64-unknown-linux-musl.tar.gz",
+                "format": "tar.gz",
+                "extractedPath": "codex-aarch64-unknown-linux-musl"
+              }
+            }))
+            .expect("github release asset by_arch shape should decode");
+
+        assert!(matches!(
+            asset,
+            RuntimeArtifactGitHubReleaseInstallAsset::ByArch { .. }
+        ));
+    }
+
+    #[test]
+    fn decodes_github_release_install_step_with_by_arch_asset() {
+        let step = serde_json::from_value::<RuntimeArtifactInstallStep>(serde_json::json!({
+          "op": "github_release_install",
+          "repository": "openai/codex",
+          "release": {
+            "kind": "tag",
+            "match": "exact",
+            "tag": "rust-v0.120.0"
+          },
+          "asset": {
+            "kind": "by_arch",
+            "x86_64": {
+              "fileName": "codex-x86_64-unknown-linux-musl.tar.gz",
+              "format": "tar.gz",
+              "extractedPath": "codex-x86_64-unknown-linux-musl"
+            },
+            "aarch64": {
+              "fileName": "codex-aarch64-unknown-linux-musl.tar.gz",
+              "format": "tar.gz",
+              "extractedPath": "codex-aarch64-unknown-linux-musl"
+            }
+          },
+          "installPath": "/usr/local/bin/codex"
+        }))
+        .expect("github release install step should decode");
+
+        assert!(matches!(
+            step,
+            RuntimeArtifactInstallStep::GitHubReleaseInstall { .. }
+        ));
+    }
 }

@@ -9,6 +9,7 @@ import {
   IntegrationConnectionMethodIds,
   IntegrationMcpConfigFormats,
   type IntegrationDefinition,
+  type RuntimeArtifactInstallStep,
 } from "../types/index.js";
 import { compileRuntimePlan } from "./index.js";
 
@@ -77,6 +78,16 @@ const NoopConversationProvider = {
   interruptExecution: async () => {},
 };
 
+function expectTypedInstallStep(
+  entry: RuntimeArtifactInstallStep | undefined,
+): RuntimeArtifactInstallStep {
+  if (entry === undefined) {
+    throw new Error("Expected artifact install step.");
+  }
+
+  return entry;
+}
+
 function createDefinitionsBundle(registry: IntegrationRegistry) {
   const agentRuntimeRegistry = new AgentRuntimeRegistry();
   agentRuntimeRegistry.register({
@@ -122,16 +133,22 @@ function createDefinitionsBundle(registry: IntegrationRegistry) {
           },
           lifecycle: {
             install: ({ refs }) => [
-              refs.githubReleases.installLatestBinary({
+              refs.githubReleases.install({
                 repository: "openai/codex",
-                assets: {
+                release: {
+                  kind: "latest",
+                },
+                asset: {
+                  kind: "by_arch",
                   x86_64: {
                     fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
-                    binaryPath: "codex-x86_64-unknown-linux-musl",
+                    format: "tar.gz",
+                    extractedPath: "codex-x86_64-unknown-linux-musl",
                   },
                   aarch64: {
                     fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
-                    binaryPath: "codex-aarch64-unknown-linux-musl",
+                    format: "tar.gz",
+                    extractedPath: "codex-aarch64-unknown-linux-musl",
                   },
                 },
                 installPath: refs.artifactBinPath("codex"),
@@ -546,16 +563,22 @@ function createGithubReleaseArtifactDefinition(): IntegrationDefinition<
           name: "Codex CLI",
           lifecycle: {
             install: ({ refs }) => [
-              refs.githubReleases.installLatestBinary({
+              refs.githubReleases.install({
                 repository: "openai/codex",
-                assets: {
+                release: {
+                  kind: "latest",
+                },
+                asset: {
+                  kind: "by_arch",
                   x86_64: {
                     fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
-                    binaryPath: "codex-x86_64-unknown-linux-musl",
+                    format: "tar.gz",
+                    extractedPath: "codex-x86_64-unknown-linux-musl",
                   },
                   aarch64: {
                     fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
-                    binaryPath: "codex-aarch64-unknown-linux-musl",
+                    format: "tar.gz",
+                    extractedPath: "codex-aarch64-unknown-linux-musl",
                   },
                 },
                 installPath: "/usr/local/bin/codex",
@@ -593,21 +616,83 @@ function createPinnedGithubReleaseArtifactDefinition(): IntegrationDefinition<
           name: "Codex CLI",
           lifecycle: {
             install: ({ refs }) => [
-              refs.githubReleases.installTaggedBinary({
+              refs.githubReleases.install({
                 repository: "openai/codex",
-                releaseTag: "rust-v0.119.0",
-                assets: {
+                release: {
+                  kind: "tag",
+                  match: "exact",
+                  tag: "rust-v0.119.0",
+                },
+                asset: {
+                  kind: "by_arch",
                   x86_64: {
                     fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
-                    binaryPath: "codex-x86_64-unknown-linux-musl",
+                    format: "tar.gz",
+                    extractedPath: "codex-x86_64-unknown-linux-musl",
                   },
                   aarch64: {
                     fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
-                    binaryPath: "codex-aarch64-unknown-linux-musl",
+                    format: "tar.gz",
+                    extractedPath: "codex-aarch64-unknown-linux-musl",
                   },
                 },
                 installPath: "/usr/local/bin/codex",
                 timeoutMs: 120_000,
+              }),
+            ],
+          },
+        },
+      ],
+      runtimeClients: [],
+    }),
+  };
+}
+
+function createCanonicalGithubReleaseInstallArtifactDefinition(): IntegrationDefinition<
+  typeof OpenAiTargetConfigSchema,
+  typeof EmptyTargetSecretsSchema,
+  typeof ConnectorBindingConfigSchema
+> {
+  return {
+    familyId: "openai",
+    variantId: "openai-default",
+    kind: "connector",
+    displayName: "OpenAI",
+    logoKey: "openai",
+    targetConfigSchema: OpenAiTargetConfigSchema,
+    targetSecretSchema: EmptyTargetSecretsSchema,
+    bindingConfigSchema: ConnectorBindingConfigSchema,
+    connectionMethods: ApiKeyConnectionMethods,
+    compileBinding: () => ({
+      egressRoutes: [],
+      artifacts: [
+        {
+          artifactKey: "codex-cli",
+          name: "Codex CLI",
+          lifecycle: {
+            install: ({ refs }) => [
+              refs.githubReleases.install({
+                repository: "openai/codex",
+                release: {
+                  kind: "tag",
+                  match: "exact",
+                  tag: "rust-v0.120.0",
+                },
+                asset: {
+                  kind: "by_arch",
+                  x86_64: {
+                    fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
+                    format: "tar.gz",
+                    extractedPath: "codex-x86_64-unknown-linux-musl",
+                  },
+                  aarch64: {
+                    fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
+                    format: "tar.gz",
+                    extractedPath: "codex-aarch64-unknown-linux-musl",
+                  },
+                },
+                installPath: "/usr/local/bin/codex",
+                timeoutMs: 90_000,
               }),
             ],
           },
@@ -641,14 +726,57 @@ function createTaggedGithubReleaseArtifactDefinition(): IntegrationDefinition<
           name: "Jira CLI",
           lifecycle: {
             install: ({ refs }) => [
-              refs.githubReleases.installLatestTaggedAsset({
+              refs.githubReleases.install({
                 repository: "mistlehq/tools",
-                releaseTagPrefix: "jira/",
-                assetName: "jira-linux-amd64",
+                release: {
+                  kind: "tag",
+                  match: "latest_matching_prefix",
+                  prefix: "jira/",
+                },
+                asset: {
+                  kind: "exact",
+                  fileName: "jira-linux-amd64",
+                  format: "binary",
+                },
                 installPath: "/usr/local/bin/jira",
-                format: "binary",
                 timeoutMs: 120_000,
               }),
+            ],
+          },
+        },
+      ],
+      runtimeClients: [],
+    }),
+  };
+}
+
+function createTypedMiseInstallArtifactDefinition(): IntegrationDefinition<
+  typeof OpenAiTargetConfigSchema,
+  typeof EmptyTargetSecretsSchema,
+  typeof ConnectorBindingConfigSchema
+> {
+  return {
+    familyId: "openai",
+    variantId: "openai-default",
+    kind: "connector",
+    displayName: "OpenAI",
+    logoKey: "openai",
+    targetConfigSchema: OpenAiTargetConfigSchema,
+    targetSecretSchema: EmptyTargetSecretsSchema,
+    bindingConfigSchema: ConnectorBindingConfigSchema,
+    connectionMethods: ApiKeyConnectionMethods,
+    compileBinding: () => ({
+      egressRoutes: [],
+      artifacts: [
+        {
+          artifactKey: "typed-mise-cli",
+          name: "Typed Mise CLI",
+          lifecycle: {
+            install: [
+              {
+                op: "mise_install",
+                tools: ["node@22.0.0"],
+              },
             ],
           },
         },
@@ -719,12 +847,36 @@ describe("compileRuntimePlan", () => {
     expect(runtimePlan.artifacts[0]?.artifactKey).toBe("codex-cli");
     expect(runtimePlan.artifacts[0]?.name).toBe("Codex CLI");
     expect(runtimePlan.artifacts[0]?.lifecycle.install).toHaveLength(2);
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[0]).toBe("sh");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[1]).toBe("-euc");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[2]).toContain("openai/codex");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.timeoutMs).toBe(120_000);
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[1]).toEqual({
-      args: ["echo", "binding:bind_openai_agent"],
+    const codexInstallCommand = expectTypedInstallStep(
+      runtimePlan.artifacts[0]?.lifecycle.install[0],
+    );
+    expect(codexInstallCommand).toEqual({
+      op: "github_release_install",
+      repository: "openai/codex",
+      release: {
+        kind: "latest",
+      },
+      asset: {
+        kind: "by_arch",
+        x86_64: {
+          fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-x86_64-unknown-linux-musl",
+        },
+        aarch64: {
+          fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-aarch64-unknown-linux-musl",
+        },
+      },
+      installPath: "/usr/local/bin/codex",
+      timeoutMs: 120_000,
+    });
+    expect(expectTypedInstallStep(runtimePlan.artifacts[0]?.lifecycle.install[1])).toEqual({
+      op: "exec",
+      command: {
+        args: ["echo", "binding:bind_openai_agent"],
+      },
     });
     expect(runtimePlan.artifacts[0]?.env).toEqual({
       GH_TOKEN: "dummy-token",
@@ -831,19 +983,31 @@ describe("compileRuntimePlan", () => {
 
     expect(runtimePlan.artifacts).toHaveLength(1);
     expect(runtimePlan.artifacts[0]?.lifecycle.install).toHaveLength(1);
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[0]).toBe("sh");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[1]).toBe("-euc");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.timeoutMs).toBe(120_000);
-
-    const installScript = runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[2];
-    expect(typeof installScript).toBe("string");
-    expect(installScript).toContain(
-      'curl --noproxy "*" -fsSL "https://github.com/$repo/releases/latest/download/$asset_name"',
+    const latestBinaryInstallCommand = expectTypedInstallStep(
+      runtimePlan.artifacts[0]?.lifecycle.install[0],
     );
-    expect(installScript).toContain("openai/codex");
-    expect(installScript).toContain("codex-x86_64-unknown-linux-musl.tar.gz");
-    expect(installScript).toContain("codex-aarch64-unknown-linux-musl.tar.gz");
-    expect(installScript).toContain("/usr/local/bin/codex");
+    expect(latestBinaryInstallCommand).toEqual({
+      op: "github_release_install",
+      repository: "openai/codex",
+      release: {
+        kind: "latest",
+      },
+      asset: {
+        kind: "by_arch",
+        x86_64: {
+          fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-x86_64-unknown-linux-musl",
+        },
+        aarch64: {
+          fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-aarch64-unknown-linux-musl",
+        },
+      },
+      installPath: "/usr/local/bin/codex",
+      timeoutMs: 120_000,
+    });
   });
 
   it("supports pinned github release binary install refs in artifact lifecycle hooks", () => {
@@ -888,15 +1052,98 @@ describe("compileRuntimePlan", () => {
       ],
     });
 
-    const installScript = runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[2];
-    expect(typeof installScript).toBe("string");
-    expect(installScript).toContain("release_tag=rust-v0.119.0");
-    expect(installScript).toContain(
-      'curl --noproxy "*" -fsSL "https://github.com/$repo/releases/download/$release_tag/$asset_name"',
-    );
-    expect(installScript).toContain("codex-x86_64-unknown-linux-musl.tar.gz");
-    expect(installScript).toContain("codex-aarch64-unknown-linux-musl.tar.gz");
-    expect(installScript).toContain("/usr/local/bin/codex");
+    expect(expectTypedInstallStep(runtimePlan.artifacts[0]?.lifecycle.install[0])).toEqual({
+      op: "github_release_install",
+      repository: "openai/codex",
+      release: {
+        kind: "tag",
+        match: "exact",
+        tag: "rust-v0.119.0",
+      },
+      asset: {
+        kind: "by_arch",
+        x86_64: {
+          fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-x86_64-unknown-linux-musl",
+        },
+        aarch64: {
+          fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-aarch64-unknown-linux-musl",
+        },
+      },
+      installPath: "/usr/local/bin/codex",
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("supports the canonical github release install ref in artifact lifecycle hooks", () => {
+    const registry = new IntegrationRegistry();
+    registry.register(createCanonicalGithubReleaseInstallArtifactDefinition());
+
+    const runtimePlan = compileRuntimePlan({
+      organizationId: "org_123",
+      sandboxProfileId: "sbp_123",
+      version: 12,
+      image: {
+        source: "base",
+        imageRef: "127.0.0.1:5001/mistle/sandbox-base:dev",
+      },
+      definitions: createDefinitionsBundle(registry),
+      bindings: [
+        {
+          targetKey: "openai-default",
+          target: {
+            familyId: "openai",
+            variantId: "openai-default",
+            enabled: true,
+            config: {
+              apiBaseUrl: "https://api.openai.com",
+            },
+            secrets: {},
+          },
+          connection: {
+            id: "conn_openai_org_123",
+            status: "active",
+            config: {},
+          },
+          binding: {
+            id: "bind_openai_agent",
+            kind: "connector",
+            connectionId: "conn_openai_org_123",
+            config: {
+              defaultModel: "gpt-5.3-codex",
+            },
+          },
+        },
+      ],
+    });
+
+    expect(expectTypedInstallStep(runtimePlan.artifacts[0]?.lifecycle.install[0])).toEqual({
+      op: "github_release_install",
+      repository: "openai/codex",
+      release: {
+        kind: "tag",
+        match: "exact",
+        tag: "rust-v0.120.0",
+      },
+      asset: {
+        kind: "by_arch",
+        x86_64: {
+          fileName: "codex-x86_64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-x86_64-unknown-linux-musl",
+        },
+        aarch64: {
+          fileName: "codex-aarch64-unknown-linux-musl.tar.gz",
+          format: "tar.gz",
+          extractedPath: "codex-aarch64-unknown-linux-musl",
+        },
+      },
+      installPath: "/usr/local/bin/codex",
+      timeoutMs: 90_000,
+    });
   });
 
   it("supports tagged github release asset install refs in artifact lifecycle hooks", () => {
@@ -943,27 +1190,73 @@ describe("compileRuntimePlan", () => {
 
     expect(runtimePlan.artifacts).toHaveLength(1);
     expect(runtimePlan.artifacts[0]?.lifecycle.install).toHaveLength(1);
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[0]).toBe("sh");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[1]).toBe("-euc");
-    expect(runtimePlan.artifacts[0]?.lifecycle.install[0]?.timeoutMs).toBe(120_000);
+    const taggedAssetInstallCommand = expectTypedInstallStep(
+      runtimePlan.artifacts[0]?.lifecycle.install[0],
+    );
+    expect(taggedAssetInstallCommand).toEqual({
+      op: "github_release_install",
+      repository: "mistlehq/tools",
+      release: {
+        kind: "tag",
+        match: "latest_matching_prefix",
+        prefix: "jira/",
+      },
+      asset: {
+        kind: "exact",
+        fileName: "jira-linux-amd64",
+        format: "binary",
+      },
+      installPath: "/usr/local/bin/jira",
+      timeoutMs: 120_000,
+    });
+  });
 
-    const installScript = runtimePlan.artifacts[0]?.lifecycle.install[0]?.args[2];
-    expect(typeof installScript).toBe("string");
-    expect(installScript).toContain(
-      "https://api.github.com/repos/$repo/releases?per_page=100&page=$page",
-    );
-    expect(installScript).toContain("run_with_retry()");
-    expect(installScript).toContain(
-      'run_with_retry 3 curl --noproxy "*" -fsSL "https://api.github.com/repos/$repo/releases?per_page=100&page=$page" -o "$releases_path"',
-    );
-    expect(installScript).toContain(
-      'run_with_retry 3 curl --noproxy "*" -fsSL "$download_url" -o "$temp_dir/artifact"',
-    );
-    expect(installScript).toContain('jq -cer --arg prefix "$release_tag_prefix"');
-    expect(installScript).toContain("mistlehq/tools");
-    expect(installScript).toContain("jira/");
-    expect(installScript).toContain("jira-linux-amd64");
-    expect(installScript).toContain("/usr/local/bin/jira");
+  it("emits typed mise install steps into compiled runtime plans", () => {
+    const registry = new IntegrationRegistry();
+    registry.register(createTypedMiseInstallArtifactDefinition());
+
+    const runtimePlan = compileRuntimePlan({
+      organizationId: "org_123",
+      sandboxProfileId: "sbp_123",
+      version: 12,
+      image: {
+        source: "base",
+        imageRef: "127.0.0.1:5001/mistle/sandbox-base:dev",
+      },
+      definitions: createDefinitionsBundle(registry),
+      bindings: [
+        {
+          targetKey: "openai-default",
+          target: {
+            familyId: "openai",
+            variantId: "openai-default",
+            enabled: true,
+            config: {
+              apiBaseUrl: "https://api.openai.com",
+            },
+            secrets: {},
+          },
+          connection: {
+            id: "conn_openai_org_123",
+            status: "active",
+            config: {},
+          },
+          binding: {
+            id: "bind_openai_agent",
+            kind: "connector",
+            connectionId: "conn_openai_org_123",
+            config: {
+              defaultModel: "gpt-5.3-codex",
+            },
+          },
+        },
+      ],
+    });
+
+    expect(expectTypedInstallStep(runtimePlan.artifacts[0]?.lifecycle.install[0])).toEqual({
+      op: "mise_install",
+      tools: ["node@22.0.0"],
+    });
   });
 
   it("collects MCP servers from connectors and maps them into agent runtime files", () => {

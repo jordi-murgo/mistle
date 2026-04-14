@@ -1,11 +1,15 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sandboxd::protocol::startup::{StartupInput, StartupMode};
 use sandboxd::runtime;
+
+static TEMP_TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn applies_runtime_plan_artifacts_workspace_sources_and_runtime_files() {
@@ -45,8 +49,11 @@ fn applies_runtime_plan_artifacts_workspace_sources_and_runtime_files() {
               "lifecycle": {
                 "install": [
                   {
-                    "args": ["sh", "-c", format!("printf artifact > {}", artifact_output_path.display())],
-                    "cwd": test_dir.display().to_string()
+                    "op": "exec",
+                    "command": {
+                      "args": ["sh", "-c", format!("printf artifact > {}", artifact_output_path.display())],
+                      "cwd": test_dir.display().to_string()
+                    }
                   }
                 ]
               }
@@ -110,6 +117,424 @@ fn applies_runtime_plan_artifacts_workspace_sources_and_runtime_files() {
         fs::read_to_string(clone_target_path.join("README.md"))
             .expect("git clone should materialize committed repository content"),
         "hello from source repo\n"
+    );
+
+    fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+}
+
+#[test]
+fn decodes_typed_artifact_install_steps() {
+    let runtime_plan: runtime::CompiledRuntimePlan = serde_json::from_value(serde_json::json!({
+      "sandboxProfileId": "sbp_123",
+      "version": 1,
+      "image": {
+        "source": "base",
+        "imageRef": "mistle/sandbox-base:dev"
+      },
+      "egressRoutes": [],
+      "artifacts": [
+        {
+          "artifactKey": "artifact_1",
+          "name": "artifact one",
+          "lifecycle": {
+            "install": [
+              {
+                "op": "exec",
+                "command": {
+                  "args": ["sh", "-c", "echo typed-exec"]
+                }
+              },
+              {
+                "op": "mise_install",
+                "tools": ["node@22.0.0"]
+              },
+              {
+                "op": "github_release_install",
+                "repository": "openai/codex",
+                "release": {
+                  "kind": "tag",
+                  "match": "exact",
+                  "tag": "rust-v0.120.0"
+                },
+                "asset": {
+                  "kind": "by_arch",
+                  "x86_64": {
+                    "fileName": "codex-x86_64-unknown-linux-musl.tar.gz",
+                    "format": "tar.gz",
+                    "extractedPath": "codex-x86_64-unknown-linux-musl"
+                  },
+                  "aarch64": {
+                    "fileName": "codex-aarch64-unknown-linux-musl.tar.gz",
+                    "format": "tar.gz",
+                    "extractedPath": "codex-aarch64-unknown-linux-musl"
+                  }
+                },
+                "installPath": "/usr/local/bin/codex"
+              }
+            ]
+          }
+        }
+      ],
+      "runtimeClients": [],
+      "workspaceSources": [],
+      "agentRuntimes": []
+    }))
+    .expect("runtime plan should decode typed artifact install steps");
+
+    assert!(matches!(
+        runtime_plan.artifacts[0].lifecycle.install[0],
+        runtime::RuntimeArtifactInstallStep::Exec { .. }
+    ));
+    assert!(matches!(
+        runtime_plan.artifacts[0].lifecycle.install[1],
+        runtime::RuntimeArtifactInstallStep::MiseInstall { .. }
+    ));
+    assert!(matches!(
+        runtime_plan.artifacts[0].lifecycle.install[2],
+        runtime::RuntimeArtifactInstallStep::GitHubReleaseInstall { .. }
+    ));
+}
+
+#[test]
+fn rejects_invalid_typed_artifact_install_payload_shapes_during_decode() {
+    let invalid_missing_tag =
+        serde_json::from_value::<runtime::CompiledRuntimePlan>(serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "github_release_install",
+                    "repository": "mistlehq/tools",
+                    "release": {
+                      "kind": "tag",
+                      "match": "exact"
+                    },
+                    "asset": {
+                      "kind": "exact",
+                      "fileName": "slack-linux-amd64",
+                      "format": "binary"
+                    },
+                    "installPath": "/usr/local/bin/slack"
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }));
+    assert!(
+        invalid_missing_tag.is_err(),
+        "typed github release selectors missing the exact tag should fail decode"
+    );
+
+    let invalid_missing_extracted_path =
+        serde_json::from_value::<runtime::CompiledRuntimePlan>(serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "github_release_install",
+                    "repository": "openai/codex",
+                    "release": {
+                      "kind": "latest"
+                    },
+                    "asset": {
+                      "kind": "exact",
+                      "fileName": "codex.tar.gz",
+                      "format": "tar.gz"
+                    },
+                    "installPath": "/usr/local/bin/codex"
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }));
+    assert!(
+        invalid_missing_extracted_path.is_err(),
+        "typed tar.gz assets missing extractedPath should fail decode"
+    );
+
+    let invalid_empty_mise_tools =
+        serde_json::from_value::<runtime::CompiledRuntimePlan>(serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "mise_install",
+                    "tools": []
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }));
+    assert!(
+        invalid_empty_mise_tools.is_err(),
+        "typed mise installs with no tools should fail decode"
+    );
+
+    let invalid_missing_binary_format =
+        serde_json::from_value::<runtime::CompiledRuntimePlan>(serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "github_release_install",
+                    "repository": "mistlehq/tools",
+                    "release": {
+                      "kind": "tag",
+                      "match": "latest_matching_prefix",
+                      "prefix": "slack/"
+                    },
+                    "asset": {
+                      "kind": "exact",
+                      "fileName": "slack-linux-amd64"
+                    },
+                    "installPath": "/usr/local/bin/slack"
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }));
+    assert!(
+        invalid_missing_binary_format
+            .expect_err("binary github release assets without format should be rejected")
+            .to_string()
+            .contains("missing field `format`")
+    );
+}
+
+#[test]
+fn applies_typed_exec_artifact_install_steps() {
+    let test_dir = create_temp_test_dir("runtime_plan_typed_exec");
+    let artifact_output_path = test_dir.join("typed-exec-output.txt");
+
+    let startup_input = StartupInput {
+        startup_mode: StartupMode::New,
+        bootstrap_token: "bootstrap-token-value".to_string(),
+        tunnel_exchange_token: "tunnel-exchange-token-value".to_string(),
+        tunnel_gateway_ws_url: "ws://127.0.0.1:5003/tunnel/sandbox".to_string(),
+        runtime_plan: serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "exec",
+                    "command": {
+                      "args": ["sh", "-c", format!("printf typed-exec > {}", artifact_output_path.display())]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }),
+        egress_grant_by_rule_id: BTreeMap::new(),
+    };
+
+    runtime::apply_runtime_plan(&startup_input)
+        .expect("typed exec artifact install steps should execute through run_command");
+
+    assert_eq!(
+        fs::read_to_string(&artifact_output_path).expect("typed exec artifact output should exist"),
+        "typed-exec"
+    );
+
+    fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+}
+
+#[test]
+#[ignore = "requires a host mise binary; command construction is covered in unit tests"]
+fn applies_typed_mise_install_steps() {
+    let startup_input = StartupInput {
+        startup_mode: StartupMode::New,
+        bootstrap_token: "bootstrap-token-value".to_string(),
+        tunnel_exchange_token: "tunnel-exchange-token-value".to_string(),
+        tunnel_gateway_ws_url: "ws://127.0.0.1:5003/tunnel/sandbox".to_string(),
+        runtime_plan: serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "mise_install",
+                    "tools": ["--help"]
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }),
+        egress_grant_by_rule_id: BTreeMap::new(),
+    };
+
+    runtime::apply_runtime_plan(&startup_input)
+        .expect("typed mise install steps should execute through the real mise subprocess path");
+}
+
+#[test]
+#[ignore = "requires a live GitHub release download; exercised by pnpm test:integration:rust"]
+fn applies_github_release_artifact_install_steps_from_pinned_public_release() {
+    let test_dir = create_temp_test_dir("runtime_plan_apply_github_release");
+    let install_path = test_dir.join("gh");
+    let (asset_name, extracted_path) = match std::env::consts::ARCH {
+        "x86_64" => (
+            "gh_2.76.2_linux_amd64.tar.gz",
+            "gh_2.76.2_linux_amd64/bin/gh",
+        ),
+        "aarch64" | "arm64" => (
+            "gh_2.76.2_linux_arm64.tar.gz",
+            "gh_2.76.2_linux_arm64/bin/gh",
+        ),
+        other => panic!("unsupported test architecture: {other}"),
+    };
+    let startup_input = StartupInput {
+        startup_mode: StartupMode::New,
+        bootstrap_token: "bootstrap-token-value".to_string(),
+        tunnel_exchange_token: "tunnel-exchange-token-value".to_string(),
+        tunnel_gateway_ws_url: "ws://127.0.0.1:5003/tunnel/sandbox".to_string(),
+        runtime_plan: serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "base",
+            "imageRef": "mistle/sandbox-base:dev"
+          },
+          "egressRoutes": [],
+          "artifacts": [
+            {
+              "artifactKey": "artifact_1",
+              "name": "artifact one",
+              "lifecycle": {
+                "install": [
+                  {
+                    "op": "github_release_install",
+                    "repository": "cli/cli",
+                    "release": {
+                      "kind": "tag",
+                      "match": "exact",
+                      "tag": "v2.76.2"
+                    },
+                    "asset": {
+                      "kind": "exact",
+                      "fileName": asset_name,
+                      "format": "tar.gz",
+                      "extractedPath": extracted_path
+                    },
+                    "installPath": install_path.display().to_string(),
+                    "timeoutMs": 30_000
+                  }
+                ]
+              }
+            }
+          ],
+          "runtimeClients": [],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }),
+        egress_grant_by_rule_id: BTreeMap::new(),
+    };
+
+    runtime::apply_runtime_plan(&startup_input)
+        .expect("github release install should download and materialize the requested asset");
+
+    assert!(
+        install_path.exists(),
+        "github release install should materialize the final binary path"
+    );
+    assert!(
+        fs::metadata(&install_path)
+            .expect("installed gh binary metadata should exist")
+            .len()
+            > 0,
+        "installed gh binary should be non-empty"
+    );
+    assert!(
+        fs::metadata(&install_path)
+            .expect("installed gh binary metadata should exist")
+            .permissions()
+            .mode()
+            & 0o777
+            == 0o755,
+        "github release install should preserve executable permissions"
     );
 
     fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
@@ -195,11 +620,14 @@ fn create_temp_test_dir(prefix: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    let short_prefix = &prefix[..prefix.len().min(8)];
+    let unique_counter = TEMP_TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sanitized_prefix =
+        prefix.replace(|character: char| !character.is_ascii_alphanumeric(), "_");
     let path = PathBuf::from("/tmp").join(format!(
-        "sbd_{short_prefix}_{}_{}",
+        "sbd_{sanitized_prefix}_{}_{}_{}",
         std::process::id(),
-        unique_suffix
+        unique_suffix,
+        unique_counter
     ));
 
     fs::create_dir_all(&path).expect("temp test dir should be creatable");

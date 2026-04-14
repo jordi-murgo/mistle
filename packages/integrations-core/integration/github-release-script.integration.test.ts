@@ -1,17 +1,19 @@
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { AgentRuntimeRegistry } from "../src/agent-runtimes/index.js";
 import { compileRuntimePlan } from "../src/compiler/index.js";
 import { IntegrationRegistry } from "../src/registry/index.js";
-import { IntegrationConnectionMethodIds, type IntegrationDefinition } from "../src/types/index.js";
+import {
+  IntegrationConnectionMethodIds,
+  type IntegrationDefinition,
+  type RuntimeArtifactInstallStep,
+} from "../src/types/index.js";
 
 const EmptyTargetConfigSchema = z.object({});
 const EmptyTargetSecretsSchema = z.object({});
 const EmptyBindingConfigSchema = z.object({});
 
-const TestContainerImage = "alpine:3.22";
 const InstallPath = "/tmp/jq";
 const ApiKeyConnectionMethods = [
   {
@@ -29,6 +31,16 @@ const ApiKeyConnectionMethods = [
     ],
   },
 ] as const;
+
+function expectTypedInstallStep(
+  entry: RuntimeArtifactInstallStep | undefined,
+): RuntimeArtifactInstallStep {
+  if (entry === undefined) {
+    throw new Error("Expected artifact install step.");
+  }
+
+  return entry;
+}
 
 function createDefinitionsBundle(registry: IntegrationRegistry) {
   return {
@@ -60,17 +72,19 @@ function createGithubBinaryInstallDefinition(): IntegrationDefinition<
           name: "jq",
           lifecycle: {
             install: ({ refs }) => [
-              refs.githubReleases.installLatestBinary({
+              refs.githubReleases.install({
                 repository: "jqlang/jq",
-                assets: {
+                release: {
+                  kind: "latest",
+                },
+                asset: {
+                  kind: "by_arch",
                   x86_64: {
                     fileName: "jq-linux-amd64",
-                    binaryPath: "jq-linux-amd64",
                     format: "binary",
                   },
                   aarch64: {
                     fileName: "jq-linux-arm64",
-                    binaryPath: "jq-linux-arm64",
                     format: "binary",
                   },
                 },
@@ -109,12 +123,19 @@ function createTaggedGithubBinaryInstallDefinition(): IntegrationDefinition<
           name: "jq",
           lifecycle: {
             install: ({ refs }) => [
-              refs.githubReleases.installLatestTaggedAsset({
+              refs.githubReleases.install({
                 repository: "jqlang/jq",
-                releaseTagPrefix: "jq-",
-                assetName: "jq-linux-amd64",
+                release: {
+                  kind: "tag",
+                  match: "latest_matching_prefix",
+                  prefix: "jq-",
+                },
+                asset: {
+                  kind: "exact",
+                  fileName: "jq-linux-amd64",
+                  format: "binary",
+                },
                 installPath: InstallPath,
-                format: "binary",
                 timeoutMs: 120_000,
               }),
             ],
@@ -126,22 +147,8 @@ function createTaggedGithubBinaryInstallDefinition(): IntegrationDefinition<
   };
 }
 
-async function prepareContainer(container: StartedTestContainer): Promise<void> {
-  const installDependenciesResult = await container.exec([
-    "sh",
-    "-euc",
-    "apk add --no-cache curl ca-certificates coreutils jq tar",
-  ]);
-
-  if (installDependenciesResult.exitCode !== 0) {
-    throw new Error(
-      `Failed to install container dependencies. Output: ${installDependenciesResult.output}`,
-    );
-  }
-}
-
-describe("renderInstallLatestGithubReleaseBinaryScript integration", () => {
-  it("downloads and installs a release binary that can be executed in linux", async () => {
+describe("github release helper integration", () => {
+  it("compiles canonical GitHub release install refs for latest releases into typed artifact ops", () => {
     const registry = new IntegrationRegistry();
     registry.register(createGithubBinaryInstallDefinition());
 
@@ -179,40 +186,29 @@ describe("renderInstallLatestGithubReleaseBinaryScript integration", () => {
       ],
     });
 
-    const installCommand = runtimePlan.artifacts[0]?.lifecycle.install[0];
-    expect(installCommand?.args[0]).toBe("sh");
-    expect(installCommand?.args[1]).toBe("-euc");
-    expect(typeof installCommand?.args[2]).toBe("string");
+    expect(expectTypedInstallStep(runtimePlan.artifacts[0]?.lifecycle.install[0])).toEqual({
+      op: "github_release_install",
+      repository: "jqlang/jq",
+      release: {
+        kind: "latest",
+      },
+      asset: {
+        kind: "by_arch",
+        x86_64: {
+          fileName: "jq-linux-amd64",
+          format: "binary",
+        },
+        aarch64: {
+          fileName: "jq-linux-arm64",
+          format: "binary",
+        },
+      },
+      installPath: InstallPath,
+      timeoutMs: 120_000,
+    });
+  });
 
-    const script = installCommand?.args[2];
-    if (typeof script !== "string") {
-      throw new Error("Expected generated github release install script.");
-    }
-    let container: StartedTestContainer | undefined;
-
-    try {
-      container = await new GenericContainer(TestContainerImage)
-        .withCommand(["sh", "-euc", "sleep infinity"])
-        .start();
-
-      await prepareContainer(container);
-
-      const installResult = await container.exec(["sh", "-euc", script]);
-      if (installResult.exitCode !== 0) {
-        throw new Error(`Install script failed. Output: ${installResult.output}`);
-      }
-
-      const versionResult = await container.exec([InstallPath, "--version"]);
-      expect(versionResult.exitCode).toBe(0);
-      expect(versionResult.stdout.trim().startsWith("jq-")).toBe(true);
-    } finally {
-      if (container !== undefined) {
-        await container.stop();
-      }
-    }
-  }, 240_000);
-
-  it("downloads and installs the latest tagged release asset that can be executed in linux", async () => {
+  it("compiles canonical GitHub release install refs for matching tag prefixes into typed artifact ops", () => {
     const registry = new IntegrationRegistry();
     registry.register(createTaggedGithubBinaryInstallDefinition());
 
@@ -250,36 +246,21 @@ describe("renderInstallLatestGithubReleaseBinaryScript integration", () => {
       ],
     });
 
-    const installCommand = runtimePlan.artifacts[0]?.lifecycle.install[0];
-    expect(installCommand?.args[0]).toBe("sh");
-    expect(installCommand?.args[1]).toBe("-euc");
-    expect(typeof installCommand?.args[2]).toBe("string");
-
-    const script = installCommand?.args[2];
-    if (typeof script !== "string") {
-      throw new Error("Expected generated tagged github release install script.");
-    }
-    let container: StartedTestContainer | undefined;
-
-    try {
-      container = await new GenericContainer(TestContainerImage)
-        .withCommand(["sh", "-euc", "sleep infinity"])
-        .start();
-
-      await prepareContainer(container);
-
-      const installResult = await container.exec(["sh", "-euc", script]);
-      if (installResult.exitCode !== 0) {
-        throw new Error(`Install script failed. Output: ${installResult.output}`);
-      }
-
-      const versionResult = await container.exec([InstallPath, "--version"]);
-      expect(versionResult.exitCode).toBe(0);
-      expect(versionResult.stdout.trim().startsWith("jq-")).toBe(true);
-    } finally {
-      if (container !== undefined) {
-        await container.stop();
-      }
-    }
-  }, 240_000);
+    expect(expectTypedInstallStep(runtimePlan.artifacts[0]?.lifecycle.install[0])).toEqual({
+      op: "github_release_install",
+      repository: "jqlang/jq",
+      release: {
+        kind: "tag",
+        match: "latest_matching_prefix",
+        prefix: "jq-",
+      },
+      asset: {
+        kind: "exact",
+        fileName: "jq-linux-amd64",
+        format: "binary",
+      },
+      installPath: InstallPath,
+      timeoutMs: 120_000,
+    });
+  });
 });
