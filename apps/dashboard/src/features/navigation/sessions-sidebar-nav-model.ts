@@ -1,4 +1,5 @@
 import { isSessionPageNavigableSandboxStatus } from "../sessions/session-connect-policy.js";
+import { resolveSessionTitleLabel } from "../sessions/session-title-presentation.js";
 import { formatCompactRelativeOrDate } from "../shared/date-formatters.js";
 
 export type SessionsSidebarSourceItem = {
@@ -43,10 +44,6 @@ export function resolveSessionsSidebarShowActivityIndicator(input: {
 
 function resolveProfileName(input: SessionsSidebarSourceItem): string {
   return input.sandboxProfileDisplayName ?? input.sandboxProfileId;
-}
-
-function resolveInstanceLabel(input: SessionsSidebarSourceItem): string {
-  return input.title ?? "Untitled";
 }
 
 function resolveMetadataLabel(
@@ -103,7 +100,7 @@ export function buildSessionsSidebarNavGroups(
 
     group.items.push({
       id: item.id,
-      label: resolveInstanceLabel(item),
+      label: resolveSessionTitleLabel(item.title),
       metadataLabel: resolveMetadataLabel({
         status: item.status,
         keepaliveActive: item.keepaliveActive,

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   createMemoryRouter,
@@ -10,8 +11,30 @@ import { describe, expect, it } from "vitest";
 
 import { AppBreadcrumbs } from "./app-breadcrumbs.js";
 
+function expectMarkupToContainCurrentPageLabel(markup: string, label: string): void {
+  expect(markup).toMatch(new RegExp(`aria-current="page"[\\s\\S]*title="${escapeRegExp(label)}"`));
+}
+
+function expectMarkupToContainAriaLabel(markup: string, label: string): void {
+  expect(markup).toContain(`aria-label="${label}"`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function BreadcrumbHarness(): React.JSX.Element {
   return <AppBreadcrumbs />;
+}
+
+function renderBreadcrumbMarkup(router: ReturnType<typeof createMemoryRouter>): string {
+  const queryClient = new QueryClient();
+
+  return renderToStaticMarkup(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
 }
 
 describe("app-breadcrumbs", () => {
@@ -43,16 +66,13 @@ describe("app-breadcrumbs", () => {
       },
     );
 
-    const markup = renderToStaticMarkup(<RouterProvider router={router} />);
+    const markup = renderBreadcrumbMarkup(router);
 
-    expect(markup).toContain("Settings");
-    expect(markup).toContain("Account");
-    expect(markup).toContain("Profile");
     expect(markup).not.toContain('href="/settings"');
     expect(markup).not.toContain('href="/settings/account"');
-    expect(markup).toContain('aria-label="Settings (not navigable)"');
-    expect(markup).toContain('aria-label="Account (not navigable)"');
-    expect(markup).toContain('aria-current="page"');
+    expectMarkupToContainAriaLabel(markup, "Settings (not navigable)");
+    expectMarkupToContainAriaLabel(markup, "Account (not navigable)");
+    expectMarkupToContainCurrentPageLabel(markup, "Profile");
     expect((markup.match(/aria-current="page"/g) ?? []).length).toBe(1);
   });
 
@@ -74,7 +94,7 @@ describe("app-breadcrumbs", () => {
       },
     );
 
-    const markup = renderToStaticMarkup(<RouterProvider router={router} />);
+    const markup = renderBreadcrumbMarkup(router);
     expect(markup).toContain('href="/integrations"');
   });
 });

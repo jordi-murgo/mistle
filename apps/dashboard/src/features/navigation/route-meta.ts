@@ -7,6 +7,11 @@ export type RouteTextResolverInput = {
 
 export type RouteTextValue = string | ((input: RouteTextResolverInput) => string);
 export type RouteHrefValue = string | ((input: RouteTextResolverInput) => string | null);
+export type RouteNodeValue = (input: RouteTextResolverInput) => React.ReactNode;
+export type AppRouteHeaderHandle = {
+  icon?: (input: RouteTextResolverInput) => React.ReactNode;
+  leading?: RouteNodeValue;
+};
 
 export type AppRouteHandle = {
   appShellInsetOwner?: "app-shell" | "child";
@@ -16,7 +21,7 @@ export type AppRouteHandle = {
   breadcrumbClickable?: boolean;
   title?: RouteTextValue;
   description?: RouteTextValue;
-  headerIcon?: (input: RouteTextResolverInput) => React.ReactNode;
+  header?: AppRouteHeaderHandle;
   hideBreadcrumb?: boolean;
 };
 
@@ -33,6 +38,19 @@ export type AppPageMeta = {
   headerIcon: React.ReactNode | null;
   supportingText: string | null;
 };
+
+export type AppHeaderLeadingModel =
+  | {
+      kind: "none";
+    }
+  | {
+      kind: "breadcrumbs";
+      breadcrumbs: AppBreadcrumb[];
+    }
+  | {
+      kind: "custom";
+      content: React.ReactNode;
+    };
 
 type MatchLike = {
   handle: unknown;
@@ -65,6 +83,32 @@ function isRouteHeaderIconValue(
   value: unknown,
 ): value is (input: RouteTextResolverInput) => React.ReactNode {
   return typeof value === "function";
+}
+
+function isRouteNodeValue(value: unknown): value is RouteNodeValue {
+  return typeof value === "function";
+}
+
+function parseAppRouteHeaderHandle(handle: unknown): AppRouteHeaderHandle | null {
+  if (!isObjectRecord(handle)) {
+    return null;
+  }
+
+  const parsedHeader: AppRouteHeaderHandle = {};
+  const icon = handle["icon"];
+  const leading = handle["leading"];
+
+  if (isRouteHeaderIconValue(icon)) {
+    parsedHeader.icon = icon;
+  }
+
+  if (isRouteNodeValue(leading)) {
+    parsedHeader.leading = leading;
+  }
+
+  return parsedHeader.icon === undefined && parsedHeader.leading === undefined
+    ? null
+    : parsedHeader;
 }
 
 function normalizeParams(params: unknown): Readonly<Record<string, string | undefined>> {
@@ -100,7 +144,7 @@ function parseAppRouteHandle(handle: unknown): AppRouteHandle | null {
   const breadcrumbClickable = handle["breadcrumbClickable"];
   const title = handle["title"];
   const description = handle["description"];
-  const headerIcon = handle["headerIcon"];
+  const header = handle["header"];
   const hideBreadcrumb = handle["hideBreadcrumb"];
 
   if (appShellInsetOwner === "app-shell" || appShellInsetOwner === "child") {
@@ -131,8 +175,9 @@ function parseAppRouteHandle(handle: unknown): AppRouteHandle | null {
     parsedHandle.description = description;
   }
 
-  if (isRouteHeaderIconValue(headerIcon)) {
-    parsedHandle.headerIcon = headerIcon;
+  const parsedHeader = parseAppRouteHeaderHandle(header);
+  if (parsedHeader !== null) {
+    parsedHandle.header = parsedHeader;
   }
 
   if (typeof hideBreadcrumb === "boolean") {
@@ -147,7 +192,7 @@ function parseAppRouteHandle(handle: unknown): AppRouteHandle | null {
     parsedHandle.breadcrumbClickable === undefined &&
     parsedHandle.title === undefined &&
     parsedHandle.description === undefined &&
-    parsedHandle.headerIcon === undefined &&
+    parsedHandle.header === undefined &&
     parsedHandle.hideBreadcrumb === undefined
   ) {
     return null;
@@ -249,6 +294,40 @@ export function useAppPageMeta(): AppPageMeta {
   return resolveAppPageMetaFromMatches(matches);
 }
 
+export function useAppHeaderLeadingModel(): AppHeaderLeadingModel {
+  const matches = useMatches();
+  return resolveAppHeaderLeadingModelFromMatches(matches);
+}
+
+export function resolveAppHeaderLeadingModelFromMatches(matches: unknown[]): AppHeaderLeadingModel {
+  if (!Array.isArray(matches)) {
+    return { kind: "none" };
+  }
+
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const match = matches.at(index);
+    if (match === undefined || !isMatchLike(match)) {
+      continue;
+    }
+
+    const handle = parseAppRouteHandle(match.handle);
+    if (handle?.header?.leading === undefined) {
+      continue;
+    }
+
+    return {
+      kind: "custom",
+      content: handle.header.leading({
+        params: normalizeParams(match.params),
+        data: match.data,
+      }),
+    };
+  }
+
+  const breadcrumbs = resolveAppBreadcrumbsFromMatches(matches);
+  return breadcrumbs.length > 0 ? { kind: "breadcrumbs", breadcrumbs } : { kind: "none" };
+}
+
 export function resolveAppPageMetaFromMatches(matches: unknown[]): AppPageMeta {
   if (!Array.isArray(matches)) {
     return {
@@ -274,7 +353,7 @@ export function resolveAppPageMetaFromMatches(matches: unknown[]): AppPageMeta {
     const params = normalizeParams(match.params);
     const title = resolveRouteText(handle.title, { params, data: match.data });
     const supportingText = resolveRouteText(handle.description, { params, data: match.data });
-    const headerIcon = handle.headerIcon?.({ params, data: match.data }) ?? null;
+    const headerIcon = handle.header?.icon?.({ params, data: match.data }) ?? null;
 
     if (title !== null || supportingText !== null || headerIcon !== null) {
       return {

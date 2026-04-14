@@ -13,6 +13,7 @@ import {
 
 import { AppBreadcrumbs } from "../navigation/app-breadcrumbs.js";
 import { ROUTE_HANDLES } from "../navigation/route-handles.js";
+import { useAppHeaderLeadingModel } from "../navigation/route-meta.js";
 import type { LaunchableSandboxProfilesResult } from "../sandbox-profiles/sandbox-profiles-types.js";
 import type { SandboxInstancesListResult } from "../sessions/sessions-types.js";
 import { resolveAppShellFrame } from "../shell/app-shell-frame.js";
@@ -26,12 +27,22 @@ import {
 } from "../shell/app-shell-sessions-sidebar-mode.js";
 import { AppShellView } from "../shell/app-shell-view.js";
 import { NewSessionPage } from "./new-session-page.js";
+import { SessionWorkbenchPage } from "./session-workbench-page.js";
 import { SessionsPage } from "./sessions-page.js";
 import { createSessionsPageStoryQueryClient } from "./sessions-page.story-fixtures.js";
 
 type SessionsStoryHarnessProps = {
   initialEntries: readonly string[];
   launchableProfiles?: LaunchableSandboxProfilesResult["items"];
+  renderSessionWorkbenchPage?: boolean;
+  sandboxInstanceStatus?: {
+    id: string;
+    title: string | null;
+    status: "pending" | "starting" | "running" | "stopped" | "failed";
+    connectable: boolean;
+    failureCode?: string | null;
+    failureMessage?: string | null;
+  };
   sandboxInstancesList?: SandboxInstancesListResult;
   sessionsSidebarQueryState?:
     | {
@@ -55,6 +66,9 @@ export function SessionsStoryHarness(input: SessionsStoryHarnessProps): React.JS
         : {}),
       ...(input.sandboxInstancesList !== undefined
         ? { sandboxInstancesList: input.sandboxInstancesList }
+        : {}),
+      ...(input.sandboxInstanceStatus !== undefined
+        ? { sandboxInstanceStatus: input.sandboxInstanceStatus }
         : {}),
       ...(input.sessionsSidebarQueryState !== undefined
         ? { sessionsSidebarQueryState: input.sessionsSidebarQueryState }
@@ -82,7 +96,13 @@ export function SessionsStoryHarness(input: SessionsStoryHarnessProps): React.JS
             <Route element={<SessionsPage />} index />
             <Route element={<NewSessionPage />} handle={ROUTE_HANDLES.sessionsNew} path="new" />
             <Route
-              element={<SessionDetailStoryPage />}
+              element={
+                input.renderSessionWorkbenchPage === true ? (
+                  <SessionWorkbenchPage />
+                ) : (
+                  <SessionDetailStoryPage />
+                )
+              }
               handle={ROUTE_HANDLES.sessionsDetail}
               path=":sandboxInstanceId"
             />
@@ -106,6 +126,7 @@ function SessionsStoryShell(input: { initialShowSessionsSidebar?: boolean }): Re
   const location = useLocation();
   const navigate = useNavigate();
   const [headerActions, setHeaderActions] = useState<React.ReactNode | null>(null);
+  const headerLeadingModel = useAppHeaderLeadingModel();
   const previousSessionsSidebarToggleUrlRef = useRef<string | null>(null);
   const [showSessionsSidebar, setShowSessionsSidebar] = useState(
     input.initialShowSessionsSidebar === true,
@@ -179,7 +200,13 @@ function SessionsStoryShell(input: { initialShowSessionsSidebar?: boolean }): Re
     <AppShellHeaderActionsContext.Provider value={setHeaderActions}>
       <AppShellView
         {...appShellFrame}
-        breadcrumbs={<AppBreadcrumbs />}
+        headerLeadingContent={
+          headerLeadingModel.kind === "custom" ? (
+            <>{headerLeadingModel.content}</>
+          ) : headerLeadingModel.kind === "breadcrumbs" ? (
+            <AppBreadcrumbs breadcrumbs={headerLeadingModel.breadcrumbs} />
+          ) : null
+        }
         headerActions={headerActions}
         mainContent={<Outlet />}
       />

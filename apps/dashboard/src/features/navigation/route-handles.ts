@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { z } from "zod";
 
 import { resolveIntegrationLogoPath } from "../integrations/logo.js";
+import { SessionHeaderTitle } from "../sessions/session-header-title.js";
 import type { AppRouteHandle, RouteTextResolverInput, RouteTextValue } from "./route-meta.js";
 
 type SettingsPageRouteHandle = AppRouteHandle & {
@@ -116,13 +117,15 @@ function resolveIntegrationDetailHeaderIcon(input: RouteTextResolverInput): Reac
   });
 }
 
-function resolveSessionDetailBreadcrumb(input: RouteTextResolverInput): string {
+function resolveSessionDetailHeaderLeading(input: RouteTextResolverInput): React.ReactNode | null {
   const sandboxInstanceId = input.params["sandboxInstanceId"];
   if (sandboxInstanceId === undefined || sandboxInstanceId.trim().length === 0) {
-    return "Session";
+    return null;
   }
 
-  return sandboxInstanceId;
+  return createElement(SessionHeaderTitle, {
+    sandboxInstanceId,
+  });
 }
 
 function resolveSandboxProfileDetailBreadcrumb(input: RouteTextResolverInput): string {
@@ -160,14 +163,18 @@ export const ROUTE_HANDLES = {
     breadcrumb: resolveIntegrationDetailBreadcrumb,
     title: resolveIntegrationDetailTitle,
     description: resolveIntegrationDetailSubtitle,
-    headerIcon: resolveIntegrationDetailHeaderIcon,
+    header: {
+      icon: resolveIntegrationDetailHeaderIcon,
+    },
   },
   integrationCreate: {
     appShellInsetOwner: "child",
     breadcrumb: "Add",
     title: resolveIntegrationCreateTitle,
     description: resolveIntegrationDetailSubtitle,
-    headerIcon: resolveIntegrationDetailHeaderIcon,
+    header: {
+      icon: resolveIntegrationDetailHeaderIcon,
+    },
   },
   sessions: {
     breadcrumb: "Sessions",
@@ -181,7 +188,10 @@ export const ROUTE_HANDLES = {
     description: "Start a sandbox-backed session from a sandbox profile.",
   },
   sessionsDetail: {
-    breadcrumb: resolveSessionDetailBreadcrumb,
+    hideBreadcrumb: true,
+    header: {
+      leading: resolveSessionDetailHeaderLeading,
+    },
     title: "Session",
     description: "Interact with one sandbox-backed Codex session.",
   },
@@ -267,7 +277,9 @@ export const ROUTE_HANDLES = {
     breadcrumb: resolveIntegrationDetailBreadcrumb,
     title: resolveIntegrationDetailTitle,
     description: resolveIntegrationDetailSubtitle,
-    headerIcon: resolveIntegrationDetailHeaderIcon,
+    header: {
+      icon: resolveIntegrationDetailHeaderIcon,
+    },
   },
 } as const satisfies Record<string, AppRouteHandle>;
 

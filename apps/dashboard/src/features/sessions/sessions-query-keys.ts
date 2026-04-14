@@ -13,3 +13,7 @@ export function sandboxInstancesListQueryKey(input: {
     },
   ] as const;
 }
+
+export function sandboxInstanceStatusQueryKey(sandboxInstanceId: string) {
+  return ["sandbox-instance-status", sandboxInstanceId] as const;
+}

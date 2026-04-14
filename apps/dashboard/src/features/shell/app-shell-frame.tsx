@@ -9,7 +9,6 @@ import { CpuIcon, HouseIcon, LightningIcon, PuzzlePieceIcon } from "@phosphor-ic
 import { NavLink } from "react-router";
 
 import { ErrorNotice } from "../auth/error-notice.js";
-import { AppBreadcrumbs } from "../navigation/app-breadcrumbs.js";
 import type { AppPageMeta } from "../navigation/route-meta.js";
 import { SessionsNavToggleItem } from "../navigation/sessions-nav-toggle-item.js";
 import { SessionsShellSidebar } from "../navigation/sessions-shell-sidebar.js";
@@ -48,9 +47,8 @@ function IntegrationsNavIcon(props: {
 
 export type AppShellFrame = Pick<
   React.ComponentProps<typeof AppShellView>,
-  | "breadcrumbs"
   | "contentInsetOwner"
-  | "showBreadcrumbs"
+  | "showHeaderLeadingContent"
   | "sidebarContent"
   | "sidebarFooterContent"
   | "sidebarHeaderClassName"
@@ -85,7 +83,7 @@ export function resolveAppShellFrame(input: {
   showSessionsSidebar: boolean;
   onShowSessionsSidebarChange: (checked: boolean) => void;
 }): AppShellFrame {
-  const showBreadcrumbs =
+  const showHeaderLeadingContent =
     input.inSettings ||
     input.inSandboxProfiles ||
     input.inAutomations ||
@@ -97,9 +95,8 @@ export function resolveAppShellFrame(input: {
 
   if (input.inSettings) {
     return {
-      breadcrumbs: showBreadcrumbs ? <AppBreadcrumbs /> : null,
       contentInsetOwner: "child",
-      showBreadcrumbs,
+      showHeaderLeadingContent,
       sidebarContent: <SettingsSectionNav />,
       sidebarFooterContent: <ErrorNotice message={input.signOutError} />,
       sidebarHeaderClassName: "pb-0",
@@ -110,9 +107,8 @@ export function resolveAppShellFrame(input: {
   }
 
   return {
-    breadcrumbs: showBreadcrumbs ? <AppBreadcrumbs /> : null,
     contentInsetOwner: input.pageMeta.appShellInsetOwner,
-    showBreadcrumbs,
+    showHeaderLeadingContent,
     sidebarContent: showDedicatedSessionsSidebar ? (
       <div className="animate-in fade-in-0 duration-200">
         <SessionsSidebarHeader
