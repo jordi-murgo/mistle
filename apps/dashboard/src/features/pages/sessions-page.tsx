@@ -17,10 +17,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@mistle/ui";
-import { InfoIcon } from "@phosphor-icons/react";
+import { ArrowSquareOutIcon, InfoIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import type { LaunchableSandboxProfile } from "../sandbox-profiles/sandbox-profiles-types.js";
@@ -30,7 +30,7 @@ import { sandboxInstancesListQueryKey } from "../sessions/sessions-query-keys.js
 import { listSandboxInstances } from "../sessions/sessions-service.js";
 import type { SandboxInstanceListItem } from "../sessions/sessions-types.js";
 import { useSandboxSessionLaunchState } from "../sessions/use-sandbox-session-launch-state.js";
-import { formatRelativeOrDate } from "../shared/date-formatters.js";
+import { formatCompactRelativeOrDate } from "../shared/date-formatters.js";
 import { TableListingFooter } from "../shared/table-listing-footer.js";
 import { TablePagination } from "../shared/table-pagination.js";
 import { resolveUserDisplayName } from "../shared/user-display-name.js";
@@ -87,47 +87,72 @@ export function shouldClearSelectedProfile(input: {
   return !input.selectableProfiles.some((profile) => profile.id === selectedProfileId);
 }
 
-export function SandboxSessionStatusBadge(input: {
-  status: SandboxLifecycleStatus;
-  failureCode: string | null;
-  failureMessage: string | null;
-}): React.JSX.Element {
-  const statusUi = resolveSandboxStatusBadgeUi(input.status);
+function SessionTitleCell(input: { href?: string; title: string }): React.JSX.Element {
+  const [titleElement, setTitleElement] = useState<HTMLSpanElement | null>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
 
-  if (input.failureMessage === null) {
-    return (
-      <Badge className={statusUi.className} variant={statusUi.variant}>
-        {statusUi.label}
-      </Badge>
-    );
+  useEffect(() => {
+    if (titleElement === null) {
+      setIsTruncated(false);
+      return;
+    }
+
+    const updateTruncation = () => {
+      setIsTruncated(titleElement.scrollWidth > titleElement.clientWidth);
+    };
+
+    updateTruncation();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(updateTruncation);
+    resizeObserver.observe(titleElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [input.title, titleElement]);
+
+  function handleTitleRef(element: HTMLSpanElement | null): void {
+    setTitleElement(element);
   }
 
-  const tooltipMessage = input.failureMessage;
-
   return (
-    <Tooltip delay={0}>
+    <Tooltip delay={0} disabled={!isTruncated}>
       <TooltipTrigger
-        aria-label="View failure details"
         render={
-          <Badge
-            className={statusUi.className}
-            render={<span aria-hidden="true" />}
-            variant={statusUi.variant}
-          />
+          input.href === undefined ? (
+            <span className="flex max-w-full items-center gap-1">
+              <span
+                className="block min-w-0 flex-1 cursor-default truncate font-medium text-muted-foreground"
+                ref={handleTitleRef}
+              >
+                {input.title}
+              </span>
+            </span>
+          ) : (
+            <Link className="flex max-w-full items-center gap-1" to={input.href}>
+              <span
+                className="block min-w-0 flex-1 cursor-default truncate font-medium group-hover/session-row:underline group-focus-within/session-row:underline"
+                ref={handleTitleRef}
+              >
+                {input.title}
+              </span>
+              <ArrowSquareOutIcon
+                aria-hidden
+                className="size-4 shrink-0 cursor-default opacity-0 transition-[opacity,transform] group-hover/session-row:translate-x-0.5 group-hover/session-row:opacity-100 group-focus-within/session-row:translate-x-0.5 group-focus-within/session-row:opacity-100"
+              />
+            </Link>
+          )
         }
-      >
-        {statusUi.label}
-        <InfoIcon className="size-3.5" data-icon="inline-end" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-80 whitespace-pre-wrap text-left" side="top">
-        {tooltipMessage}
+      />
+      <TooltipContent showArrow={false} side="top" variant="light">
+        {input.title}
       </TooltipContent>
     </Tooltip>
   );
-}
-
-export function shouldUseResumeActionLabel(status: SandboxLifecycleStatus): boolean {
-  return status === "stopped";
 }
 
 function formatStartedByLabel(input: SandboxInstanceListItem["startedBy"]): string {
@@ -140,6 +165,51 @@ function formatStartedByLabel(input: SandboxInstanceListItem["startedBy"]): stri
   }
 
   return "User";
+}
+
+function resolveUpdatedLabel(input: {
+  status: SandboxLifecycleStatus;
+  updatedAt: string;
+  failureMessage: string | null;
+}): React.JSX.Element {
+  if (input.status === "failed") {
+    const statusUi = resolveSandboxStatusBadgeUi(input.status);
+
+    if (input.failureMessage === null) {
+      return (
+        <Badge className={statusUi.className} variant={statusUi.variant}>
+          {statusUi.label}
+        </Badge>
+      );
+    }
+
+    return (
+      <Tooltip delay={0}>
+        <TooltipTrigger
+          aria-label="View failure details"
+          render={
+            <Badge
+              className={statusUi.className}
+              render={<span aria-hidden="true" />}
+              variant={statusUi.variant}
+            />
+          }
+        >
+          {statusUi.label}
+          <InfoIcon className="size-3.5" data-icon="inline-end" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 whitespace-pre-wrap text-left" side="top">
+          {input.failureMessage}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <span className="text-muted-foreground text-sm whitespace-nowrap">
+      {formatCompactRelativeOrDate(input.updatedAt)}
+    </span>
+  );
 }
 
 export function buildOptimisticSessions(input: {
@@ -206,7 +276,6 @@ export function resolveSessionResultsSummary(input: {
 }
 
 export function SessionsPage(): React.JSX.Element {
-  const navigate = useNavigate();
   const session = useCachedRequiredSession();
   const [searchParams, setSearchParams] = useSearchParams();
   // Tradeoff: the selection intentionally snapshots the launchable profile, including latestVersion.
@@ -277,25 +346,7 @@ export function SessionsPage(): React.JSX.Element {
     currentUserId: session.user.id,
     currentUserDisplayName,
   });
-  const displayedSessions = [
-    ...optimisticSessions,
-    ...(sandboxInstancesQuery.data?.items ?? []),
-  ].sort((left, right) => {
-    const statusRank: Record<SandboxLifecycleStatus, number> = {
-      pending: 0,
-      starting: 1,
-      running: 2,
-      failed: 3,
-      stopped: 4,
-    };
-
-    const rankDifference = statusRank[left.status] - statusRank[right.status];
-    if (rankDifference !== 0) {
-      return rankDifference;
-    }
-
-    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
-  });
+  const displayedSessions = [...optimisticSessions, ...(sandboxInstancesQuery.data?.items ?? [])];
 
   function updatePagination(input: {
     nextLimit: number;
@@ -343,9 +394,7 @@ export function SessionsPage(): React.JSX.Element {
     });
   }
 
-  const sortedSessions = displayedSessions;
-
-  const hasSessions = sortedSessions.length > 0;
+  const hasSessions = displayedSessions.length > 0;
 
   const listErrorMessage = sandboxInstancesQuery.isError
     ? resolveApiErrorMessage({
@@ -451,76 +500,74 @@ export function SessionsPage(): React.JSX.Element {
         )}
 
         <div className="flex flex-col gap-3">
-          <Table className="min-w-[48rem]">
+          <Table className="min-w-[40rem] table-fixed">
             <TableHeader className="bg-muted/60">
               <TableRow className="h-9 border-b">
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
+                <TableHead className="text-foreground w-[44%] py-2 text-[11px] font-semibold tracking-[0.08em] uppercase">
                   Sessions
                 </TableHead>
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
+                <TableHead className="text-foreground w-[24%] py-2 text-[11px] font-semibold tracking-[0.08em] uppercase">
+                  Sandbox profile
+                </TableHead>
+                <TableHead className="text-foreground w-[20%] py-2 text-[11px] font-semibold tracking-[0.08em] uppercase">
                   Started by
                 </TableHead>
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
-                  Created
-                </TableHead>
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
-                  Status
-                </TableHead>
-                <TableHead className="text-right text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
-                  <span className="sr-only">Actions</span>
+                <TableHead className="text-right text-foreground w-[12%] py-2 text-[11px] font-semibold tracking-[0.08em] uppercase whitespace-nowrap">
+                  Updated
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {!isLoadingSessions && !hasSessions ? (
                 <TableRow>
-                  <TableCell className="text-muted-foreground" colSpan={5}>
+                  <TableCell className="text-muted-foreground" colSpan={4}>
                     No sessions yet.
                   </TableCell>
                 </TableRow>
               ) : (
-                sortedSessions.map((session) => {
+                displayedSessions.map((session) => {
+                  const isNavigable = isSessionPageNavigableSandboxStatus(session.status);
+
                   return (
-                    <TableRow key={session.id}>
-                      <TableCell className="whitespace-normal">
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <span className="font-medium break-words">
-                            {session.title ?? "Untitled"}
-                          </span>
-                          <span className="text-muted-foreground text-xs break-words">
-                            {session.sandboxProfileDisplayName ?? session.sandboxProfileId}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm whitespace-normal">
-                        <span className="break-words">
-                          {formatStartedByLabel(session.startedBy)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
-                        {formatRelativeOrDate(session.createdAt)}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <SandboxSessionStatusBadge
-                            failureCode={session.failureCode}
-                            failureMessage={session.failureMessage}
-                            status={session.status}
+                    <TableRow
+                      className={
+                        isNavigable
+                          ? "group/session-row focus-within:bg-muted/50 hover:bg-muted/50"
+                          : "group/session-row hover:bg-transparent"
+                      }
+                      key={session.id}
+                      {...(isNavigable ? {} : { "aria-disabled": true })}
+                    >
+                      <TableCell className="max-w-0 align-top whitespace-normal">
+                        <div className="flex min-w-0">
+                          <SessionTitleCell
+                            title={session.title ?? "Untitled"}
+                            {...(isNavigable
+                              ? {
+                                  href: `/sessions/${encodeURIComponent(session.id)}`,
+                                }
+                              : {})}
                           />
                         </div>
                       </TableCell>
-                      <TableCell className="text-right whitespace-nowrap">
-                        {/** Stopped sessions resume through the workbench so the
-                         existing reconnect and error flow stays centralized. */}
-                        <Button
-                          disabled={!isSessionPageNavigableSandboxStatus(session.status)}
-                          onClick={() => {
-                            void navigate(`/sessions/${encodeURIComponent(session.id)}`);
-                          }}
-                          type="button"
-                        >
-                          {shouldUseResumeActionLabel(session.status) ? "Resume" : "Open"}
-                        </Button>
+                      <TableCell className="align-top text-sm whitespace-normal">
+                        <span className="break-words text-sm text-muted-foreground">
+                          {session.sandboxProfileDisplayName ?? session.sandboxProfileId}
+                        </span>
+                      </TableCell>
+                      <TableCell className="align-top text-sm whitespace-normal">
+                        <span className="break-words text-sm text-foreground/80">
+                          {formatStartedByLabel(session.startedBy)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="align-top text-right whitespace-nowrap">
+                        <div className="flex justify-end">
+                          {resolveUpdatedLabel({
+                            status: session.status,
+                            updatedAt: session.updatedAt,
+                            failureMessage: session.failureMessage,
+                          })}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

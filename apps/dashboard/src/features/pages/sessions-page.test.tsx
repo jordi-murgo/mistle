@@ -14,10 +14,8 @@ import { resolveSandboxStatusBadgeUi } from "./sandbox-status-presentation.js";
 import {
   buildOptimisticSessions,
   resolveSessionResultsSummary,
-  SandboxSessionStatusBadge,
   SessionsPage,
   shouldClearSelectedProfile,
-  shouldUseResumeActionLabel,
 } from "./sessions-page.js";
 import { buildSandboxInstanceListItemFixture } from "./sessions-page.story-fixtures.js";
 
@@ -166,12 +164,13 @@ describe("SessionsPage", () => {
     );
 
     expect(markup).toContain(
-      'data-slot="table" class="w-full caption-bottom text-sm min-w-[48rem]"',
+      'data-slot="table" class="w-full caption-bottom text-sm min-w-[40rem] table-fixed"',
     );
     expect(markup).toContain("bg-muted/60");
-    expect(markup).toContain("text-xs font-semibold tracking-wide uppercase");
+    expect(markup).toContain("text-[11px] font-semibold tracking-[0.08em] uppercase");
     expect(markup).toContain(">Sessions<");
-    expect(markup).toContain('<span class="sr-only">Actions</span>');
+    expect(markup).toContain(">Sandbox profile<");
+    expect(markup).toContain(">Updated<");
   });
 
   it("keeps a single horizontally scrollable table layout", () => {
@@ -202,7 +201,7 @@ describe("SessionsPage", () => {
 
     expect(markup).toContain('data-slot="table-container" class="relative w-full overflow-x-auto"');
     expect(markup).toContain(
-      'data-slot="table" class="w-full caption-bottom text-sm min-w-[48rem]"',
+      'data-slot="table" class="w-full caption-bottom text-sm min-w-[40rem] table-fixed"',
     );
     expect(markup).toContain("Finance Investigator");
     expect(markup).not.toContain('class="grid gap-3 md:hidden"');
@@ -234,6 +233,37 @@ describe("SessionsPage", () => {
     expect(screen.getByText("Profile metadata")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  });
+
+  it("truncates long session titles in the list so the full value can be shown in a tooltip", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildSandboxInstanceListItemFixture({
+          id: "sbi_long_title",
+          title:
+            "This session title is intentionally extremely long so the sessions list keeps the row compact instead of wrapping across multiple lines",
+        }),
+      ],
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain("This session title is intentionally extremely long");
+    expect(markup).toContain('class="block min-w-0 flex-1 cursor-default truncate font-medium');
+    expect(markup).toContain(
+      'data-slot="table" class="w-full caption-bottom text-sm min-w-[40rem] table-fixed"',
+    );
   });
 
   it("renders Untitled when the persisted conversation title is missing", () => {
@@ -281,19 +311,33 @@ describe("SessionsPage", () => {
   });
 
   it("renders a compact failure indicator with tooltip details", () => {
-    const markup = renderToStaticMarkup(
-      <SandboxSessionStatusBadge
-        status="failed"
-        failureCode="sandbox_start_failed"
-        failureMessage="Failed to start sandbox runtime."
-      />,
-    );
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildSandboxInstanceListItemFixture({
+          id: "sbi_failed",
+          status: "failed",
+          failureCode: "sandbox_start_failed",
+          failureMessage: "Failed to start sandbox runtime.",
+        }),
+      ],
+    });
 
-    expect(markup).toContain("View failure details");
-    expect(markup).toContain("Failed");
-    expect(markup).not.toContain("sandbox_start_failed");
-    expect(markup).not.toContain("Failed to start sandbox runtime.");
-    expect(markup).not.toContain("text-destructive whitespace-pre-wrap text-xs");
+    const rendered = renderSessionsPage({
+      queryClient,
+    });
+
+    expect(within(rendered.container).getByLabelText("View failure details")).toBeDefined();
+    expect(within(rendered.container).getByText("Failed")).toBeDefined();
+    expect(rendered.container.innerHTML).not.toContain("sandbox_start_failed");
+    expect(rendered.container.innerHTML).not.toContain("Failed to start sandbox runtime.");
+    expect(rendered.container.innerHTML).not.toContain(
+      "text-destructive whitespace-pre-wrap text-xs",
+    );
   });
 
   it("uses the same badge labels as the workbench header mapper", () => {
@@ -305,7 +349,7 @@ describe("SessionsPage", () => {
     expect(resolveSandboxStatusBadgeUi("failed").label).toBe("Failed");
   });
 
-  it("routes stopped sessions into the workbench route directly", () => {
+  it("routes stopped sessions into the workbench route directly from the row", () => {
     const queryClient = createSessionsPageQueryClient({
       refetchOnMount: false,
       staleTime: Number.POSITIVE_INFINITY,
@@ -335,12 +379,12 @@ describe("SessionsPage", () => {
       ),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    fireEvent.click(screen.getByRole("link", { name: /untitled/i }));
 
     expect(screen.getByText("/sessions/sbi_stopped")).toBeDefined();
   });
 
-  it("uses the open action label for non-stopped sessions", () => {
+  it("marks running rows as navigable links", () => {
     const queryClient = createSessionsPageQueryClient({
       refetchOnMount: false,
       staleTime: Number.POSITIVE_INFINITY,
@@ -354,14 +398,85 @@ describe("SessionsPage", () => {
       queryClient,
     });
 
-    expect(within(rendered.container).getByRole("button", { name: "Open" })).toBeDefined();
+    expect(within(rendered.container).getByRole("link").getAttribute("href")).toBe(
+      "/sessions/sbi_running",
+    );
   });
 
-  it("uses the resume action label only for stopped sessions", () => {
-    expect(shouldUseResumeActionLabel("stopped")).toBe(true);
-    expect(shouldUseResumeActionLabel("starting")).toBe(false);
-    expect(shouldUseResumeActionLabel("running")).toBe(false);
-    expect(shouldUseResumeActionLabel("failed")).toBe(false);
+  it("renders failed sessions as non-navigable rows", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildSandboxInstanceListItemFixture({
+          id: "sbi_failed",
+          status: "failed",
+          failureCode: "sandbox_bootstrap_failed",
+          failureMessage: "Could not start sandbox runtime because image pull failed.",
+        }),
+      ],
+    });
+
+    const rendered = renderSessionsPage({
+      queryClient,
+    });
+
+    expect(within(rendered.container).queryByRole("link")).toBeNull();
+    expect(rendered.container.querySelector('tr[aria-disabled="true"]')).not.toBeNull();
+    expect(rendered.container.innerHTML).toContain("hover:bg-transparent");
+  });
+
+  it("shows compact updated labels for non-failed sessions", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildSandboxInstanceListItemFixture({
+          id: "sbi_updated",
+          updatedAt: "2026-03-08T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain(">1mo<");
+  });
+
+  it("shows the failed badge in place of the updated label for failed sessions", () => {
+    const queryClient = createSessionsPageQueryClient({
+      refetchOnMount: false,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    seedSessionsList({
+      queryClient,
+      items: [
+        buildSandboxInstanceListItemFixture({
+          id: "sbi_failed",
+          status: "failed",
+          failureCode: "sandbox_bootstrap_failed",
+          failureMessage: "Could not start sandbox runtime because image pull failed.",
+        }),
+      ],
+    });
+
+    const rendered = renderSessionsPage({
+      queryClient,
+    });
+
+    expect(within(rendered.container).getByText("Failed")).toBeDefined();
   });
 
   it("renders automation names in the started by column without the source sublabel", () => {
