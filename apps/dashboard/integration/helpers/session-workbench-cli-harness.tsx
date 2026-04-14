@@ -693,7 +693,10 @@ function createWorkbenchRequestHandler(
           connectable: true,
           failureCode: null,
           failureMessage: null,
-          runtimePlan: null,
+          runtimeContext: {
+            launchCwd: null,
+            primaryRepositoryRoot: null,
+          },
           automationConversation:
             options.providerConversationId === null || options.providerConversationId === undefined
               ? null
