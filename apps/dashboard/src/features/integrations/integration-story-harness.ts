@@ -431,6 +431,80 @@ export function createGitHubAppDetailViewStoryProps(): IntegrationConnectionDeta
   };
 }
 
+export function createGitHubAppSetupIncompleteDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  const connectionId = "icn_github_setup_incomplete";
+
+  return {
+    connections: [
+      {
+        id: connectionId,
+        ...resolveAuthMethodOrThrow({
+          familyId: "github",
+          methodId: "github-app-installation",
+          variantId: "github-cloud",
+        }),
+        bindingCount: 0,
+        canDelete: true,
+        contextItems: [
+          {
+            label: "App ID",
+            value: "3079908",
+          },
+          {
+            label: "App slug",
+            value: "jon-mistle-github-app",
+          },
+          {
+            label: "Installation",
+            value: "Pending",
+          },
+        ],
+        displayName: "GitHub App Setup",
+        installActionLabel: "Install GitHub App",
+        resources: [],
+        setup: {
+          description: "Set these URLs in your GitHub App settings, then install the app.",
+          postInstallationSetupUrl:
+            "https://control-plane.example.com/p/integration/callbacks/github-app-installation",
+        },
+        status: "active",
+        webhookInstructions:
+          "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
+      },
+    ],
+    showWebhookSources: true,
+    webhookSourceStateByConnectionId: new Map([
+      [
+        connectionId,
+        {
+          createErrorMessage: null,
+          deleteErrorMessage: null,
+          deletingWebhookSourceId: null,
+          isCreating: false,
+          isLoading: false,
+          items: [
+            {
+              callbackUrl:
+                "https://control-plane.example.com/p/integration/webhooks/github-cloud/ep_github_setup_incomplete",
+              createdAt: "2026-04-13T15:37:00.000Z",
+              displayName: "GitHub App webhook",
+              endpointKey: "ep_github_setup_incomplete",
+              id: "iws_github_setup_incomplete",
+              integrationConnectionId: connectionId,
+              providerMetadata: {},
+              status: "active",
+              targetKey: "github-cloud",
+              updatedAt: "2026-04-13T15:37:00.000Z",
+            },
+          ],
+          loadErrorMessage: null,
+          revealedWebhookSecret: null,
+        },
+      ],
+    ]),
+  };
+}
+
 type ScenarioDetailStorySpec = {
   authMethod?: StoryAuthMethodSpec;
   bindingCount?: number;
@@ -450,8 +524,14 @@ type ScenarioDetailStorySpec = {
     lastSyncedAt?: string;
     syncState: "never-synced" | "syncing" | "ready" | "error";
   }[];
-  setupDescription?: string;
-  setupStatusLabel?: string;
+  setup?:
+    | {
+        description?: string;
+        errorMessage?: string;
+        isPending?: boolean;
+        postInstallationSetupUrl?: string;
+      }
+    | undefined;
   showCreateWebhookSource?: boolean;
   status?: "active" | "error" | "revoked";
   webhookInstructions?: string;
@@ -541,12 +621,7 @@ function createScenarioDetailViewStoryProps(
           ...(resource.lastSyncedAt === undefined ? {} : { lastSyncedAt: resource.lastSyncedAt }),
           syncState: resource.syncState,
         })),
-        ...(input.setupDescription === undefined
-          ? {}
-          : { setupDescription: input.setupDescription }),
-        ...(input.setupStatusLabel === undefined
-          ? {}
-          : { setupStatusLabel: input.setupStatusLabel }),
+        ...(input.setup === undefined ? {} : { setup: input.setup }),
         status: input.status ?? "active",
         ...(input.webhookInstructions === undefined
           ? {}
@@ -646,13 +721,38 @@ export function createJiraDetailViewStoryProps(): IntegrationConnectionDetailVie
         endpointKey: "ep_jira_dense",
         id: "iws_jira_dense",
         integrationConnectionId: "icn_jira_dense",
-        providerMetadata: {},
+        providerMetadata: {
+          registeredEvents: [
+            "jira:issue_created",
+            "jira:issue_updated",
+            "comment_created",
+            "comment_updated",
+          ],
+        },
         remoteRegistrationId: "10001",
         status: "active",
         targetKey: "jira-default",
         updatedAt: DenseStoryLastSyncedAt,
       },
     ],
+  });
+}
+
+export function createJiraSetupIncompleteDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  return createScenarioDetailViewStoryProps({
+    authMethod: {
+      familyId: "jira",
+      methodId: "jira-personal-api-token",
+      variantId: "jira-default",
+    },
+    bindingCount: 1,
+    connectionId: "icn_jira_setup_incomplete",
+    displayName: "Jira Production",
+    setup: {
+      description: "Create a Jira admin webhook to complete setup.",
+    },
+    showCreateWebhookSource: true,
+    webhookSources: [],
   });
 }
 
@@ -669,31 +769,79 @@ export function createLinearDetailViewStoryProps(): IntegrationConnectionDetailV
 }
 
 export function createSlackDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
-  return createScenarioDetailViewStoryProps({
-    authMethod: {
-      familyId: "slack",
-      methodId: "slack-bot-token",
-      variantId: "slack-default",
+  const storyProps = [
+    {
+      bindingCount: 2,
+      connectionId: "icn_slack_engineering",
+      displayName: "Slack Engineering",
+      endpointKey: "ep_slack_engineering",
+      webhookSourceId: "iws_slack_engineering",
     },
-    bindingCount: 2,
-    connectionId: "icn_slack_dense",
-    displayName: "Slack Engineering",
-    webhookSources: [
-      {
-        callbackUrl:
-          "https://control-plane.example.com/p/integration/webhooks/slack-default/ep_slack_dense",
-        createdAt: DenseStoryLastSyncedAt,
-        displayName: "Slack Events API webhook",
-        endpointKey: "ep_slack_dense",
-        id: "iws_slack_dense",
-        integrationConnectionId: "icn_slack_dense",
-        providerMetadata: {},
-        status: "active",
-        targetKey: "slack-default",
-        updatedAt: DenseStoryLastSyncedAt,
+    {
+      bindingCount: 1,
+      connectionId: "icn_slack_support",
+      displayName: "Slack Support",
+      endpointKey: "ep_slack_support",
+      webhookSourceId: "iws_slack_support",
+    },
+    {
+      bindingCount: 3,
+      connectionId: "icn_slack_growth",
+      displayName: "Slack Growth",
+      endpointKey: "ep_slack_growth",
+      webhookSourceId: "iws_slack_growth",
+    },
+    {
+      bindingCount: 0,
+      connectionId: "icn_slack_ops",
+      displayName: "Slack Ops",
+      endpointKey: "ep_slack_ops",
+      webhookSourceId: "iws_slack_ops",
+    },
+    {
+      bindingCount: 1,
+      connectionId: "icn_slack_design",
+      displayName: "Slack Design",
+      endpointKey: "ep_slack_design",
+      webhookSourceId: "iws_slack_design",
+    },
+  ].map((connection) =>
+    createScenarioDetailViewStoryProps({
+      authMethod: {
+        familyId: "slack",
+        methodId: "slack-bot-token",
+        variantId: "slack-default",
       },
-    ],
-  });
+      bindingCount: connection.bindingCount,
+      connectionId: connection.connectionId,
+      displayName: connection.displayName,
+      webhookSources: [
+        {
+          callbackUrl: `https://control-plane.example.com/p/integration/webhooks/slack-default/${connection.endpointKey}`,
+          createdAt: DenseStoryLastSyncedAt,
+          displayName: "Slack Events API webhook",
+          endpointKey: connection.endpointKey,
+          id: connection.webhookSourceId,
+          integrationConnectionId: connection.connectionId,
+          providerMetadata: {},
+          status: "active",
+          targetKey: "slack-default",
+          updatedAt: DenseStoryLastSyncedAt,
+        },
+      ],
+    }),
+  );
+
+  return {
+    connections: storyProps.flatMap((story) => story.connections),
+    onRefreshResource: () => {},
+    showWebhookSources: true,
+    webhookSourceStateByConnectionId: new Map(
+      storyProps.flatMap((story) =>
+        Array.from(story.webhookSourceStateByConnectionId?.entries() ?? []),
+      ),
+    ),
+  };
 }
 
 export function createOpenAiDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
@@ -754,35 +902,4 @@ export function createSigNozDetailViewStoryProps(): IntegrationConnectionDetailV
     connectionId: "icn_signoz_dense",
     displayName: "SigNoz Hosted MCP",
   });
-}
-
-export function createIntegrationGalleryStoryProps(): IntegrationConnectionDetailViewProps {
-  const storyProps = [
-    createGitHubAppDetailViewStoryProps(),
-    createGitHubEnterpriseServerDetailViewStoryProps(),
-    createJiraDetailViewStoryProps(),
-    createLinearDetailViewStoryProps(),
-    createSlackDetailViewStoryProps(),
-    createOpenAiDetailViewStoryProps(),
-    createAwsDetailViewStoryProps(),
-    createDatadogDetailViewStoryProps(),
-    createPlanetScaleDetailViewStoryProps(),
-    createSigNozDetailViewStoryProps(),
-  ];
-
-  return {
-    connections: storyProps.flatMap((story) => story.connections),
-    onEditApiKey: () => {},
-    onRefreshResource: () => {},
-    resourceItemsByKey: new Map(
-      storyProps.flatMap((story) => Array.from(story.resourceItemsByKey?.entries() ?? [])),
-    ),
-    showCreateWebhookSource: true,
-    showWebhookSources: true,
-    webhookSourceStateByConnectionId: new Map(
-      storyProps.flatMap((story) =>
-        Array.from(story.webhookSourceStateByConnectionId?.entries() ?? []),
-      ),
-    ),
-  };
 }

@@ -7,8 +7,9 @@ import {
   createDatadogDetailViewStoryProps,
   createGitHubEnterpriseServerDetailViewStoryProps,
   createGitHubAppDetailViewStoryProps,
-  createIntegrationGalleryStoryProps,
+  createGitHubAppSetupIncompleteDetailViewStoryProps,
   createJiraDetailViewStoryProps,
+  createJiraSetupIncompleteDetailViewStoryProps,
   createLinearDetailViewStoryProps,
   createOpenAiDetailViewStoryProps,
   createPlanetScaleDetailViewStoryProps,
@@ -48,6 +49,12 @@ const meta = {
     onEditApiKey: (_connectionId: string) => {},
     onRefreshResource: (_input: { connectionId: string; kind: string }) => {},
     onStartGitHubAppInstallation: async (_connectionId: string) => {},
+    titleEditor: {
+      disabled: false,
+      errorMessageByConnectionId: {},
+      onStartEditing: (_connectionId: string) => {},
+      onSave: async (_connectionId: string, _draftValue: string) => {},
+    },
   },
 } satisfies Meta<typeof IntegrationConnectionDetailView>;
 
@@ -62,6 +69,13 @@ export const GitHubApp: Story = {
   },
 };
 
+export const GitHubAppSetupIncomplete: Story = {
+  name: "GitHub App Setup Incomplete",
+  args: {
+    ...withoutStoryHandlers(createGitHubAppSetupIncompleteDetailViewStoryProps()),
+  },
+};
+
 export const GitHubEnterpriseServer: Story = {
   name: "GitHub Enterprise Server",
   args: {
@@ -70,8 +84,16 @@ export const GitHubEnterpriseServer: Story = {
 };
 
 export const Jira: Story = {
+  name: "Jira Complete",
   args: {
     ...withoutStoryHandlers(createJiraDetailViewStoryProps()),
+  },
+};
+
+export const JiraSetupIncomplete: Story = {
+  name: "Jira Setup Incomplete",
+  args: {
+    ...withoutStoryHandlers(createJiraSetupIncompleteDetailViewStoryProps()),
   },
 };
 
@@ -118,11 +140,5 @@ export const SigNoz: Story = {
   name: "SigNoz",
   args: {
     ...withoutStoryHandlers(createSigNozDetailViewStoryProps()),
-  },
-};
-
-export const Gallery: Story = {
-  args: {
-    ...withoutStoryHandlers(createIntegrationGalleryStoryProps()),
   },
 };

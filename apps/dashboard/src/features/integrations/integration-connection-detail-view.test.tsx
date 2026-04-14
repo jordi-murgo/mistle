@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,7 +11,7 @@ describe("IntegrationConnectionDetailView", () => {
     cleanup();
   });
 
-  it("renders stacked connections and exposes refresh actions", () => {
+  it("renders connection navigation and exposes detail actions for the selected connection", () => {
     let refreshedKind: string | null = null;
     let startedGitHubAppInstallationConnectionId: string | null = null;
     render(
@@ -74,6 +74,42 @@ describe("IntegrationConnectionDetailView", () => {
                     status: "accessible",
                     metadata: {},
                   },
+                  {
+                    id: "repo_2",
+                    familyId: "github",
+                    kind: "repositories",
+                    handle: "mistle/control-plane-api",
+                    displayName: "mistle/control-plane-api",
+                    status: "accessible",
+                    metadata: {},
+                  },
+                  {
+                    id: "repo_3",
+                    familyId: "github",
+                    kind: "repositories",
+                    handle: "mistle/data-plane-api",
+                    displayName: "mistle/data-plane-api",
+                    status: "accessible",
+                    metadata: {},
+                  },
+                  {
+                    id: "repo_4",
+                    familyId: "github",
+                    kind: "repositories",
+                    handle: "mistle/ui",
+                    displayName: "mistle/ui",
+                    status: "accessible",
+                    metadata: {},
+                  },
+                  {
+                    id: "repo_5",
+                    familyId: "github",
+                    kind: "repositories",
+                    handle: "mistle/docs",
+                    displayName: "mistle/docs",
+                    status: "accessible",
+                    metadata: {},
+                  },
                 ],
                 kind: "repositories",
               },
@@ -84,19 +120,42 @@ describe("IntegrationConnectionDetailView", () => {
     );
 
     expect(
-      screen.getAllByText("GitHub returned a 403 while reading repository visibility."),
-    ).toHaveLength(1);
-    expect(screen.getByText("Engineering GitHub")).toBeTruthy();
-    expect(screen.getByText("Archive Mirror")).toBeTruthy();
+      screen.getByRole("button", { name: "Select connection Engineering GitHub" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Select connection Archive Mirror" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Select connection" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Engineering GitHub" })).toBeTruthy();
+    expect(screen.getAllByText("Resources")).toHaveLength(1);
+    expect(screen.getByText("Repository")).toBeTruthy();
+    expect(screen.getByText("- 41")).toBeTruthy();
+    expect(screen.queryByText("- 0")).toBeNull();
+    const expandRepositoryButton = screen.getByRole("button", {
+      name: "Expand repository resources",
+    });
+    expect(screen.queryByText("mistle/dashboard")).toBeNull();
+    expect(screen.queryByText("mistle/docs")).toBeNull();
+    fireEvent.click(expandRepositoryButton);
     expect(screen.getByText("mistle/dashboard")).toBeTruthy();
-    const [refreshButton] = screen.getAllByRole("button", { name: "Refresh repositories" });
-    if (refreshButton === undefined) {
-      throw new Error("Expected a refresh repositories button.");
-    }
+    expect(screen.getByText("mistle/docs")).toBeTruthy();
+    const collapseRepositoryButton = screen.getByRole("button", {
+      name: "Collapse repository resources",
+    });
+    fireEvent.click(collapseRepositoryButton);
+    expect(screen.queryByText("mistle/dashboard")).toBeNull();
+    expect(screen.queryByText("mistle/docs")).toBeNull();
+    const refreshButton = screen.getByRole("button", { name: "Refresh repositories" });
     fireEvent.click(refreshButton);
     expect(refreshedKind).toBe("repositories");
     fireEvent.click(screen.getByRole("button", { name: "Manage installation" }));
     expect(startedGitHubAppInstallationConnectionId).toBe("icn_github_primary");
+    fireEvent.click(screen.getByRole("button", { name: "Select connection Archive Mirror" }));
+    expect(screen.getByRole("heading", { name: "Archive Mirror" })).toBeTruthy();
+    expect(screen.getByText("Repository")).toBeTruthy();
+    expect(screen.getByText("- 0")).toBeTruthy();
+    expect(
+      screen.getByText("GitHub returned a 403 while reading repository visibility."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage installation" })).toBeNull();
   });
 
   it("renders an empty state when no connections are available", () => {
@@ -172,14 +231,103 @@ describe("IntegrationConnectionDetailView", () => {
       />,
     );
 
-    const editButtons = screen.getAllByRole("button", { name: "Edit connection name" });
-    const secondEditButton = editButtons[1];
-    if (secondEditButton === undefined) {
-      throw new Error("Expected a second edit connection name button.");
-    }
-    fireEvent.click(secondEditButton);
+    fireEvent.click(screen.getByRole("button", { name: "Select connection Archive Mirror" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit connection name" }));
     expect(startedEditingConnectionId).toBe("icn_github_archive");
     expect(screen.getByDisplayValue("Archive Mirror")).toBeTruthy();
+  });
+
+  it("resets expanded resource state when switching connections", () => {
+    render(
+      <IntegrationConnectionDetailView
+        connections={[
+          {
+            id: "icn_github_primary",
+            bindingCount: 0,
+            canDelete: true,
+            displayName: "Engineering GitHub",
+            authMethodId: "github-app-installation",
+            authMethodLabel: "GitHub App installation",
+            status: "active",
+            resources: [
+              {
+                kind: "repositories",
+                count: 2,
+                syncState: "ready",
+                lastSyncedAt: "2026-03-11T04:25:00.000Z",
+              },
+            ],
+          },
+          {
+            id: "icn_github_archive",
+            bindingCount: 0,
+            canDelete: true,
+            displayName: "Archive Mirror",
+            authMethodId: "github-app-installation",
+            authMethodLabel: "GitHub App installation",
+            status: "active",
+            resources: [
+              {
+                kind: "repositories",
+                count: 2,
+                syncState: "ready",
+                lastSyncedAt: "2026-03-11T04:25:00.000Z",
+              },
+            ],
+          },
+        ]}
+        resourceItemsByKey={
+          new Map([
+            [
+              "icn_github_primary:repositories",
+              {
+                errorMessage: null,
+                isLoading: false,
+                items: [
+                  {
+                    id: "repo_1",
+                    familyId: "github",
+                    kind: "repositories",
+                    handle: "mistle/dashboard",
+                    displayName: "mistle/dashboard",
+                    status: "accessible",
+                    metadata: {},
+                  },
+                ],
+                kind: "repositories",
+              },
+            ],
+            [
+              "icn_github_archive:repositories",
+              {
+                errorMessage: null,
+                isLoading: false,
+                items: [
+                  {
+                    id: "repo_2",
+                    familyId: "github",
+                    kind: "repositories",
+                    handle: "mistle/archive",
+                    displayName: "mistle/archive",
+                    status: "accessible",
+                    metadata: {},
+                  },
+                ],
+                kind: "repositories",
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand repository resources" }));
+    expect(screen.getByText("mistle/dashboard")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select connection Archive Mirror" }));
+    expect(screen.queryByText("mistle/dashboard")).toBeNull();
+    expect(screen.queryByText("mistle/archive")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand repository resources" })).toBeTruthy();
   });
 
   it("clears a stale connection save error when a new edit session starts", () => {
@@ -287,12 +435,12 @@ describe("IntegrationConnectionDetailView", () => {
     const authSection = screen.getByLabelText("Connection authentication");
     expect(authSection.getAttribute("data-auth-method-id")).toBe("slack-bot-token");
     expect(screen.getByLabelText("Masked Slack credential values")).toBeTruthy();
-    expect(screen.getByText("Bot token:")).toBeTruthy();
-    expect(screen.getByText("Signing secret:")).toBeTruthy();
-    expect(screen.getAllByText("**********")).toHaveLength(2);
+    expect(within(authSection).getAllByText("Bot token")).toHaveLength(2);
+    expect(within(authSection).getByText("Signing secret")).toBeTruthy();
+    expect(within(authSection).getAllByText("**********")).toHaveLength(2);
   });
 
-  it("shows delete only for unbound connections", () => {
+  it("shows delete for all connections and disables it when bindings prevent deletion", () => {
     let deletedConnectionId: string | null = null;
 
     render(
@@ -325,7 +473,14 @@ describe("IntegrationConnectionDetailView", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Delete connection Bound connection" })).toBeNull();
+    const boundDeleteButton = screen.getByRole("button", {
+      name: "Delete connection Bound connection",
+    });
+    expect(boundDeleteButton).toHaveProperty("disabled", true);
+    expect(boundDeleteButton.getAttribute("title")).toBe(
+      "This connection can't be deleted while it has 2 bindings.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select connection Free connection" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete connection Free connection" }));
     expect(deletedConnectionId).toBe("icn_free");
   });
@@ -338,12 +493,12 @@ describe("IntegrationConnectionDetailView", () => {
       <IntegrationConnectionDetailView
         connections={[
           {
-            id: "icn_jira_primary",
+            id: "icn_webhook_primary",
             bindingCount: 0,
             canDelete: true,
-            displayName: "Jira Production",
-            authMethodId: "jira-personal-api-token",
-            authMethodLabel: "Personal API token",
+            displayName: "Webhook Connection",
+            authMethodId: "api-key",
+            authMethodLabel: "API key",
             status: "active",
             resources: [],
           },
@@ -359,7 +514,7 @@ describe("IntegrationConnectionDetailView", () => {
         webhookSourceStateByConnectionId={
           new Map([
             [
-              "icn_jira_primary",
+              "icn_webhook_primary",
               {
                 createErrorMessage: null,
                 deleteErrorMessage: null,
@@ -370,14 +525,21 @@ describe("IntegrationConnectionDetailView", () => {
                   {
                     id: "iws_jira_123",
                     targetKey: "jira-default",
-                    integrationConnectionId: "icn_jira_primary",
+                    integrationConnectionId: "icn_webhook_primary",
                     displayName: "Primary Jira webhook",
                     endpointKey: "ep_jira_123",
                     callbackUrl:
                       "https://control-plane.example.com/p/integration/webhooks/jira-default/ep_jira_123",
                     remoteRegistrationId: "10001",
                     status: "active",
-                    providerMetadata: {},
+                    providerMetadata: {
+                      registeredEvents: [
+                        "jira:issue_created",
+                        "jira:issue_updated",
+                        "comment_created",
+                        "comment_updated",
+                      ],
+                    },
                     createdAt: "2026-04-03T00:00:00.000Z",
                     updatedAt: "2026-04-03T00:00:00.000Z",
                   },
@@ -391,24 +553,83 @@ describe("IntegrationConnectionDetailView", () => {
       />,
     );
 
-    expect(screen.getByText("Webhooks")).toBeTruthy();
+    expect(screen.getByText("Details")).toBeTruthy();
     expect(
-      screen.getByText("Copy the callback URL into your provider's webhook configuration."),
-    ).toBeTruthy();
+      screen.queryByText("Copy the callback URL into your provider's webhook configuration."),
+    ).toBeNull();
     expect(screen.getByText("Primary Jira webhook")).toBeTruthy();
+    expect(screen.queryByText("Webhook source ID: iws_jira_123")).toBeNull();
+    expect(screen.queryByText("Target")).toBeNull();
+    expect(screen.queryByText("jira-default")).toBeNull();
+    expect(screen.getByText("Provider registration")).toBeTruthy();
+    expect(screen.getByText("10001")).toBeTruthy();
+    expect(screen.getByText("Registered events")).toBeTruthy();
+    expect(screen.getByText("Issue created")).toBeTruthy();
+    expect(screen.getByText("Issue updated")).toBeTruthy();
+    expect(screen.getByText("Comment created")).toBeTruthy();
+    expect(screen.getByText("Comment updated")).toBeTruthy();
+    expect(screen.getByText("Callback URL")).toBeTruthy();
     expect(screen.getByText("whsec_jira_123")).toBeTruthy();
     expect(screen.queryByText("Endpoint key")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Create webhook" }));
-    expect(createdConnectionId).toBe("icn_jira_primary");
+    expect(createdConnectionId).toBe("icn_webhook_primary");
 
     fireEvent.click(
       screen.getByRole("button", { name: "Delete webhook source Primary Jira webhook" }),
     );
     expect(deletedWebhookSource).toEqual({
-      connectionId: "icn_jira_primary",
+      connectionId: "icn_webhook_primary",
       webhookSourceId: "iws_jira_123",
     });
+  });
+
+  it("renders generic setup guidance without setup URLs", () => {
+    render(
+      <IntegrationConnectionDetailView
+        connections={[
+          {
+            id: "icn_jira_setup",
+            bindingCount: 0,
+            canDelete: true,
+            displayName: "Jira Production",
+            authMethodId: "jira-personal-api-token",
+            authMethodLabel: "Personal API token",
+            status: "active",
+            resources: [],
+            setup: {
+              description: "Create a Jira admin webhook to complete setup.",
+            },
+          },
+        ]}
+        onCreateWebhookSource={() => {}}
+        showCreateWebhookSource={true}
+        showWebhookSources={true}
+        webhookSourceStateByConnectionId={
+          new Map([
+            [
+              "icn_jira_setup",
+              {
+                createErrorMessage: null,
+                deleteErrorMessage: null,
+                deletingWebhookSourceId: null,
+                isCreating: false,
+                isLoading: false,
+                items: [],
+                loadErrorMessage: null,
+                revealedWebhookSecret: null,
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByText("Setup")).toBeTruthy();
+    expect(screen.getByText("Create a Jira admin webhook to complete setup.")).toBeTruthy();
+    expect(screen.queryByText("Details")).toBeNull();
+    expect(screen.getByRole("button", { name: "Create webhook" })).toBeTruthy();
+    expect(screen.queryByText("Callback URL")).toBeNull();
   });
 
   it("does not show delete for implicit webhook sources", () => {
@@ -422,16 +643,16 @@ describe("IntegrationConnectionDetailView", () => {
             bindingCount: 0,
             canDelete: true,
             displayName: "GitHub Production",
-            postInstallationSetupUrl:
-              "http://localhost:5100/p/integration/callbacks/github-app-installation",
             installActionLabel: "Install GitHub App",
             authMethodId: "github-app-installation",
             authMethodLabel: "GitHub App installation",
             status: "active",
             resources: [],
-            setupDescription:
-              "Set the webhook callback URL and post-installation setup URL in your GitHub App settings, then install the app to finish setup.",
-            setupStatusLabel: "Setup incomplete",
+            setup: {
+              description: "Set these URLs in your GitHub App settings, then install the app.",
+              postInstallationSetupUrl:
+                "http://localhost:5100/p/integration/callbacks/github-app-installation",
+            },
             webhookInstructions:
               "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
           },
@@ -475,14 +696,17 @@ describe("IntegrationConnectionDetailView", () => {
     );
 
     expect(
-      screen.getAllByText(
-        "Set the webhook callback URL and post-installation setup URL in your GitHub App settings, then install the app to finish setup.",
-      ),
-    ).toHaveLength(2);
-    expect(screen.getAllByText("Setup incomplete")).toHaveLength(2);
-    expect(screen.getByText("GitHub App setup")).toBeTruthy();
+      screen.getByText("Set these URLs in your GitHub App settings, then install the app."),
+    ).toBeTruthy();
     expect(screen.getByText("Webhook callback URL")).toBeTruthy();
     expect(screen.getByText("Post-installation setup URL")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy Webhook callback URL" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy Post-installation setup URL" })).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
+      ),
+    ).toBeNull();
     expect(
       screen.getByText(
         "https://control-plane.example.com/p/integration/callbacks/github-app-installation",
@@ -563,6 +787,6 @@ describe("IntegrationConnectionDetailView", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Create webhook" })).toBeNull();
-    expect(screen.getByText("GitHub App webhook")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy Callback URL" })).toBeTruthy();
   });
 });
