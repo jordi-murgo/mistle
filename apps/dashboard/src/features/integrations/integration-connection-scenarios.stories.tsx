@@ -7,9 +7,10 @@ import {
   createDatadogDetailViewStoryProps,
   createGitHubEnterpriseServerDetailViewStoryProps,
   createGitHubAppDetailViewStoryProps,
+  createGitHubPreviewErrorDetailViewStoryProps,
   createGitHubAppSetupIncompleteDetailViewStoryProps,
   createJiraDetailViewStoryProps,
-  createJiraSetupIncompleteDetailViewStoryProps,
+  createJiraWebhookNotConfiguredDetailViewStoryProps,
   createLinearDetailViewStoryProps,
   createOpenAiDetailViewStoryProps,
   createPlanetScaleDetailViewStoryProps,
@@ -23,14 +24,14 @@ function withoutStoryHandlers(
   React.ComponentProps<typeof IntegrationConnectionDetailView>,
   | "onCreateWebhookSource"
   | "onDeleteWebhookSource"
-  | "onEditApiKey"
+  | "onEditAuthentication"
   | "onRefreshResource"
   | "onStartGitHubAppInstallation"
 > {
   const {
     onCreateWebhookSource: _onCreateWebhookSource,
     onDeleteWebhookSource: _onDeleteWebhookSource,
-    onEditApiKey: _onEditApiKey,
+    onEditAuthentication: _onEditAuthentication,
     onRefreshResource: _onRefreshResource,
     onStartGitHubAppInstallation: _onStartGitHubAppInstallation,
     ...rest
@@ -46,7 +47,7 @@ const meta = {
   args: {
     onCreateWebhookSource: (_input: { connectionId: string }) => {},
     onDeleteWebhookSource: (_input: { connectionId: string; webhookSourceId: string }) => {},
-    onEditApiKey: (_connectionId: string) => {},
+    onEditAuthentication: (_connectionId: string) => {},
     onRefreshResource: (_input: { connectionId: string; kind: string }) => {},
     onStartGitHubAppInstallation: async (_connectionId: string) => {},
     titleEditor: {
@@ -76,6 +77,13 @@ export const GitHubAppSetupIncomplete: Story = {
   },
 };
 
+export const GitHubPreviewError: Story = {
+  name: "GitHub Preview Error",
+  args: {
+    ...withoutStoryHandlers(createGitHubPreviewErrorDetailViewStoryProps()),
+  },
+};
+
 export const GitHubEnterpriseServer: Story = {
   name: "GitHub Enterprise Server",
   args: {
@@ -90,10 +98,10 @@ export const Jira: Story = {
   },
 };
 
-export const JiraSetupIncomplete: Story = {
-  name: "Jira Setup Incomplete",
+export const JiraWebhookNotConfigured: Story = {
+  name: "Jira Webhook Not Configured",
   args: {
-    ...withoutStoryHandlers(createJiraSetupIncompleteDetailViewStoryProps()),
+    ...withoutStoryHandlers(createJiraWebhookNotConfiguredDetailViewStoryProps()),
   },
 };
 

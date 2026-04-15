@@ -43,6 +43,11 @@ function resolveIntegrationDetailBreadcrumb(input: RouteTextResolverInput): stri
     return "Connection";
   }
 
+  const metadata = resolveIntegrationDefinitionMetadata(targetKey);
+  if (metadata !== null) {
+    return metadata.displayName;
+  }
+
   return normalizeIntegrationBreadcrumbLabel(targetKey);
 }
 
@@ -88,8 +93,30 @@ function resolveIntegrationDetailSubtitle(input: RouteTextResolverInput): string
   return targetKey;
 }
 
+function resolveIntegrationBreadcrumbIcon(input: RouteTextResolverInput): React.ReactNode | null {
+  const targetKey = input.params["targetKey"];
+  if (targetKey === undefined || targetKey.trim().length === 0) {
+    return null;
+  }
+
+  const metadata = resolveIntegrationDefinitionMetadata(targetKey);
+  if (metadata === null) {
+    return null;
+  }
+
+  return createElement("img", {
+    alt: "",
+    className: "h-5 w-5 rounded-sm",
+    src: resolveIntegrationLogoPath({ logoKey: metadata.logoKey }),
+  });
+}
+
 function resolveIntegrationCreateTitle(input: RouteTextResolverInput): string {
   return `Add ${resolveIntegrationDetailTitle(input)} Connection`;
+}
+
+function resolveIntegrationEditTitle(input: RouteTextResolverInput): string {
+  return `Edit ${resolveIntegrationDetailTitle(input)} Connection`;
 }
 
 function resolveIntegrationDetailHeaderIcon(input: RouteTextResolverInput): React.ReactNode | null {
@@ -161,6 +188,7 @@ export const ROUTE_HANDLES = {
   integrationDetail: {
     appShellInsetOwner: "child",
     breadcrumb: resolveIntegrationDetailBreadcrumb,
+    breadcrumbIcon: resolveIntegrationBreadcrumbIcon,
     title: resolveIntegrationDetailTitle,
     description: resolveIntegrationDetailSubtitle,
     header: {
@@ -171,6 +199,15 @@ export const ROUTE_HANDLES = {
     appShellInsetOwner: "child",
     breadcrumb: "Add",
     title: resolveIntegrationCreateTitle,
+    description: resolveIntegrationDetailSubtitle,
+    header: {
+      icon: resolveIntegrationDetailHeaderIcon,
+    },
+  },
+  integrationEdit: {
+    appShellInsetOwner: "child",
+    breadcrumb: "Edit",
+    title: resolveIntegrationEditTitle,
     description: resolveIntegrationDetailSubtitle,
     header: {
       icon: resolveIntegrationDetailHeaderIcon,

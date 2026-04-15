@@ -17,6 +17,7 @@ import {
   ArrowClockwiseIcon,
   CaretDownIcon,
   CaretRightIcon,
+  InfoIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import { useState } from "react";
@@ -30,6 +31,7 @@ import {
   formatResourceInlineMetadata,
   formatResourceLabel,
   formatSyncStateLabel,
+  formatWebhookSourceStatusLabel,
 } from "./integration-connection-detail-formatters.js";
 import type {
   IntegrationConnectionResource,
@@ -52,6 +54,11 @@ export type IntegrationConnectionDetailResourceSummary = {
 };
 
 export type IntegrationConnectionDetailItem = {
+  authFields?: readonly {
+    label: string;
+    value: string;
+  }[];
+  authSecretLabels?: readonly string[];
   authMethodId?: string | null;
   authMethodLabel?: string | null;
   bindingCount: number;
@@ -73,7 +80,6 @@ export type IntegrationConnectionDetailItem = {
       }
     | undefined;
   status: "active" | "error" | "revoked";
-  webhookInstructions?: string;
 };
 
 export type IntegrationConnectionDetailViewProps = {
@@ -82,10 +88,10 @@ export type IntegrationConnectionDetailViewProps = {
   onCreateWebhookSource?: (input: { connectionId: string }) => void;
   onDeleteConnection?: (connectionId: string) => void;
   onDeleteWebhookSource?: (input: { connectionId: string; webhookSourceId: string }) => void;
-  onEditApiKey?: (connectionId: string) => void;
+  onEditAuthentication?: (connectionId: string) => void;
   onStartGitHubAppInstallation?: (connectionId: string) => Promise<void> | void;
   onRefreshResource?: (input: { connectionId: string; kind: string }) => void;
-  resourceItemsByKey?: ReadonlyMap<
+  resourceContentByKey?: ReadonlyMap<
     string,
     {
       errorMessage: string | null;
@@ -102,10 +108,78 @@ export type IntegrationConnectionDetailViewProps = {
         onSave: (connectionId: string, draftValue: string) => Promise<void> | void;
       }
     | undefined;
-  showWebhookSources?: boolean;
-  showCreateWebhookSource?: boolean;
+  webhookPolicy?:
+    | {
+        canCreateWebhookSource: boolean;
+        canDeleteWebhookSource: boolean;
+        showWebhookSources: boolean;
+      }
+    | undefined;
   webhookSourceStateByConnectionId?: ReadonlyMap<string, IntegrationWebhookSourceSectionState>;
 };
+
+type WebhookSectionUiState = {
+  hideInlineDeleteAction: boolean;
+  showCreateAction: boolean;
+  showStandaloneDeleteAction: boolean;
+  standaloneSource: IntegrationWebhookSource | undefined;
+};
+
+function resolveWebhookSectionUiState(input: {
+  canCreateWebhookSource: boolean;
+  canDeleteWebhookSource: boolean;
+  state: IntegrationWebhookSourceSectionState;
+}): WebhookSectionUiState {
+  const standaloneSource = input.state.items.length === 1 ? input.state.items[0] : undefined;
+
+  return {
+    standaloneSource,
+    hideInlineDeleteAction: standaloneSource !== undefined,
+    showCreateAction: input.canCreateWebhookSource && input.state.items.length === 0,
+    showStandaloneDeleteAction:
+      standaloneSource !== undefined &&
+      input.canDeleteWebhookSource &&
+      standaloneSource.remoteRegistrationId !== undefined,
+  };
+}
+
+function resolveConnectionDetailPaneViewState(input: {
+  connection: IntegrationConnectionDetailItem;
+  webhookPolicy: IntegrationConnectionDetailViewProps["webhookPolicy"];
+  webhookSourceState: IntegrationWebhookSourceSectionState | undefined;
+}) {
+  const setup =
+    input.connection.setup === undefined
+      ? undefined
+      : {
+          ...input.connection.setup,
+          ...(input.connection.authMethodId === "github-app-installation" &&
+          input.webhookSourceState?.items[0]?.callbackUrl !== undefined
+            ? { callbackUrl: input.webhookSourceState.items[0].callbackUrl }
+            : {}),
+        };
+  const hasSetupSection =
+    setup !== undefined &&
+    (setup.description !== undefined ||
+      setup.errorMessage !== undefined ||
+      setup.postInstallationSetupUrl !== undefined ||
+      ("callbackUrl" in setup && setup.callbackUrl !== undefined));
+  const shouldRenderWebhookSection =
+    input.webhookPolicy?.showWebhookSources === true && input.webhookSourceState !== undefined;
+
+  return {
+    hasSetupSection,
+    setup,
+    webhookSectionUiState:
+      !shouldRenderWebhookSection || input.webhookSourceState === undefined
+        ? null
+        : resolveWebhookSectionUiState({
+            canCreateWebhookSource: input.webhookPolicy?.canCreateWebhookSource === true,
+            canDeleteWebhookSource: input.webhookPolicy?.canDeleteWebhookSource === true,
+            state: input.webhookSourceState,
+          }),
+  };
+}
 
 export function IntegrationConnectionDetailView(
   props: IntegrationConnectionDetailViewProps,
@@ -125,6 +199,10 @@ export function IntegrationConnectionDetailView(
   if (selectedConnection === undefined) {
     throw new Error("Expected at least one integration connection.");
   }
+
+  const selectedWebhookSourceState = props.webhookSourceStateByConnectionId?.get(
+    selectedConnection.id,
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -149,7 +227,7 @@ export function IntegrationConnectionDetailView(
           </SelectContent>
         </Select>
       </div>
-      <div className="flex flex-col gap-6 md:grid md:grid-cols-[16rem_1px_minmax(0,1fr)] md:gap-0 lg:grid-cols-[18rem_1px_minmax(0,1fr)]">
+      <div className="flex flex-col gap-6 md:grid md:grid-cols-[10rem_1px_minmax(0,1fr)] md:gap-0 lg:grid-cols-[11rem_1px_minmax(0,1fr)]">
         <nav aria-label="Connections" className="hidden flex-col md:flex">
           {props.connections.map((connection) => {
             const isSelected = connection.id === selectedConnection.id;
@@ -186,53 +264,38 @@ export function IntegrationConnectionDetailView(
         </nav>
         <div aria-hidden className="bg-border hidden md:block" />
         <div className="min-w-0 md:pl-8">
-          <ConnectionDetailPaneWithOptionalProps connection={selectedConnection} props={props} />
+          <ConnectionDetailPane
+            connection={selectedConnection}
+            {...(props.onCreateWebhookSource === undefined
+              ? {}
+              : { onCreateWebhookSource: props.onCreateWebhookSource })}
+            {...(props.onDeleteConnection === undefined
+              ? {}
+              : { onDeleteConnection: props.onDeleteConnection })}
+            {...(props.onDeleteWebhookSource === undefined
+              ? {}
+              : { onDeleteWebhookSource: props.onDeleteWebhookSource })}
+            {...(props.onEditAuthentication === undefined
+              ? {}
+              : { onEditAuthentication: props.onEditAuthentication })}
+            {...(props.onRefreshResource === undefined
+              ? {}
+              : { onRefreshResource: props.onRefreshResource })}
+            {...(props.onStartGitHubAppInstallation === undefined
+              ? {}
+              : { onStartGitHubAppInstallation: props.onStartGitHubAppInstallation })}
+            {...(props.resourceContentByKey === undefined
+              ? {}
+              : { resourceContentByKey: props.resourceContentByKey })}
+            {...(props.webhookPolicy === undefined ? {} : { webhookPolicy: props.webhookPolicy })}
+            {...(props.titleEditor === undefined ? {} : { titleEditor: props.titleEditor })}
+            {...(selectedWebhookSourceState === undefined
+              ? {}
+              : { webhookSourceState: selectedWebhookSourceState })}
+          />
         </div>
       </div>
     </div>
-  );
-}
-
-function ConnectionDetailPaneWithOptionalProps(input: {
-  connection: IntegrationConnectionDetailItem;
-  props: IntegrationConnectionDetailViewProps;
-}): React.JSX.Element {
-  const webhookSourceState =
-    input.props.webhookSourceStateByConnectionId?.get(input.connection.id) ?? undefined;
-
-  return (
-    <ConnectionDetailPane
-      connection={input.connection}
-      {...(input.props.onDeleteConnection === undefined
-        ? {}
-        : { onDeleteConnection: input.props.onDeleteConnection })}
-      {...(input.props.onEditApiKey === undefined
-        ? {}
-        : { onEditApiKey: input.props.onEditApiKey })}
-      {...(input.props.onStartGitHubAppInstallation === undefined
-        ? {}
-        : { onStartGitHubAppInstallation: input.props.onStartGitHubAppInstallation })}
-      {...(input.props.onRefreshResource === undefined
-        ? {}
-        : { onRefreshResource: input.props.onRefreshResource })}
-      {...(input.props.resourceItemsByKey === undefined
-        ? {}
-        : { resourceItemsByKey: input.props.resourceItemsByKey })}
-      {...(webhookSourceState === undefined ? {} : { webhookSourceState })}
-      {...(input.props.onCreateWebhookSource === undefined
-        ? {}
-        : { onCreateWebhookSource: input.props.onCreateWebhookSource })}
-      {...(input.props.onDeleteWebhookSource === undefined
-        ? {}
-        : { onDeleteWebhookSource: input.props.onDeleteWebhookSource })}
-      {...(input.props.showWebhookSources === undefined
-        ? {}
-        : { showWebhookSources: input.props.showWebhookSources })}
-      {...(input.props.showCreateWebhookSource === undefined
-        ? {}
-        : { showCreateWebhookSource: input.props.showCreateWebhookSource })}
-      {...(input.props.titleEditor === undefined ? {} : { titleEditor: input.props.titleEditor })}
-    />
   );
 }
 
@@ -241,56 +304,21 @@ function ConnectionDetailPane(input: {
   onCreateWebhookSource?: (input: { connectionId: string }) => void;
   onDeleteConnection?: (connectionId: string) => void;
   onDeleteWebhookSource?: (input: { connectionId: string; webhookSourceId: string }) => void;
-  onEditApiKey?: (connectionId: string) => void;
+  onEditAuthentication?: (connectionId: string) => void;
   onStartGitHubAppInstallation?: (connectionId: string) => Promise<void> | void;
   onRefreshResource?: (input: { connectionId: string; kind: string }) => void;
-  resourceItemsByKey?: IntegrationConnectionDetailViewProps["resourceItemsByKey"];
-  showWebhookSources?: boolean;
-  showCreateWebhookSource?: boolean;
+  resourceContentByKey?: IntegrationConnectionDetailViewProps["resourceContentByKey"];
   titleEditor?: IntegrationConnectionDetailViewProps["titleEditor"];
+  webhookPolicy?: IntegrationConnectionDetailViewProps["webhookPolicy"];
   webhookSourceState?: IntegrationWebhookSourceSectionState;
 }): React.JSX.Element {
   const deleteConnectionMessage = resolveDeleteConnectionMessage(input.connection);
-  const isJiraConnection = isJiraConnectionMethod(input.connection.authMethodId);
   const webhookSourceState = input.webhookSourceState;
-  const hasWebhookDetailsContent =
-    input.showWebhookSources === true &&
-    webhookSourceState !== undefined &&
-    (webhookSourceState.items.length > 0 ||
-      webhookSourceState.loadErrorMessage !== null ||
-      webhookSourceState.createErrorMessage !== null ||
-      webhookSourceState.deleteErrorMessage !== null ||
-      webhookSourceState.revealedWebhookSecret !== null ||
-      (!isJiraConnection && input.showCreateWebhookSource === true));
-  const setup =
-    input.connection.setup === undefined
-      ? undefined
-      : {
-          ...input.connection.setup,
-          ...(input.connection.authMethodId === "github-app-installation" &&
-          input.webhookSourceState?.items[0]?.callbackUrl !== undefined
-            ? { callbackUrl: input.webhookSourceState.items[0].callbackUrl }
-            : {}),
-        };
-  const hasSetupSection =
-    setup !== undefined &&
-    (setup.description !== undefined ||
-      setup.errorMessage !== undefined ||
-      setup.postInstallationSetupUrl !== undefined ||
-      ("callbackUrl" in setup && setup.callbackUrl !== undefined));
-  const shouldRenderStandaloneJiraWebhooksSection =
-    isJiraConnection && !hasSetupSection && hasWebhookDetailsContent;
-  const jiraManagedWebhookSource =
-    shouldRenderStandaloneJiraWebhooksSection && webhookSourceState?.items.length === 1
-      ? webhookSourceState.items[0]
-      : undefined;
-  const jiraManagedWebhookTitle =
-    jiraManagedWebhookSource?.displayName === undefined ||
-    jiraManagedWebhookSource.displayName.length === 0
-      ? "Jira admin webhook"
-      : jiraManagedWebhookSource.displayName;
-  const shouldRenderWebhookContentInDetails =
-    hasWebhookDetailsContent && !shouldRenderStandaloneJiraWebhooksSection;
+  const viewState = resolveConnectionDetailPaneViewState({
+    connection: input.connection,
+    webhookPolicy: input.webhookPolicy,
+    webhookSourceState,
+  });
 
   return (
     <section className="flex flex-col gap-8">
@@ -352,28 +380,11 @@ function ConnectionDetailPane(input: {
         </div>
       </header>
 
-      {hasSetupSection ? (
+      {viewState.hasSetupSection ? (
         <SectionBlock
           action={
-            input.onStartGitHubAppInstallation === undefined ||
-            input.connection.installActionLabel === undefined ? (
-              isJiraConnection &&
-              (input.webhookSourceState?.items.length ?? 0) === 0 &&
-              input.showCreateWebhookSource === true &&
-              input.onCreateWebhookSource !== undefined ? (
-                <Button
-                  disabled={input.webhookSourceState?.isCreating ?? false}
-                  onClick={() => {
-                    input.onCreateWebhookSource?.({ connectionId: input.connection.id });
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {input.webhookSourceState?.isCreating === true ? "Creating..." : "Create webhook"}
-                </Button>
-              ) : null
-            ) : (
+            input.onStartGitHubAppInstallation !== undefined &&
+            input.connection.installActionLabel !== undefined ? (
               <Button
                 disabled={input.connection.setup?.isPending ?? false}
                 onClick={() => {
@@ -387,24 +398,26 @@ function ConnectionDetailPane(input: {
                   ? "Starting install..."
                   : input.connection.installActionLabel}
               </Button>
-            )
+            ) : null
           }
           title="Setup"
         >
           <div className="flex flex-col gap-4">
             <SetupSection
-              {...(setup === undefined ||
-              !("callbackUrl" in setup) ||
-              setup.callbackUrl === undefined
+              {...(viewState.setup === undefined ||
+              !("callbackUrl" in viewState.setup) ||
+              viewState.setup.callbackUrl === undefined
                 ? {}
-                : { callbackUrl: setup.callbackUrl })}
-              {...(setup?.description === undefined ? {} : { description: setup.description })}
-              {...(setup?.postInstallationSetupUrl === undefined
+                : { callbackUrl: viewState.setup.callbackUrl })}
+              {...(viewState.setup?.description === undefined
                 ? {}
-                : { postInstallationSetupUrl: setup.postInstallationSetupUrl })}
+                : { description: viewState.setup.description })}
+              {...(viewState.setup?.postInstallationSetupUrl === undefined
+                ? {}
+                : { postInstallationSetupUrl: viewState.setup.postInstallationSetupUrl })}
             />
-            {setup?.errorMessage === undefined ? null : (
-              <Notice variant="alert">{setup.errorMessage}</Notice>
+            {viewState.setup?.errorMessage === undefined ? null : (
+              <Notice variant="alert">{viewState.setup.errorMessage}</Notice>
             )}
           </div>
         </SectionBlock>
@@ -412,19 +425,21 @@ function ConnectionDetailPane(input: {
 
       <SectionBlock
         action={
-          input.connection.authMethodId === "api-key" && input.onEditApiKey !== undefined ? (
+          input.connection.authMethodId !== undefined &&
+          input.connection.authMethodId !== null &&
+          input.onEditAuthentication !== undefined ? (
             <Button
-              aria-label="Edit API key"
+              aria-label="Edit"
               onClick={() => {
-                input.onEditApiKey?.(input.connection.id);
+                input.onEditAuthentication?.(input.connection.id);
               }}
               size="sm"
               type="button"
               variant="outline"
             >
-              Edit API key
+              Edit
             </Button>
-          ) : hasSetupSection ||
+          ) : viewState.hasSetupSection ||
             input.onStartGitHubAppInstallation === undefined ||
             input.connection.installActionLabel === undefined ? null : (
             <Button
@@ -447,8 +462,12 @@ function ConnectionDetailPane(input: {
         <ConnectionAuthSection
           authMethodId={input.connection.authMethodId}
           authMethodLabel={input.connection.authMethodLabel}
-          connectionId={input.connection.id}
-          onEditApiKey={input.onEditApiKey}
+          {...(input.connection.authFields === undefined
+            ? {}
+            : { authFields: input.connection.authFields })}
+          {...(input.connection.authSecretLabels === undefined
+            ? {}
+            : { authSecretLabels: input.connection.authSecretLabels })}
         />
       </SectionBlock>
 
@@ -457,44 +476,61 @@ function ConnectionDetailPane(input: {
           <ResourcesSection
             connectionId={input.connection.id}
             onRefreshResource={input.onRefreshResource}
-            resourceItemsByKey={input.resourceItemsByKey}
+            resourceContentByKey={input.resourceContentByKey}
             resources={input.connection.resources}
           />
         </SectionBlock>
       )}
 
-      {shouldRenderStandaloneJiraWebhooksSection && webhookSourceState !== undefined ? (
+      {viewState.webhookSectionUiState !== null && webhookSourceState !== undefined ? (
         <SectionBlock
           action={
-            jiraManagedWebhookSource !== undefined &&
-            input.onDeleteWebhookSource !== undefined &&
-            jiraManagedWebhookSource.remoteRegistrationId !== undefined ? (
+            viewState.webhookSectionUiState.showCreateAction === true &&
+            input.onCreateWebhookSource !== undefined ? (
               <Button
-                aria-label={`Delete webhook source ${jiraManagedWebhookSource.displayName}`}
-                disabled={
-                  webhookSourceState.deletingWebhookSourceId === jiraManagedWebhookSource.id
-                }
+                disabled={webhookSourceState.isCreating}
                 onClick={() => {
-                  input.onDeleteWebhookSource?.({
-                    connectionId: input.connection.id,
-                    webhookSourceId: jiraManagedWebhookSource.id,
-                  });
+                  input.onCreateWebhookSource?.({ connectionId: input.connection.id });
                 }}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {webhookSourceState.deletingWebhookSourceId === jiraManagedWebhookSource.id
-                  ? "Deleting..."
-                  : "Delete webhook"}
+                {webhookSourceState.isCreating ? "Creating..." : "Create webhook"}
               </Button>
+            ) : viewState.webhookSectionUiState.showStandaloneDeleteAction === true &&
+              viewState.webhookSectionUiState.standaloneSource !== undefined &&
+              input.onDeleteWebhookSource !== undefined ? (
+              (() => {
+                const standaloneSource = viewState.webhookSectionUiState.standaloneSource;
+
+                return (
+                  <Button
+                    aria-label={`Delete webhook source ${standaloneSource.displayName}`}
+                    disabled={webhookSourceState.deletingWebhookSourceId === standaloneSource.id}
+                    onClick={() => {
+                      input.onDeleteWebhookSource?.({
+                        connectionId: input.connection.id,
+                        webhookSourceId: standaloneSource.id,
+                      });
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {webhookSourceState.deletingWebhookSourceId === standaloneSource.id
+                      ? "Deleting..."
+                      : "Delete webhook"}
+                  </Button>
+                );
+              })()
             ) : null
           }
-          title={jiraManagedWebhookTitle}
+          title="Webhook"
         >
           <WebhookSourcesSection
             connectionId={input.connection.id}
-            hideDeleteAction={jiraManagedWebhookSource !== undefined}
+            hideDeleteAction={viewState.webhookSectionUiState.hideInlineDeleteAction}
             onCreateWebhookSource={undefined}
             onDeleteWebhookSource={input.onDeleteWebhookSource}
             state={webhookSourceState}
@@ -502,27 +538,8 @@ function ConnectionDetailPane(input: {
         </SectionBlock>
       ) : null}
 
-      {input.connection.contextItems === undefined || input.connection.contextItems.length === 0 ? (
-        shouldRenderWebhookContentInDetails ? (
-          <SectionBlock title="Details">
-            <div className="flex flex-col gap-4">
-              {shouldRenderWebhookContentInDetails && webhookSourceState !== undefined ? (
-                <WebhookSourcesSection
-                  connectionId={input.connection.id}
-                  hideDeleteAction={false}
-                  onCreateWebhookSource={
-                    !isJiraConnection && input.showCreateWebhookSource === true
-                      ? input.onCreateWebhookSource
-                      : undefined
-                  }
-                  onDeleteWebhookSource={input.onDeleteWebhookSource}
-                  state={webhookSourceState}
-                />
-              ) : null}
-            </div>
-          </SectionBlock>
-        ) : null
-      ) : (
+      {input.connection.contextItems === undefined ||
+      input.connection.contextItems.length === 0 ? null : (
         <SectionBlock title="Details">
           <div className="flex flex-col gap-4">
             <div className="gap-3 grid grid-cols-1 md:grid-cols-2">
@@ -530,33 +547,10 @@ function ConnectionDetailPane(input: {
                 <MetadataField key={item.label} label={item.label} value={item.value} />
               ))}
             </div>
-            {shouldRenderWebhookContentInDetails && webhookSourceState !== undefined ? (
-              <WebhookSourcesSection
-                connectionId={input.connection.id}
-                hideDeleteAction={false}
-                onCreateWebhookSource={
-                  !isJiraConnection && input.showCreateWebhookSource === true
-                    ? input.onCreateWebhookSource
-                    : undefined
-                }
-                onDeleteWebhookSource={input.onDeleteWebhookSource}
-                state={webhookSourceState}
-              />
-            ) : null}
           </div>
         </SectionBlock>
       )}
     </section>
-  );
-}
-
-function isJiraConnectionMethod(
-  authMethodId: IntegrationConnectionDetailItem["authMethodId"],
-): boolean {
-  return (
-    authMethodId === "jira-personal-api-token" ||
-    authMethodId === "jira-service-account-api-token" ||
-    authMethodId === "jira-service-account-oauth-client-credentials"
   );
 }
 
@@ -628,57 +622,40 @@ function shouldShowResourceSyncStateBadge(
 }
 
 function ConnectionAuthSection(input: {
+  authFields?: readonly {
+    label: string;
+    value: string;
+  }[];
+  authSecretLabels?: readonly string[];
   authMethodId: IntegrationConnectionDetailItem["authMethodId"] | undefined;
   authMethodLabel: string | null | undefined;
-  connectionId: string;
-  onEditApiKey: ((connectionId: string) => void) | undefined;
 }): React.JSX.Element | null {
-  if (input.authMethodLabel === undefined || input.authMethodLabel === null) {
+  const authFields =
+    input.authFields === undefined || input.authFields.length === 0
+      ? input.authMethodLabel === undefined || input.authMethodLabel === null
+        ? []
+        : [{ label: "Method", value: input.authMethodLabel }]
+      : input.authFields;
+
+  if (authFields.length === 0) {
     return null;
   }
-
-  if (input.authMethodId === "api-key") {
-    return (
-      <div
-        aria-label="Connection authentication"
-        className="gap-3 flex flex-col"
-        data-auth-method-id="api-key"
-      >
-        <div
-          aria-label="API key authentication fields"
-          className="grid grid-cols-1 gap-3 md:grid-cols-2"
-        >
-          <MetadataField label="Method" value="API key" />
-          <div aria-label="Masked API key value" className="min-w-0" data-api-key-state="masked">
-            <MetadataField label="API key" value="**********" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (input.authMethodId === "slack-bot-token") {
-    return (
-      <div
-        aria-label="Connection authentication"
-        className="gap-3 flex flex-col"
-        data-auth-method-id="slack-bot-token"
-      >
-        <div
-          aria-label="Masked Slack credential values"
-          className="grid grid-cols-1 gap-3 md:grid-cols-2"
-        >
-          <MetadataField label="Method" value={input.authMethodLabel} />
-          <MetadataField label="Bot token" value="**********" />
-          <MetadataField label="Signing secret" value="**********" />
-        </div>
-      </div>
-    );
-  }
+  const authSecretLabels = input.authSecretLabels ?? [];
 
   return (
-    <div className="min-w-0">
-      <MetadataField label="Method" value={input.authMethodLabel} />
+    <div
+      aria-label="Connection authentication"
+      className="gap-3 flex flex-col"
+      {...(input.authMethodId === undefined ? {} : { "data-auth-method-id": input.authMethodId })}
+    >
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {authFields.map((field) => (
+          <MetadataField key={field.label} label={field.label} value={field.value} />
+        ))}
+        {authSecretLabels.map((label) => (
+          <MetadataField key={label} label={label} value="**********" />
+        ))}
+      </div>
     </div>
   );
 }
@@ -790,10 +767,15 @@ function ResourceScopeRow(input: {
   const resourceLabel = formatResourceLabel(input.resource.kind);
   const rowClassName = [input.className].filter(Boolean).join(" ");
   const resourceCount = input.resource.count;
+  const resourceStateIndicator = resolveResourceStateIndicator({
+    errorMessage: input.resourceItems?.errorMessage ?? null,
+    kindLabel: resourceLabel,
+  });
+  const shouldReplaceMetadataWithPreviewError = input.resourceItems?.errorMessage != null;
 
   return (
     <div className={rowClassName}>
-      <div className="flex flex-col gap-2 py-2">
+      <div className={`flex flex-col gap-2 pt-1 ${isExpanded ? "pb-4" : "pb-1"}`}>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex items-center gap-2">
             <Button
@@ -820,10 +802,14 @@ function ResourceScopeRow(input: {
             ) : null}
           </div>
           <div className="flex items-center gap-2 sm:shrink-0">
-            <div className="text-muted-foreground text-xs">
-              <span className="sr-only">{formatResourceCountSummary(input.resource)}. </span>
-              {formatResourceInlineMetadata(input.resource)}
-            </div>
+            {shouldReplaceMetadataWithPreviewError ? (
+              <div className="flex items-center">{resourceStateIndicator}</div>
+            ) : (
+              <div className="text-muted-foreground text-xs">
+                <span className="sr-only">{formatResourceCountSummary(input.resource)}. </span>
+                {formatResourceInlineMetadata(input.resource)}
+              </div>
+            )}
             {input.onRefreshResource ? (
               <Button
                 aria-label={`Refresh ${input.resource.kind}`}
@@ -852,14 +838,15 @@ function ResourceScopeRow(input: {
         {input.resource.lastErrorMessage ? (
           <Notice variant="alert">{input.resource.lastErrorMessage}</Notice>
         ) : null}
-        {isExpanded ? (
-          <ResourceItemsPreview
-            errorMessage={input.resourceItems?.errorMessage ?? null}
-            isExpanded={isExpanded}
-            isLoading={input.resourceItems?.isLoading ?? false}
-            items={input.resourceItems?.items ?? []}
-            kindLabel={resourceLabel}
-          />
+        {input.resourceItems?.errorMessage === null ? resourceStateIndicator : null}
+        {isExpanded && input.resourceItems !== null && input.resourceItems.items.length > 0 ? (
+          <div className="gap-2 flex flex-wrap pl-5">
+            {input.resourceItems.items.map((item) => (
+              <span className="rounded-full border px-2.5 py-1 text-xs" key={item.id}>
+                {item.displayName}
+              </span>
+            ))}
+          </div>
         ) : null}
       </div>
     </div>
@@ -869,11 +856,11 @@ function ResourceScopeRow(input: {
 function ResourcesSection(input: {
   connectionId: string;
   onRefreshResource: ((input: { connectionId: string; kind: string }) => void) | undefined;
-  resourceItemsByKey: IntegrationConnectionDetailViewProps["resourceItemsByKey"];
+  resourceContentByKey: IntegrationConnectionDetailViewProps["resourceContentByKey"];
   resources: readonly IntegrationConnectionDetailResourceSummary[];
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-0.5">
       {input.resources.map((resource, index) => (
         <ResourceScopeRow
           connectionId={input.connectionId}
@@ -881,7 +868,7 @@ function ResourcesSection(input: {
           onRefreshResource={input.onRefreshResource}
           resource={resource}
           resourceItems={
-            input.resourceItemsByKey?.get(`${input.connectionId}:${resource.kind}`) ?? null
+            input.resourceContentByKey?.get(`${input.connectionId}:${resource.kind}`) ?? null
           }
           {...(index === 0 ? {} : { className: "" })}
         />
@@ -890,40 +877,28 @@ function ResourcesSection(input: {
   );
 }
 
-function ResourceItemsPreview(input: {
+function resolveResourceStateIndicator(input: {
   errorMessage: string | null;
-  isExpanded: boolean;
-  isLoading: boolean;
-  items: readonly IntegrationConnectionResource[];
   kindLabel: string;
 }): React.JSX.Element | null {
-  if (input.isLoading) {
+  if (input.errorMessage !== null) {
     return (
-      <p className="text-muted-foreground text-sm">Loading {input.kindLabel.toLowerCase()}...</p>
+      <Tooltip delay={0}>
+        <TooltipTrigger
+          aria-label={`View ${input.kindLabel.toLowerCase()} load error`}
+          render={<Badge render={<span aria-hidden="true" />} variant="destructive" />}
+        >
+          Error
+          <InfoIcon className="size-3.5" data-icon="inline-end" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 whitespace-pre-wrap text-left" side="top">
+          {input.errorMessage}
+        </TooltipContent>
+      </Tooltip>
     );
   }
 
-  if (input.errorMessage !== null) {
-    return <Notice variant="alert">{input.errorMessage}</Notice>;
-  }
-
-  if (input.items.length === 0) {
-    return null;
-  }
-
-  if (!input.isExpanded) {
-    return null;
-  }
-
-  return (
-    <div className="gap-2 flex flex-wrap pl-5">
-      {input.items.map((item) => (
-        <span className="rounded-full border px-2.5 py-1 text-xs" key={item.id}>
-          {item.displayName}
-        </span>
-      ))}
-    </div>
-  );
+  return null;
 }
 
 function WebhookSourcesSection(input: {
@@ -936,7 +911,7 @@ function WebhookSourcesSection(input: {
   state: IntegrationWebhookSourceSectionState;
 }): React.JSX.Element {
   return (
-    <div className="gap-3 flex flex-col">
+    <div className="gap-3 pt-2 flex flex-col">
       {input.onCreateWebhookSource ? (
         <div className="flex items-start justify-end gap-3">
           <Button
@@ -973,9 +948,11 @@ function WebhookSourcesSection(input: {
       {input.state.isLoading ? (
         <p className="text-muted-foreground text-sm">Loading webhook sources...</p>
       ) : input.state.items.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          No webhook sources are configured for this connection.
-        </p>
+        <Notice>
+          {input.onCreateWebhookSource === undefined
+            ? "No webhook is configured for this connection."
+            : "Create a webhook to receive events."}
+        </Notice>
       ) : (
         <div className="gap-3 flex flex-col">
           {input.state.items.map((source) => (
@@ -1008,17 +985,21 @@ function WebhookSourceCard(input: {
     !input.hideDeleteAction &&
     input.onDeleteWebhookSource !== undefined &&
     input.source.remoteRegistrationId !== undefined;
-  const shouldShowHeader =
-    !input.hideDeleteAction && (input.source.displayName !== "" || isDeleteSupported);
   const registeredEventLabels = resolveWebhookRegisteredEventLabels(input.source.providerMetadata);
+  const shouldShowHeaderText = !input.hideDeleteAction && input.source.displayName !== "";
+  const shouldShowHeaderRow = shouldShowHeaderText || isDeleteSupported;
 
   return (
     <div className="flex flex-col gap-3">
-      {shouldShowHeader ? (
+      {shouldShowHeaderRow ? (
         <div className="flex items-start justify-between gap-3">
-          <p className="text-muted-foreground text-xs uppercase tracking-wide">
-            {input.source.displayName}
-          </p>
+          {shouldShowHeaderText ? (
+            <p className="text-muted-foreground text-xs uppercase tracking-wide">
+              {input.source.displayName}
+            </p>
+          ) : (
+            <span />
+          )}
           {isDeleteSupported ? (
             <Button
               aria-label={`Delete webhook source ${input.source.displayName}`}
@@ -1039,12 +1020,16 @@ function WebhookSourceCard(input: {
         </div>
       ) : null}
       <div className="gap-3 flex flex-col">
+        <div className="gap-1.5 flex flex-col">
+          <p className="text-muted-foreground text-xs uppercase tracking-wide">Status</p>
+          <p className="text-sm">{formatWebhookSourceStatusLabel(input.source.status)}</p>
+        </div>
         {input.source.remoteRegistrationId === undefined ? null : (
           <MetadataField label="Provider registration" value={input.source.remoteRegistrationId} />
         )}
         <MetadataBadgeListField items={registeredEventLabels} label="Registered events" />
         {input.source.callbackUrl === undefined ? null : (
-          <CopyableValue label="Callback URL" value={input.source.callbackUrl} />
+          <CopyableValue label="Webhook URL" value={input.source.callbackUrl} />
         )}
       </div>
     </div>

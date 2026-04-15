@@ -3,11 +3,14 @@ import { createBrowserIntegrationRegistry } from "@mistle/integrations-definitio
 
 import {
   buildIntegrationConnectionDetailItems,
-  buildIntegrationConnectionResourceItemsByKey,
-  createRefreshingResourceKey,
+  buildIntegrationConnectionResourceContentByKey,
+  createIntegrationConnectionResourceKey,
+  resolveIntegrationConnectionDetailWebhookPolicy,
 } from "../pages/integrations-page-view-model.js";
+import { resolveVisibleConnectionMethodConfigFields } from "../pages/use-integration-connection-editor-state-helpers.js";
 import type { IntegrationWebhookSourceSectionState } from "../pages/use-integration-webhook-source-state.js";
 import type { IntegrationConnectionDetailViewProps } from "./integration-connection-detail-view.js";
+import type { IntegrationConnectionMethod } from "./integrations-service-shared.js";
 import type {
   IntegrationConnection,
   IntegrationConnectionResource,
@@ -20,6 +23,14 @@ type StoryAuthMethodSpec = {
   familyId: string;
   methodId: string;
   variantId: string;
+};
+
+type StoryResolvedAuthMethod = {
+  authMethodId: string;
+  authMethodLabel: string;
+  definition: AnyIntegrationDefinition;
+  normalizedMethod: IntegrationConnectionMethod;
+  secretLabels: readonly string[];
 };
 
 function getDefinitionOrThrow(input: {
@@ -42,10 +53,7 @@ function getDefinitionOrThrow(input: {
   return definition;
 }
 
-function resolveAuthMethodOrThrow(input: StoryAuthMethodSpec): {
-  authMethodId: string;
-  authMethodLabel: string;
-} {
+function resolveAuthMethodOrThrow(input: StoryAuthMethodSpec): StoryResolvedAuthMethod {
   const definition = getDefinitionOrThrow({
     familyId: input.familyId,
     variantId: input.variantId,
@@ -63,6 +71,143 @@ function resolveAuthMethodOrThrow(input: StoryAuthMethodSpec): {
   return {
     authMethodId: method.id,
     authMethodLabel: method.label,
+    definition,
+    normalizedMethod: normalizeStoryConnectionMethod(method),
+    secretLabels: method.kind === "form" ? method.secretFields.map((field) => field.label) : [],
+  };
+}
+
+function resolveStoryAuthFields(input: {
+  authMethod: StoryAuthMethodSpec;
+  connectionConfig?: Record<string, unknown>;
+  connectionId: string;
+}):
+  | {
+      authFields: readonly {
+        label: string;
+        value: string;
+      }[];
+      authSecretLabels?: readonly string[];
+      authMethodId: string;
+      authMethodLabel: string;
+    }
+  | undefined {
+  const resolvedAuthMethod = resolveAuthMethodOrThrow(input.authMethod);
+  const baseFields = [
+    {
+      label: "Method",
+      value: resolvedAuthMethod.authMethodLabel,
+    },
+  ];
+
+  if (input.connectionConfig === undefined) {
+    return {
+      authFields: baseFields,
+      ...(resolvedAuthMethod.secretLabels.length === 0
+        ? {}
+        : { authSecretLabels: resolvedAuthMethod.secretLabels }),
+      authMethodId: resolvedAuthMethod.authMethodId,
+      authMethodLabel: resolvedAuthMethod.authMethodLabel,
+    };
+  }
+
+  return {
+    authFields: [
+      ...baseFields,
+      ...resolveVisibleConnectionMethodConfigFields({
+        connectionId: input.connectionId,
+        connectionMethod: resolvedAuthMethod.normalizedMethod,
+        connectionConfig: input.connectionConfig,
+        targetConfig: {},
+        targetFamilyId: resolvedAuthMethod.definition.familyId,
+        targetKey: resolvedAuthMethod.definition.variantId,
+        targetVariantId: resolvedAuthMethod.definition.variantId,
+      }),
+    ],
+    ...(resolvedAuthMethod.secretLabels.length === 0
+      ? {}
+      : { authSecretLabels: resolvedAuthMethod.secretLabels }),
+    authMethodId: resolvedAuthMethod.authMethodId,
+    authMethodLabel: resolvedAuthMethod.authMethodLabel,
+  };
+}
+
+function normalizeStoryConnectionMethod(input: {
+  id: string;
+  kind: "device-authorization" | "form" | "redirect";
+  label: string;
+  secretFields?: readonly {
+    description?: string;
+    inputType: "password" | "text" | "textarea";
+    label: string;
+    name: string;
+    placeholder?: string;
+    slotKey?: string;
+  }[];
+  ui?: {
+    create?: {
+      helperText?: string;
+      submitLabel?: string;
+    };
+    pending?: {
+      description?: string;
+      title?: string;
+    };
+  };
+}): IntegrationConnectionMethod {
+  if (input.kind === "form") {
+    return {
+      id: input.id,
+      kind: "form",
+      label: input.label,
+      secretFields: [...(input.secretFields ?? [])],
+    };
+  }
+
+  if (input.kind === "redirect") {
+    if (input.ui?.create?.helperText === undefined || input.ui.create.submitLabel === undefined) {
+      throw new Error(`Redirect method '${input.id}' is missing create UI for Storybook.`);
+    }
+
+    return {
+      id: input.id,
+      kind: "redirect",
+      label: input.label,
+      ui: {
+        create: {
+          helperText: input.ui.create.helperText,
+          submitLabel: input.ui.create.submitLabel,
+        },
+      },
+    };
+  }
+
+  if (input.ui?.create?.helperText === undefined || input.ui.create.submitLabel === undefined) {
+    throw new Error(
+      `Device authorization method '${input.id}' is missing create UI for Storybook.`,
+    );
+  }
+
+  return {
+    id: input.id,
+    kind: "device-authorization",
+    label: input.label,
+    ui: {
+      create: {
+        helperText: input.ui.create.helperText,
+        submitLabel: input.ui.create.submitLabel,
+      },
+      ...(input.ui.pending === undefined
+        ? {}
+        : {
+            pending: {
+              ...(input.ui.pending.description === undefined
+                ? {}
+                : { description: input.ui.pending.description }),
+              ...(input.ui.pending.title === undefined ? {} : { title: input.ui.pending.title }),
+            },
+          }),
+    },
   };
 }
 
@@ -146,7 +291,7 @@ export function createDetailViewStoryProps(input?: {
       connections,
       refreshingResourceKeys,
     }),
-    resourceItemsByKey: buildIntegrationConnectionResourceItemsByKey([
+    resourceContentByKey: buildIntegrationConnectionResourceContentByKey([
       {
         connectionId: "icn_github_primary",
         state: {
@@ -194,7 +339,7 @@ export function createRefreshingDetailViewStoryProps() {
   return createDetailViewStoryProps({
     connections: [primaryConnection],
     refreshingResourceKeys: new Set<string>([
-      createRefreshingResourceKey({
+      createIntegrationConnectionResourceKey({
         connectionId: primaryConnection.id,
         kind: "repositories",
       }),
@@ -209,10 +354,13 @@ export function createGitHubAppDetailViewStoryProps(): IntegrationConnectionDeta
     connections: [
       {
         id: connectionId,
-        ...resolveAuthMethodOrThrow({
-          familyId: "github",
-          methodId: "github-app-installation",
-          variantId: "github-cloud",
+        ...resolveStoryAuthFields({
+          authMethod: {
+            familyId: "github",
+            methodId: "github-app-installation",
+            variantId: "github-cloud",
+          },
+          connectionId,
         }),
         bindingCount: 3,
         canDelete: false,
@@ -253,12 +401,10 @@ export function createGitHubAppDetailViewStoryProps(): IntegrationConnectionDeta
           },
         ],
         status: "active",
-        webhookInstructions:
-          "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
       },
     ],
     onRefreshResource: () => {},
-    resourceItemsByKey: buildIntegrationConnectionResourceItemsByKey([
+    resourceContentByKey: buildIntegrationConnectionResourceContentByKey([
       {
         connectionId,
         state: {
@@ -398,7 +544,9 @@ export function createGitHubAppDetailViewStoryProps(): IntegrationConnectionDeta
         },
       },
     ]),
-    showWebhookSources: true,
+    webhookPolicy: resolveIntegrationConnectionDetailWebhookPolicy({
+      webhookSource: { lifecycle: "implicit" },
+    }),
     webhookSourceStateByConnectionId: new Map<string, IntegrationWebhookSourceSectionState>([
       [
         connectionId,
@@ -438,10 +586,13 @@ export function createGitHubAppSetupIncompleteDetailViewStoryProps(): Integratio
     connections: [
       {
         id: connectionId,
-        ...resolveAuthMethodOrThrow({
-          familyId: "github",
-          methodId: "github-app-installation",
-          variantId: "github-cloud",
+        ...resolveStoryAuthFields({
+          authMethod: {
+            familyId: "github",
+            methodId: "github-app-installation",
+            variantId: "github-cloud",
+          },
+          connectionId,
         }),
         bindingCount: 0,
         canDelete: true,
@@ -468,11 +619,11 @@ export function createGitHubAppSetupIncompleteDetailViewStoryProps(): Integratio
             "https://control-plane.example.com/p/integration/callbacks/github-app-installation",
         },
         status: "active",
-        webhookInstructions:
-          "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
       },
     ],
-    showWebhookSources: true,
+    webhookPolicy: resolveIntegrationConnectionDetailWebhookPolicy({
+      webhookSource: { lifecycle: "implicit" },
+    }),
     webhookSourceStateByConnectionId: new Map([
       [
         connectionId,
@@ -505,9 +656,105 @@ export function createGitHubAppSetupIncompleteDetailViewStoryProps(): Integratio
   };
 }
 
+export function createGitHubPreviewErrorDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+  const connectionId = "icn_github_preview_error";
+
+  return {
+    connections: [
+      {
+        id: connectionId,
+        ...resolveStoryAuthFields({
+          authMethod: {
+            familyId: "github",
+            methodId: "github-app-installation",
+            variantId: "github-cloud",
+          },
+          connectionId,
+        }),
+        bindingCount: 1,
+        canDelete: false,
+        contextItems: [
+          {
+            label: "App ID",
+            value: "3079908",
+          },
+          {
+            label: "App slug",
+            value: "mistle-github-app",
+          },
+          {
+            label: "Installation",
+            value: "116007157",
+          },
+        ],
+        displayName: "Engineering GitHub",
+        installActionLabel: "Manage installation",
+        resources: [
+          {
+            count: 41,
+            kind: "repositories",
+            lastSyncedAt: "2026-04-13T15:37:00.000Z",
+            syncState: "ready",
+          },
+          {
+            count: 1,
+            kind: "organizations",
+            lastSyncedAt: "2026-04-13T15:37:00.000Z",
+            syncState: "ready",
+          },
+        ],
+        status: "active",
+      },
+    ],
+    onRefreshResource: () => {},
+    resourceContentByKey: buildIntegrationConnectionResourceContentByKey([
+      {
+        connectionId,
+        state: {
+          errorMessage:
+            "GitHub returned a 403 while loading repository data. Check installation repository access.",
+          isLoading: false,
+          items: [
+            {
+              id: "repo_error_1",
+              familyId: "github",
+              kind: "repositories",
+              handle: "mistlehq/private-repo",
+              displayName: "mistlehq/private-repo",
+              status: "accessible",
+              metadata: {},
+            },
+          ],
+          kind: "repositories",
+        },
+      },
+      {
+        connectionId,
+        state: {
+          errorMessage: null,
+          isLoading: false,
+          items: [
+            {
+              id: "org_error_1",
+              familyId: "github",
+              kind: "organizations",
+              handle: "mistlehq",
+              displayName: "mistlehq",
+              status: "accessible",
+              metadata: {},
+            },
+          ],
+          kind: "organizations",
+        },
+      },
+    ]),
+  };
+}
+
 type ScenarioDetailStorySpec = {
   authMethod?: StoryAuthMethodSpec;
   bindingCount?: number;
+  connectionConfig?: Record<string, unknown>;
   connectionId: string;
   contextItems?: readonly {
     label: string;
@@ -532,19 +779,18 @@ type ScenarioDetailStorySpec = {
         postInstallationSetupUrl?: string;
       }
     | undefined;
-  showCreateWebhookSource?: boolean;
+  webhookLifecycle?: "implicit" | "managed";
   status?: "active" | "error" | "revoked";
-  webhookInstructions?: string;
   webhookSources?: readonly IntegrationWebhookSource[];
 };
 
-function createResourceItems(
+function createResourceContent(
   input: ScenarioDetailStorySpec,
-): IntegrationConnectionDetailViewProps["resourceItemsByKey"] {
+): IntegrationConnectionDetailViewProps["resourceContentByKey"] {
   const resources = input.resources ?? [];
   const familyId = input.familyId ?? "integration";
 
-  return buildIntegrationConnectionResourceItemsByKey(
+  return buildIntegrationConnectionResourceContentByKey(
     resources.map((resource) => ({
       connectionId: input.connectionId,
       state: {
@@ -591,12 +837,32 @@ function createWebhookSourceSectionState(
   ]);
 }
 
+function createWebhookPolicy(input: ScenarioDetailStorySpec) {
+  if (input.webhookSources === undefined) {
+    return undefined;
+  }
+
+  return resolveIntegrationConnectionDetailWebhookPolicy({
+    webhookSource:
+      input.webhookLifecycle === undefined ? {} : { lifecycle: input.webhookLifecycle },
+  });
+}
+
 function createScenarioDetailViewStoryProps(
   input: ScenarioDetailStorySpec,
 ): IntegrationConnectionDetailViewProps {
   const authMethod =
-    input.authMethod === undefined ? undefined : resolveAuthMethodOrThrow(input.authMethod);
-  const resourceItemsByKey = createResourceItems(input);
+    input.authMethod === undefined
+      ? undefined
+      : resolveStoryAuthFields({
+          authMethod: input.authMethod,
+          ...(input.connectionConfig === undefined
+            ? {}
+            : { connectionConfig: input.connectionConfig }),
+          connectionId: input.connectionId,
+        });
+  const resourceContentByKey = createResourceContent(input);
+  const webhookPolicy = createWebhookPolicy(input);
   const webhookSourceStateByConnectionId = createWebhookSourceSectionState(input);
 
   return {
@@ -623,19 +889,15 @@ function createScenarioDetailViewStoryProps(
         })),
         ...(input.setup === undefined ? {} : { setup: input.setup }),
         status: input.status ?? "active",
-        ...(input.webhookInstructions === undefined
-          ? {}
-          : { webhookInstructions: input.webhookInstructions }),
       },
     ],
-    onEditApiKey: () => {},
+    onEditAuthentication: () => {},
     onRefreshResource: () => {},
-    ...(resourceItemsByKey === undefined ? {} : { resourceItemsByKey }),
+    ...(resourceContentByKey === undefined ? {} : { resourceContentByKey }),
     ...(webhookSourceStateByConnectionId === undefined
       ? {}
       : {
-          showCreateWebhookSource: input.showCreateWebhookSource ?? false,
-          showWebhookSources: true,
+          ...(webhookPolicy === undefined ? {} : { webhookPolicy }),
           webhookSourceStateByConnectionId,
         }),
   };
@@ -681,8 +943,6 @@ export function createGitHubEnterpriseServerDetailViewStoryProps(): IntegrationC
         syncState: "ready",
       },
     ],
-    webhookInstructions:
-      "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
     webhookSources: [
       {
         callbackUrl:
@@ -709,15 +969,20 @@ export function createJiraDetailViewStoryProps(): IntegrationConnectionDetailVie
       variantId: "jira-default",
     },
     bindingCount: 1,
+    connectionConfig: {
+      connection_method: "jira-personal-api-token",
+      email: "jon@example.com",
+      site_url: "https://mistle.atlassian.net",
+    },
     connectionId: "icn_jira_dense",
     displayName: "Jira Production",
-    showCreateWebhookSource: true,
+    webhookLifecycle: "managed",
     webhookSources: [
       {
         callbackUrl:
           "https://control-plane.example.com/p/integration/webhooks/jira-default/ep_jira_dense",
         createdAt: DenseStoryLastSyncedAt,
-        displayName: "Jira admin webhook",
+        displayName: "Webhook",
         endpointKey: "ep_jira_dense",
         id: "iws_jira_dense",
         integrationConnectionId: "icn_jira_dense",
@@ -738,7 +1003,7 @@ export function createJiraDetailViewStoryProps(): IntegrationConnectionDetailVie
   });
 }
 
-export function createJiraSetupIncompleteDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
+export function createJiraWebhookNotConfiguredDetailViewStoryProps(): IntegrationConnectionDetailViewProps {
   return createScenarioDetailViewStoryProps({
     authMethod: {
       familyId: "jira",
@@ -746,12 +1011,14 @@ export function createJiraSetupIncompleteDetailViewStoryProps(): IntegrationConn
       variantId: "jira-default",
     },
     bindingCount: 1,
+    connectionConfig: {
+      connection_method: "jira-personal-api-token",
+      email: "jon@example.com",
+      site_url: "https://mistle.atlassian.net",
+    },
     connectionId: "icn_jira_setup_incomplete",
     displayName: "Jira Production",
-    setup: {
-      description: "Create a Jira admin webhook to complete setup.",
-    },
-    showCreateWebhookSource: true,
+    webhookLifecycle: "managed",
     webhookSources: [],
   });
 }
@@ -835,7 +1102,9 @@ export function createSlackDetailViewStoryProps(): IntegrationConnectionDetailVi
   return {
     connections: storyProps.flatMap((story) => story.connections),
     onRefreshResource: () => {},
-    showWebhookSources: true,
+    webhookPolicy: resolveIntegrationConnectionDetailWebhookPolicy({
+      webhookSource: { lifecycle: "implicit" },
+    }),
     webhookSourceStateByConnectionId: new Map(
       storyProps.flatMap((story) =>
         Array.from(story.webhookSourceStateByConnectionId?.entries() ?? []),

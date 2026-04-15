@@ -11,6 +11,7 @@ import type {
 } from "../integrations/integrations-service.js";
 import type { OpenIntegrationConnectionEditorInput } from "./integration-connection-editor-state-types.js";
 import type { OrganizationIntegrationsSettingsPageCard } from "./organization-integrations-settings-page-view.js";
+import { resolveVisibleConnectionMethodConfigFields } from "./use-integration-connection-editor-state-helpers.js";
 
 const GitHubAppInstallationCompletePath = "/p/integration/callbacks/github-app-installation";
 
@@ -85,6 +86,41 @@ export function buildOpenCreateIntegrationConnectionInput(
   };
 }
 
+export function buildOpenUpdateIntegrationConnectionInput(input: {
+  card: IntegrationCardViewModel;
+  connection: IntegrationConnection;
+}): OpenIntegrationConnectionEditorInput {
+  const connectionMethodId = input.connection.connectionMethodId;
+  if (connectionMethodId === undefined) {
+    throw new Error(
+      `Connection '${input.connection.id}' is missing connectionMethodId for update editor input.`,
+    );
+  }
+
+  const currentMethod =
+    toConnectionMethods(input.card.target.connectionMethods).find(
+      (method) => method.id === connectionMethodId,
+    ) ?? null;
+  if (currentMethod === null) {
+    throw new Error(
+      `Connection '${input.connection.id}' references unknown method '${connectionMethodId}'.`,
+    );
+  }
+
+  return {
+    mode: "update",
+    connectionConfig: resolveTargetConfig(input.connection.config),
+    connectionDisplayName: input.connection.displayName,
+    connectionId: input.connection.id,
+    currentMethod,
+    targetConfig: resolveTargetConfig(input.card.target.config),
+    targetDisplayName: input.card.displayName,
+    targetFamilyId: input.card.target.familyId,
+    targetKey: input.card.target.targetKey,
+    targetVariantId: input.card.target.variantId,
+  };
+}
+
 export function buildIntegrationConnectionDetailItems(input: {
   connections: readonly IntegrationConnection[];
   controlPlaneApiOrigin?: string;
@@ -96,6 +132,10 @@ export function buildIntegrationConnectionDetailItems(input: {
     }
   >;
   refreshingResourceKeys: ReadonlySet<string>;
+  targetConfig?: Record<string, unknown>;
+  targetConnectionMethods?: readonly IntegrationConnectionMethod[];
+  targetFamilyId?: string;
+  targetVariantId?: string;
 }): readonly IntegrationConnectionDetailItem[] {
   return input.connections.map((connection) => {
     const bindingCount = connection.bindingCount ?? 0;
@@ -106,6 +146,21 @@ export function buildIntegrationConnectionDetailItems(input: {
     );
     const githubAppInstallationState =
       input.githubAppInstallationStateByConnectionId?.get(connection.id) ?? undefined;
+    const currentMethod =
+      connection.connectionMethodId === undefined
+        ? null
+        : (input.targetConnectionMethods?.find(
+            (method) => method.id === connection.connectionMethodId,
+          ) ?? null);
+    const authFields = resolveAuthFields({
+      connection,
+      currentMethod,
+      ...(input.targetConfig === undefined ? {} : { targetConfig: input.targetConfig }),
+      ...(input.targetFamilyId === undefined ? {} : { targetFamilyId: input.targetFamilyId }),
+      ...(input.targetVariantId === undefined ? {} : { targetVariantId: input.targetVariantId }),
+    });
+    const authSecretLabels =
+      currentMethod?.kind === "form" ? currentMethod.secretFields.map((field) => field.label) : [];
 
     return {
       id: connection.id,
@@ -119,6 +174,8 @@ export function buildIntegrationConnectionDetailItems(input: {
       ...(connection.connectionMethodLabel === undefined
         ? {}
         : { authMethodLabel: connection.connectionMethodLabel }),
+      ...(authFields.length === 0 ? {} : { authFields }),
+      ...(authSecretLabels.length === 0 ? {} : { authSecretLabels }),
       ...(githubAppConnectionContext === undefined
         ? {}
         : {
@@ -141,7 +198,6 @@ export function buildIntegrationConnectionDetailItems(input: {
                       : { isPending: githubAppInstallationState.isPending }),
                   },
                 }),
-            webhookInstructions: githubAppConnectionContext.webhookInstructions,
           }),
       resources: (connection.resources ?? []).map((resource) => ({
         kind: resource.kind,
@@ -164,6 +220,75 @@ export function buildIntegrationConnectionDetailItems(input: {
   });
 }
 
+export type IntegrationConnectionDetailWebhookPolicy = {
+  canCreateWebhookSource: boolean;
+  canDeleteWebhookSource: boolean;
+  showWebhookSources: boolean;
+};
+
+export function resolveIntegrationConnectionDetailWebhookPolicy(input: {
+  webhookSource:
+    | {
+        lifecycle?: string;
+      }
+    | undefined;
+}): IntegrationConnectionDetailWebhookPolicy {
+  const lifecycle = input.webhookSource?.lifecycle;
+  const supportsManagedWebhookActions = lifecycle === "managed";
+
+  return {
+    canCreateWebhookSource: supportsManagedWebhookActions,
+    canDeleteWebhookSource: supportsManagedWebhookActions,
+    showWebhookSources: input.webhookSource !== undefined,
+  };
+}
+
+function resolveAuthFields(input: {
+  connection: IntegrationConnection;
+  currentMethod: IntegrationConnectionMethod | null;
+  targetConfig?: Record<string, unknown>;
+  targetFamilyId?: string;
+  targetVariantId?: string;
+}): readonly {
+  label: string;
+  value: string;
+}[] {
+  const methodLabel = input.connection.connectionMethodLabel;
+  const fields: {
+    label: string;
+    value: string;
+  }[] = [];
+
+  if (methodLabel !== undefined) {
+    fields.push({
+      label: "Method",
+      value: methodLabel,
+    });
+  }
+
+  if (
+    input.currentMethod === null ||
+    input.connection.config === undefined ||
+    input.targetConfig === undefined ||
+    input.targetFamilyId === undefined ||
+    input.targetVariantId === undefined
+  ) {
+    return fields;
+  }
+
+  const visibleConfigFields = resolveVisibleConnectionMethodConfigFields({
+    connectionId: input.connection.id,
+    connectionMethod: input.currentMethod,
+    connectionConfig: resolveTargetConfig(input.connection.config),
+    targetConfig: input.targetConfig,
+    targetFamilyId: input.targetFamilyId,
+    targetKey: input.connection.targetKey,
+    targetVariantId: input.targetVariantId,
+  });
+
+  return [...fields, ...visibleConfigFields];
+}
+
 function resolveGitHubAppConnectionContext(
   connection: Pick<IntegrationConnection, "config" | "externalSubjectId">,
   controlPlaneApiOrigin?: string,
@@ -180,7 +305,6 @@ function resolveGitHubAppConnectionContext(
             postInstallationSetupUrl?: string;
           }
         | undefined;
-      webhookInstructions: string;
     }
   | undefined {
   const config = connection.config;
@@ -244,8 +368,6 @@ function resolveGitHubAppConnectionContext(
           },
         }
       : {}),
-    webhookInstructions:
-      "Copy the callback URL into your GitHub App webhook settings, then install the app to finish setup.",
   };
 }
 
@@ -254,10 +376,6 @@ export function createIntegrationConnectionResourceKey(input: {
   kind: string;
 }): string {
   return `${input.connectionId}:${input.kind}`;
-}
-
-export function createRefreshingResourceKey(input: { connectionId: string; kind: string }): string {
-  return createIntegrationConnectionResourceKey(input);
 }
 
 export function getIntegrationConnectionResourceSummaries(
@@ -282,19 +400,19 @@ export function buildIntegrationConnectionResourceRequests(
   );
 }
 
-export type IntegrationConnectionResourceItemsState = {
+export type IntegrationConnectionResourceContentState = {
   errorMessage: string | null;
   isLoading: boolean;
   items: readonly IntegrationConnectionResource[];
   kind: string;
 };
 
-export function buildIntegrationConnectionResourceItemsByKey(
+export function buildIntegrationConnectionResourceContentByKey(
   input: readonly {
     connectionId: string;
-    state: IntegrationConnectionResourceItemsState;
+    state: IntegrationConnectionResourceContentState;
   }[],
-): ReadonlyMap<string, IntegrationConnectionResourceItemsState> {
+): ReadonlyMap<string, IntegrationConnectionResourceContentState> {
   return new Map(
     input.map((entry) => [
       createIntegrationConnectionResourceKey({

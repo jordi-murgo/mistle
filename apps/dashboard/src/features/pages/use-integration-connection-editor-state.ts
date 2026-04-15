@@ -53,6 +53,22 @@ function isDeviceAuthorizationMethod(
   return method?.kind === "device-authorization";
 }
 
+function resolveEditableConfigValue(input: {
+  configValue: Record<string, unknown>;
+  configForm: ReturnType<typeof resolveConnectionMethodFormUiModel>;
+}): Record<string, unknown> | undefined {
+  if (input.configForm.mode !== "form") {
+    return undefined;
+  }
+
+  const entries = input.configForm.visiblePropertyKeys.flatMap((propertyKey) => {
+    const value = input.configValue[propertyKey];
+    return value === undefined ? [] : [[propertyKey, value] as const];
+  });
+
+  return Object.fromEntries(entries);
+}
+
 function resolveSelectedMethod(input: {
   editor: IntegrationConnectionEditorState;
   methodId: IntegrationConnectionMethodId;
@@ -114,9 +130,12 @@ export function useIntegrationConnectionEditorState(
       cancelDeviceAuthorizationAttempt(mutationInput),
   });
 
-  const updateConnectionMetadataMutation = useMutation({
-    mutationFn: async (mutationInput: { connectionId: string; displayName: string }) =>
-      updateIntegrationConnection(mutationInput),
+  const updateConnectionMutation = useMutation({
+    mutationFn: async (mutationInput: {
+      connectionId: string;
+      displayName: string;
+      config?: Record<string, unknown>;
+    }) => updateIntegrationConnection(mutationInput),
   });
 
   const updateFormMutation = useMutation({
@@ -138,7 +157,7 @@ export function useIntegrationConnectionEditorState(
     createFormMutation.isPending ||
     startDeviceAuthorizationMutation.isPending ||
     startRedirectMutation.isPending ||
-    updateConnectionMetadataMutation.isPending ||
+    updateConnectionMutation.isPending ||
     updateFormMutation.isPending;
   const closePending = submitPending || cancelDeviceAuthorizationMutation.isPending;
 
@@ -333,9 +352,14 @@ export function useIntegrationConnectionEditorState(
     }
 
     if (editor.mode === "update") {
-      await updateConnectionMetadataMutation.mutateAsync({
+      const editableConfigValue = resolveEditableConfigValue({
+        configValue: draft.configValue,
+        configForm,
+      });
+      await updateConnectionMutation.mutateAsync({
         connectionId: editor.connectionId,
         displayName: normalizedConnectionDisplayName,
+        ...(editableConfigValue === undefined ? {} : { config: editableConfigValue }),
       });
 
       await queryClient.invalidateQueries({
