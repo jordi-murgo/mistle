@@ -5,9 +5,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AutoSaveEditableHeading, AutoSaveTitleHeading } from "./auto-save-editable-heading.js";
+import { AutoSaveInlineHeading, AutoSaveTitleHeading } from "./auto-save-inline-heading.js";
 
-describe("AutoSaveEditableHeading", () => {
+describe("AutoSaveInlineHeading", () => {
   afterEach(() => {
     cleanup();
   });
@@ -21,11 +21,10 @@ describe("AutoSaveEditableHeading", () => {
     );
   }
 
-  it("shows a validation error and stays in edit mode when the value is invalid", async () => {
+  it("shows a validation error and keeps the inline field visible when the value is invalid", async () => {
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
-        editButtonLabel="Edit heading"
         value="Repo Maintainer"
         onSave={async () => {}}
         successFadeDurationMs={20}
@@ -36,7 +35,6 @@ describe("AutoSaveEditableHeading", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
     const input = screen.getByRole("textbox", { name: "Heading" });
     fireEvent.change(input, { target: { value: "" } });
     fireEvent.blur(input);
@@ -45,14 +43,13 @@ describe("AutoSaveEditableHeading", () => {
     expect(screen.getByRole("textbox", { name: "Heading" })).toBeDefined();
   });
 
-  it("returns to display mode after a successful save", async () => {
+  it("keeps the inline field visible after a successful save", async () => {
     function ControlledHarness(): React.JSX.Element {
       const [value, setValue] = useState("Repo Maintainer");
 
       return (
-        <AutoSaveEditableHeading
+        <AutoSaveInlineHeading
           ariaLabel="Heading"
-          editButtonLabel="Edit heading"
           onSave={async (nextValue) => {
             setValue(nextValue);
           }}
@@ -66,7 +63,6 @@ describe("AutoSaveEditableHeading", () => {
 
     render(<ControlledHarness />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
     const input = screen.getByRole("textbox", { name: "Heading" });
     fireEvent.change(input, { target: { value: "New Title" } });
     fireEvent.blur(input);
@@ -74,54 +70,45 @@ describe("AutoSaveEditableHeading", () => {
     expect(getSaveState({ label: "Heading" })).toBe("saving");
 
     await waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: "Heading" })).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty("value", "New Title");
     });
-
-    expect(screen.getByText("New Title")).toBeDefined();
   });
 
-  it("does not allow edit entry while disabled", () => {
+  it("keeps the inline field disabled when saves are disabled", () => {
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
         disabled={true}
-        editButtonLabel="Edit heading"
         value="Repo Maintainer"
         onSave={async () => {}}
         validate={() => null}
       />,
     );
 
-    const editButton = screen.getByRole("button", { name: "Edit heading" });
-    expect(editButton).toHaveProperty("disabled", true);
-    expect(screen.queryByRole("textbox", { name: "Heading" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty("disabled", true);
   });
 
-  it("uses a display-only fallback without seeding the edit input", () => {
+  it("uses the display fallback as placeholder text without seeding the input value", () => {
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
         displayText="profile_123"
-        editButtonLabel="Edit heading"
         value=""
         onSave={async () => {}}
         validate={() => null}
       />,
     );
 
-    expect(screen.getByText("profile_123")).toBeDefined();
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
-
-    expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty("value", "");
+    const input = screen.getByRole("textbox", { name: "Heading" });
+    expect(input).toHaveProperty("value", "");
+    expect(input.getAttribute("placeholder")).toBe("profile_123");
   });
 
   it("disables the input while saving", async () => {
     let resolveSave: (() => void) | undefined;
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
-        editButtonLabel="Edit heading"
         value="Repo Maintainer"
         onSave={() =>
           new Promise<void>((resolve) => {
@@ -134,7 +121,6 @@ describe("AutoSaveEditableHeading", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
     const input = screen.getByRole("textbox", { name: "Heading" });
     fireEvent.change(input, { target: { value: "New Title" } });
     fireEvent.blur(input);
@@ -148,7 +134,7 @@ describe("AutoSaveEditableHeading", () => {
     finishSave();
 
     return waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: "Heading" })).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty("value", "New Title");
     });
   });
 
@@ -168,9 +154,8 @@ describe("AutoSaveEditableHeading", () => {
           >
             Rerender
           </button>
-          <AutoSaveEditableHeading
+          <AutoSaveInlineHeading
             ariaLabel="Heading"
-            editButtonLabel="Edit heading"
             errorMessage={errorMessage}
             value="Repo Maintainer"
             onSave={async () => {}}
@@ -192,9 +177,8 @@ describe("AutoSaveEditableHeading", () => {
 
   it("keeps an external save error visible on blur when the user has not changed the value", () => {
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
-        editButtonLabel="Edit heading"
         errorMessage="Could not update heading."
         value="Repo Maintainer"
         onSave={async () => {}}
@@ -209,11 +193,10 @@ describe("AutoSaveEditableHeading", () => {
     expect(screen.getByText("Could not update heading.")).toBeDefined();
   });
 
-  it("leaves edit mode when escape cancels a changed draft after a parent-owned save error", () => {
+  it("restores the persisted value when escape cancels a changed draft after a parent-owned save error", () => {
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
-        editButtonLabel="Edit heading"
         errorMessage="Could not update heading."
         value="Repo Maintainer"
         onSave={async () => {}}
@@ -225,8 +208,10 @@ describe("AutoSaveEditableHeading", () => {
     fireEvent.change(input, { target: { value: "Retry Title" } });
     fireEvent.keyDown(input, { key: "Escape" });
 
-    expect(screen.queryByRole("textbox", { name: "Heading" })).toBeNull();
-    expect(screen.getByText("Repo Maintainer")).toBeDefined();
+    expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty(
+      "value",
+      "Repo Maintainer",
+    );
   });
 
   it("preserves the retry draft when an external save error is cleared before retry", async () => {
@@ -241,9 +226,8 @@ describe("AutoSaveEditableHeading", () => {
       });
 
       return (
-        <AutoSaveEditableHeading
+        <AutoSaveInlineHeading
           ariaLabel="Heading"
-          editButtonLabel="Edit heading"
           value={value}
           onSave={async (nextValue) => {
             setErrorState(null);
@@ -264,10 +248,11 @@ describe("AutoSaveEditableHeading", () => {
     fireEvent.blur(input);
 
     await waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: "Heading" })).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty(
+        "value",
+        "Retry Title",
+      );
     });
-
-    expect(screen.getByText("Retry Title")).toBeDefined();
   });
 
   it("ignores a stale save result after the parent resets the value", async () => {
@@ -286,9 +271,8 @@ describe("AutoSaveEditableHeading", () => {
           >
             Reset
           </button>
-          <AutoSaveEditableHeading
+          <AutoSaveInlineHeading
             ariaLabel="Heading"
-            editButtonLabel="Edit heading"
             value={value}
             onSave={() =>
               new Promise<void>((resolve) => {
@@ -303,7 +287,6 @@ describe("AutoSaveEditableHeading", () => {
 
     render(<ResetHarness />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
     const input = screen.getByRole("textbox", { name: "Heading" });
     fireEvent.change(input, { target: { value: "Client Title" } });
     fireEvent.blur(input);
@@ -316,10 +299,11 @@ describe("AutoSaveEditableHeading", () => {
     finishSave();
 
     await waitFor(() => {
-      expect(screen.getByText("Server Title")).toBeDefined();
+      expect(screen.getByRole("textbox", { name: "Heading" })).toHaveProperty(
+        "value",
+        "Server Title",
+      );
     });
-
-    expect(screen.queryByText("Client Title")).toBeNull();
   });
 
   it("does not auto-close a new draft after a prior save succeeded", async () => {
@@ -327,9 +311,8 @@ describe("AutoSaveEditableHeading", () => {
     const scheduler = createManualScheduler(clock);
 
     render(
-      <AutoSaveEditableHeading
+      <AutoSaveInlineHeading
         ariaLabel="Heading"
-        editButtonLabel="Edit heading"
         value="Repo Maintainer"
         onSave={async () => {}}
         scheduler={scheduler}
@@ -339,7 +322,6 @@ describe("AutoSaveEditableHeading", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
     const input = screen.getByRole("textbox", { name: "Heading" });
     fireEvent.change(input, { target: { value: "New Title" } });
     fireEvent.blur(input);
@@ -370,9 +352,8 @@ describe("AutoSaveEditableHeading", () => {
       const [value, setValue] = useState("Repo Maintainer");
 
       return (
-        <AutoSaveEditableHeading
+        <AutoSaveInlineHeading
           ariaLabel="Heading"
-          editButtonLabel="Edit heading"
           onSave={async (nextValue) => {
             setValue(nextValue);
           }}
@@ -386,7 +367,6 @@ describe("AutoSaveEditableHeading", () => {
 
     render(<ControlledHarness />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit heading" }));
     const input = screen.getByRole("textbox", { name: "Heading" });
     fireEvent.change(input, { target: { value: "New Title" } });
     fireEvent.blur(input);
@@ -404,11 +384,10 @@ describe("AutoSaveTitleHeading", () => {
     cleanup();
   });
 
-  it("uses the empty display text without seeding the edit input", () => {
+  it("uses the empty display text as placeholder without seeding the input value", () => {
     render(
       <AutoSaveTitleHeading
         ariaLabel="Session title"
-        editButtonLabel="Edit session title"
         emptyDisplayText="Untitled"
         onSave={async () => {}}
         requiredLabel="Session title"
@@ -416,18 +395,15 @@ describe("AutoSaveTitleHeading", () => {
       />,
     );
 
-    expect(screen.getByText("Untitled")).toBeDefined();
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit session title" }));
-
-    expect(screen.getByRole("textbox", { name: "Session title" })).toHaveProperty("value", "");
+    const input = screen.getByRole("textbox", { name: "Session title" });
+    expect(input).toHaveProperty("value", "");
+    expect(input.getAttribute("placeholder")).toBe("Untitled");
   });
 
   it("treats blank persisted values like missing titles", () => {
     render(
       <AutoSaveTitleHeading
         ariaLabel="Session title"
-        editButtonLabel="Edit session title"
         emptyDisplayText="Untitled"
         onSave={async () => {}}
         requiredLabel="Session title"
@@ -435,26 +411,21 @@ describe("AutoSaveTitleHeading", () => {
       />,
     );
 
-    expect(screen.getByText("Untitled")).toBeDefined();
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit session title" }));
-
-    expect(screen.getByRole("textbox", { name: "Session title" })).toHaveProperty("value", "");
+    const input = screen.getByRole("textbox", { name: "Session title" });
+    expect(input).toHaveProperty("value", "");
+    expect(input.getAttribute("placeholder")).toBe("Untitled");
   });
 
   it("applies the required-label validation message", async () => {
     render(
       <AutoSaveTitleHeading
         ariaLabel="Session title"
-        editButtonLabel="Edit session title"
         emptyDisplayText="Untitled"
         onSave={async () => {}}
         requiredLabel="Session title"
         value="Existing title"
       />,
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit session title" }));
 
     const input = screen.getByRole("textbox", { name: "Session title" });
     fireEvent.change(input, { target: { value: "   " } });
