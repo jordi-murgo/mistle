@@ -17,6 +17,7 @@ import { AppIds } from "../../packages/config/src/modules.ts";
 import { developmentPresetModules } from "./presets/development/index.ts";
 import type { ConfigRecord, DevelopmentPresetModule } from "./presets/development/types.ts";
 import {
+  getRequiredIntegrationConfigValues,
   getIntegrationProviderPreset,
   parseIntegrationSandboxProviders,
   type IntegrationSandboxProvider,
@@ -116,20 +117,31 @@ function assertRequiredConfigValues(input: {
   provider: IntegrationSandboxProvider;
   configRoot: Record<string, unknown>;
 }): void {
-  const preset = getIntegrationProviderPreset(input.provider);
-
-  for (const requiredValue of preset.requiredConfigValues) {
+  for (const requiredValue of getRequiredIntegrationConfigValues(input)) {
     const value = getValueAtPath(input.configRoot, requiredValue.path);
-    if (
-      typeof value !== "string" ||
-      value.trim().length === 0 ||
-      value.startsWith("replace-with-")
-    ) {
+    if (isMissingRequiredConfigValue(value)) {
       throw new Error(
         `Missing required config value at ${requiredValue.path.join(".")} for provider "${input.provider}". Set ${requiredValue.envVar} before running \`pnpm config:init:integration\`.`,
       );
     }
   }
+}
+
+function isMissingRequiredConfigValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length === 0 || value.startsWith("replace-with-");
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 0 || value.some((item) => isMissingRequiredConfigValue(item));
+  }
+
+  if (isObjectRecord(value)) {
+    const entries = Object.values(value);
+    return entries.length === 0 || entries.some((item) => isMissingRequiredConfigValue(item));
+  }
+
+  return true;
 }
 
 function buildDevelopmentBaseConfig(
