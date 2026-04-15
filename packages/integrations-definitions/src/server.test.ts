@@ -92,6 +92,43 @@ describe("integrations-definitions server", () => {
     expect(slackDefinition?.webhookSource).toMatchObject({
       lifecycle: "implicit",
     });
+    expect(slackDefinition?.resourceDefinitions).toEqual([
+      expect.objectContaining({
+        kind: "channel",
+        bindingField: "channels",
+      }),
+    ]);
+    expect(slackDefinition?.resourceSyncTriggers).toEqual([
+      {
+        eventType: "slack:channel_created",
+        resourceKinds: ["channel"],
+      },
+      {
+        eventType: "slack:channel_archive",
+        resourceKinds: ["channel"],
+      },
+      {
+        eventType: "slack:channel_unarchive",
+        resourceKinds: ["channel"],
+      },
+      {
+        eventType: "slack:channel_rename",
+        resourceKinds: ["channel"],
+      },
+      {
+        eventType: "slack:group_archive",
+        resourceKinds: ["channel"],
+      },
+      {
+        eventType: "slack:group_unarchive",
+        resourceKinds: ["channel"],
+      },
+      {
+        eventType: "slack:group_rename",
+        resourceKinds: ["channel"],
+      },
+    ]);
+    expect(typeof slackDefinition?.listConnectionResources).toBe("function");
   });
 
   it("lists registered server definitions", () => {
