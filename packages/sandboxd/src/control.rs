@@ -8,6 +8,7 @@
 use std::fmt;
 use std::fs;
 use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -21,12 +22,24 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::startup::StartupInput;
 use crate::sandboxd_state::SandboxdState;
 use crate::security;
-use crate::time::{Sleeper, SystemClock, ThreadSleeper};
+use crate::supervision::{
+    ComponentHealthSnapshot, ComponentHealthState, SandboxdDaemonPhase, SandboxdHealthResponse,
+    SandboxdHealthSnapshot, SupervisedComponent,
+};
+use crate::time::{Clock, Sleeper, SystemClock, ThreadSleeper, format_rfc3339_timestamp};
 
 /// Default Unix socket path for the local `sandboxd` control channel.
 pub const DEFAULT_CONTROL_SOCKET_PATH: &str = "/run/mistle/sandboxd/control.sock";
 /// Poll interval for checking shutdown while the nonblocking listener is idle.
 pub const DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Default loopback HTTP address for the daemon-local health endpoint.
+pub const DEFAULT_HEALTH_ENDPOINT_ADDR: &str = "127.0.0.1:3901";
+/// Fixed path served by the daemon-local health endpoint.
+pub const DEFAULT_HEALTH_ENDPOINT_PATH: &str = "/__healthz";
+#[cfg(any(test, debug_assertions))]
+const TEST_FAULTS_ENABLED_ENV: &str = "MISTLE_SANDBOXD_ENABLE_TEST_FAULTS";
+#[cfg(any(test, debug_assertions))]
+const EGRESS_PROXY_FAULT_KILL_PATH: &str = "/__faults/components/egress-proxy/kill";
 
 /// Tracks whether this daemon has already accepted startup input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,9 +75,15 @@ pub enum ControlError {
         path: PathBuf,
         error: std::io::Error,
     },
+    BindHealthEndpoint {
+        address: SocketAddr,
+        error: std::io::Error,
+    },
     AcceptConnection(std::io::Error),
+    AcceptHealthConnection(std::io::Error),
     ConfigureConnection(std::io::Error),
     ReadRequest(std::io::Error),
+    ReadHealthRequest(std::io::Error),
     InvalidRequest(serde_json::Error),
     InvalidResponse(serde_json::Error),
     VerifyPeer(String),
@@ -74,6 +93,7 @@ pub enum ControlError {
     CloseSandboxdState(String),
     SerializeResponse(serde_json::Error),
     WriteResponse(std::io::Error),
+    WriteHealthResponse(std::io::Error),
     ResponseError(String),
     ConnectSocket {
         path: PathBuf,
@@ -81,6 +101,7 @@ pub enum ControlError {
     },
     ShutdownSend,
     ServerPanicked,
+    HealthServerPanicked,
     InitPanicked,
 }
 
@@ -123,13 +144,22 @@ impl fmt::Display for ControlError {
                     path.display()
                 )
             }
+            Self::BindHealthEndpoint { address, error } => {
+                write!(f, "failed to bind health endpoint {address}: {error}")
+            }
             Self::AcceptConnection(error) => {
                 write!(f, "failed to accept control socket connection: {error}")
+            }
+            Self::AcceptHealthConnection(error) => {
+                write!(f, "failed to accept health endpoint connection: {error}")
             }
             Self::ConfigureConnection(error) => {
                 write!(f, "failed to configure control socket connection: {error}")
             }
             Self::ReadRequest(error) => write!(f, "failed to read control socket request: {error}"),
+            Self::ReadHealthRequest(error) => {
+                write!(f, "failed to read health endpoint request: {error}")
+            }
             Self::InvalidRequest(error) => {
                 write!(f, "control socket request must be valid json: {error}")
             }
@@ -157,6 +187,9 @@ impl fmt::Display for ControlError {
             Self::WriteResponse(error) => {
                 write!(f, "failed to write control socket response: {error}")
             }
+            Self::WriteHealthResponse(error) => {
+                write!(f, "failed to write health endpoint response: {error}")
+            }
             Self::ResponseError(error) => write!(f, "control socket returned an error: {error}"),
             Self::ConnectSocket { path, error } => {
                 write!(
@@ -167,6 +200,7 @@ impl fmt::Display for ControlError {
             }
             Self::ShutdownSend => write!(f, "failed to signal control socket shutdown"),
             Self::ServerPanicked => write!(f, "control socket server panicked"),
+            Self::HealthServerPanicked => write!(f, "health endpoint server panicked"),
             Self::InitPanicked => write!(f, "sandbox init worker panicked"),
         }
     }
@@ -206,8 +240,11 @@ type SharedInitThread = Arc<Mutex<Option<InitThread>>>;
 pub struct ControlServer {
     state: Arc<Mutex<ControlServerState>>,
     shutdown_sender: mpsc::Sender<()>,
+    health_shutdown_sender: mpsc::Sender<()>,
     thread: Option<JoinHandle<Result<(), ControlError>>>,
+    health_thread: Option<JoinHandle<Result<(), ControlError>>>,
     init_thread: SharedInitThread,
+    health_endpoint_addr: SocketAddr,
 }
 
 impl ControlServer {
@@ -229,9 +266,17 @@ impl ControlServer {
             .clone()
     }
 
+    /// Returns the loopback socket address bound by the local health endpoint.
+    pub fn health_endpoint_addr(&self) -> SocketAddr {
+        self.health_endpoint_addr
+    }
+
     /// Signals the control server thread to stop and waits for it to exit.
     pub fn close(mut self) -> Result<(), ControlError> {
         self.shutdown_sender
+            .send(())
+            .map_err(|_| ControlError::ShutdownSend)?;
+        self.health_shutdown_sender
             .send(())
             .map_err(|_| ControlError::ShutdownSend)?;
 
@@ -239,14 +284,23 @@ impl ControlServer {
             .thread
             .take()
             .expect("control server thread should exist");
+        let health_thread = self
+            .health_thread
+            .take()
+            .expect("health server thread should exist");
         let thread_result = match thread.join() {
             Ok(result) => result,
             Err(_) => Err(ControlError::ServerPanicked),
+        };
+        let health_thread_result = match health_thread.join() {
+            Ok(result) => result,
+            Err(_) => Err(ControlError::HealthServerPanicked),
         };
         let init_result = join_init_thread(&self.init_thread);
         let stop_result = close_sandboxd_state(&self.state);
 
         thread_result?;
+        health_thread_result?;
         init_result?;
         stop_result
     }
@@ -261,10 +315,22 @@ impl ControlServer {
             Ok(result) => result,
             Err(_) => Err(ControlError::ServerPanicked),
         };
+        self.health_shutdown_sender
+            .send(())
+            .map_err(|_| ControlError::ShutdownSend)?;
+        let health_thread = self
+            .health_thread
+            .take()
+            .expect("health server thread should exist");
+        let health_thread_result = match health_thread.join() {
+            Ok(result) => result,
+            Err(_) => Err(ControlError::HealthServerPanicked),
+        };
         let init_result = join_init_thread(&self.init_thread);
         let stop_result = close_sandboxd_state(&self.state);
 
         thread_result?;
+        health_thread_result?;
         init_result?;
         stop_result
     }
@@ -273,6 +339,25 @@ impl ControlServer {
 /// Starts the local control socket server that accepts startup lifecycle requests.
 pub fn start_control_server<S>(
     socket_path: &Path,
+    sleeper: S,
+    accept_poll_interval: Duration,
+) -> Result<ControlServer, ControlError>
+where
+    S: Sleeper + 'static,
+{
+    start_control_server_with_health_endpoint(
+        socket_path,
+        DEFAULT_HEALTH_ENDPOINT_ADDR
+            .parse()
+            .expect("default health endpoint address should parse"),
+        sleeper,
+        accept_poll_interval,
+    )
+}
+
+fn start_control_server_with_health_endpoint<S>(
+    socket_path: &Path,
+    health_endpoint_addr: SocketAddr,
     sleeper: S,
     accept_poll_interval: Duration,
 ) -> Result<ControlServer, ControlError>
@@ -300,6 +385,18 @@ where
             path: socket_path.to_path_buf(),
             error,
         })?;
+    let health_listener = TcpListener::bind(health_endpoint_addr).map_err(|error| {
+        ControlError::BindHealthEndpoint {
+            address: health_endpoint_addr,
+            error,
+        }
+    })?;
+    health_listener
+        .set_nonblocking(true)
+        .map_err(|error| ControlError::BindHealthEndpoint {
+            address: health_endpoint_addr,
+            error,
+        })?;
 
     let state = Arc::new(Mutex::new(ControlServerState {
         init_phase: InitPhase::Uninitialized,
@@ -308,9 +405,13 @@ where
     }));
     let init_thread: SharedInitThread = Arc::new(Mutex::new(None));
     let (shutdown_sender, shutdown_receiver) = mpsc::channel::<()>();
+    let (health_shutdown_sender, health_shutdown_receiver) = mpsc::channel::<()>();
+    let sleeper = Arc::new(sleeper);
     let state_for_thread = state.clone();
     let init_thread_for_loop = init_thread.clone();
     let socket_path_for_thread = socket_path.to_path_buf();
+    let sleeper_for_control = sleeper.clone();
+    let sleeper_for_health = sleeper;
 
     let thread = thread::spawn(move || {
         let result = run_control_server_loop(
@@ -318,43 +419,59 @@ where
             &state_for_thread,
             &init_thread_for_loop,
             &shutdown_receiver,
-            &sleeper,
+            sleeper_for_control.as_ref(),
             accept_poll_interval,
         );
         let _ = fs::remove_file(&socket_path_for_thread);
         result
     });
+    let state_for_health_thread = state.clone();
+    let health_thread = thread::spawn(move || {
+        run_health_server_loop(
+            health_listener,
+            &state_for_health_thread,
+            &health_shutdown_receiver,
+            sleeper_for_health.as_ref(),
+            accept_poll_interval,
+        )
+    });
 
     Ok(ControlServer {
         state,
         shutdown_sender,
+        health_shutdown_sender,
         thread: Some(thread),
+        health_thread: Some(health_thread),
         init_thread,
+        health_endpoint_addr,
     })
 }
 
 /// Submits one startup payload to the running daemon over the local control socket.
 pub fn submit_init(socket_path: &Path, startup_input: &StartupInput) -> Result<(), ControlError> {
-    submit_startup_request(socket_path, ControlRequest::Init {
-        startup_input: startup_input.clone(),
-    })
+    submit_startup_request(
+        socket_path,
+        ControlRequest::Init {
+            startup_input: startup_input.clone(),
+        },
+    )
 }
 
 /// Submits one resume payload to the running daemon over the local control socket.
 pub fn submit_resume(socket_path: &Path, startup_input: &StartupInput) -> Result<(), ControlError> {
-    submit_startup_request(socket_path, ControlRequest::Resume {
-        startup_input: startup_input.clone(),
-    })
+    submit_startup_request(
+        socket_path,
+        ControlRequest::Resume {
+            startup_input: startup_input.clone(),
+        },
+    )
 }
 
-fn submit_startup_request(
-    socket_path: &Path,
-    request: ControlRequest,
-) -> Result<(), ControlError> {
+fn submit_startup_request(socket_path: &Path, request: ControlRequest) -> Result<(), ControlError> {
     let mut stream =
         UnixStream::connect(socket_path).map_err(|error| ControlError::ConnectSocket {
             path: socket_path.to_path_buf(),
-        error,
+            error,
         })?;
 
     let request = serde_json::to_vec(&request).map_err(ControlError::SerializeResponse)?;
@@ -423,6 +540,164 @@ fn run_control_server_loop(
             }
         }
     }
+}
+
+fn run_health_server_loop(
+    listener: TcpListener,
+    state: &Arc<Mutex<ControlServerState>>,
+    shutdown_receiver: &mpsc::Receiver<()>,
+    sleeper: &dyn Sleeper,
+    accept_poll_interval: Duration,
+) -> Result<(), ControlError> {
+    loop {
+        if shutdown_receiver.try_recv().is_ok() {
+            return Ok(());
+        }
+
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .map_err(ControlError::ConfigureConnection)?;
+                handle_health_connection(&mut stream, state)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                sleeper.sleep(accept_poll_interval);
+            }
+            Err(error) => return Err(ControlError::AcceptHealthConnection(error)),
+        }
+    }
+}
+
+fn handle_health_connection(
+    stream: &mut TcpStream,
+    state: &Arc<Mutex<ControlServerState>>,
+) -> Result<(), ControlError> {
+    let request_head = read_http_request_head(stream)?;
+    let mut request_lines = request_head.lines();
+    let request_line = request_lines.next().unwrap_or_default();
+    let response = match parse_http_request_line(request_line) {
+        Some(("GET", DEFAULT_HEALTH_ENDPOINT_PATH)) => build_http_json_response(
+            200,
+            &serialize_health_response(&build_health_response(state)?)
+                .map_err(ControlError::SerializeResponse)?,
+        ),
+        #[cfg(any(test, debug_assertions))]
+        Some(("POST", EGRESS_PROXY_FAULT_KILL_PATH)) => build_fault_injection_response(state)?,
+        _ => build_http_json_response(404, br#"{"error":"not_found"}"#),
+    };
+
+    stream
+        .write_all(&response)
+        .map_err(ControlError::WriteHealthResponse)
+}
+
+fn parse_http_request_line(request_line: &str) -> Option<(&str, &str)> {
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next()?;
+    let path = parts.next()?;
+    let _http_version = parts.next()?;
+    Some((method, path))
+}
+
+fn read_http_request_head(stream: &mut TcpStream) -> Result<String, ControlError> {
+    let mut raw_request = Vec::new();
+    let mut buffer = [0_u8; 1024];
+
+    loop {
+        let bytes_read = stream
+            .read(&mut buffer)
+            .map_err(ControlError::ReadHealthRequest)?;
+        if bytes_read == 0 {
+            break;
+        }
+        raw_request.extend_from_slice(&buffer[..bytes_read]);
+        if raw_request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        if raw_request.len() > 16 * 1024 {
+            break;
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&raw_request).into_owned())
+}
+
+fn build_http_json_response(status_code: u16, body: &[u8]) -> Vec<u8> {
+    let status_text = match status_code {
+        200 => "OK",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        _ => "OK",
+    };
+    let mut response = Vec::new();
+    response.extend_from_slice(format!("HTTP/1.1 {status_code} {status_text}\r\n").as_bytes());
+    response.extend_from_slice(b"content-type: application/json\r\n");
+    response.extend_from_slice(format!("content-length: {}\r\n", body.len()).as_bytes());
+    response.extend_from_slice(b"connection: close\r\n\r\n");
+    response.extend_from_slice(body);
+    response
+}
+
+#[cfg(any(test, debug_assertions))]
+#[derive(Serialize)]
+struct FaultInjectionAcceptedResponse {
+    status: &'static str,
+    component: &'static str,
+    action: &'static str,
+}
+
+#[cfg(any(test, debug_assertions))]
+#[derive(Serialize)]
+struct FaultInjectionErrorResponse<'a> {
+    error: &'a str,
+}
+
+#[cfg(any(test, debug_assertions))]
+fn build_fault_injection_response(
+    state: &Arc<Mutex<ControlServerState>>,
+) -> Result<Vec<u8>, ControlError> {
+    if !test_fault_injection_enabled() {
+        let body = serde_json::to_vec(&FaultInjectionErrorResponse {
+            error: "test_fault_injection_disabled",
+        })
+        .map_err(ControlError::SerializeResponse)?;
+        return Ok(build_http_json_response(403, &body));
+    }
+
+    let fault_result = state
+        .lock()
+        .expect("control server state lock should not be poisoned")
+        .sandboxd_state
+        .as_ref()
+        .ok_or_else(|| "sandboxd is not initialized".to_string())
+        .and_then(SandboxdState::force_egress_proxy_shutdown_for_test);
+
+    match fault_result {
+        Ok(()) => {
+            let body = serde_json::to_vec(&FaultInjectionAcceptedResponse {
+                status: "accepted",
+                component: "egress_proxy",
+                action: "kill",
+            })
+            .map_err(ControlError::SerializeResponse)?;
+            Ok(build_http_json_response(200, &body))
+        }
+        Err(error) => {
+            let body = serde_json::to_vec(&FaultInjectionErrorResponse { error: &error })
+                .map_err(ControlError::SerializeResponse)?;
+            Ok(build_http_json_response(409, &body))
+        }
+    }
+}
+
+#[cfg(any(test, debug_assertions))]
+fn test_fault_injection_enabled() -> bool {
+    matches!(
+        std::env::var(TEST_FAULTS_ENABLED_ENV),
+        Ok(value) if value == "1" || value.eq_ignore_ascii_case("true")
+    )
 }
 
 fn handle_connection(
@@ -566,6 +841,152 @@ fn begin_resume(
     resume_result
 }
 
+fn build_health_response(
+    state: &Arc<Mutex<ControlServerState>>,
+) -> Result<SandboxdHealthResponse, ControlError> {
+    let observed_at = SystemClock.now_system_time();
+    let state = state
+        .lock()
+        .expect("control server state lock should not be poisoned");
+
+    let (daemon_phase, snapshot, init_error) = match &state.init_phase {
+        InitPhase::Uninitialized => (SandboxdDaemonPhase::Uninitialized, None, None),
+        InitPhase::Initializing => (SandboxdDaemonPhase::Initializing, None, None),
+        InitPhase::Initialized => (
+            SandboxdDaemonPhase::Initialized,
+            state
+                .sandboxd_state
+                .as_ref()
+                .map(SandboxdState::health_snapshot),
+            None,
+        ),
+        InitPhase::Failed(error) => (SandboxdDaemonPhase::Failed, None, Some(error.clone())),
+    };
+
+    Ok(SandboxdHealthResponse {
+        daemon_phase,
+        observed_at,
+        snapshot,
+        init_error,
+    })
+}
+
+fn serialize_health_response(
+    response: &SandboxdHealthResponse,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(&SerializableHealthResponse::from_response(response)?)
+}
+
+#[derive(Serialize)]
+struct SerializableHealthResponse {
+    daemon_phase: &'static str,
+    observed_at: String,
+    snapshot: Option<SerializableHealthSnapshot>,
+    init_error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SerializableHealthSnapshot {
+    observed_at: String,
+    components: Vec<SerializableComponentHealthSnapshot>,
+}
+
+#[derive(Serialize)]
+struct SerializableComponentHealthSnapshot {
+    component: &'static str,
+    state: &'static str,
+    restart_count: u64,
+    last_started_at: Option<String>,
+    last_failed_at: Option<String>,
+    last_healthcheck_at: Option<String>,
+    last_error: Option<String>,
+    details: std::collections::BTreeMap<String, String>,
+}
+
+impl SerializableHealthResponse {
+    fn from_response(response: &SandboxdHealthResponse) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            daemon_phase: daemon_phase_name(response.daemon_phase),
+            observed_at: serialize_timestamp(response.observed_at)?,
+            snapshot: response
+                .snapshot
+                .as_ref()
+                .map(SerializableHealthSnapshot::from_snapshot)
+                .transpose()?,
+            init_error: response.init_error.clone(),
+        })
+    }
+}
+
+impl SerializableHealthSnapshot {
+    fn from_snapshot(snapshot: &SandboxdHealthSnapshot) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            observed_at: serialize_timestamp(snapshot.observed_at)?,
+            components: snapshot
+                .components
+                .iter()
+                .map(SerializableComponentHealthSnapshot::from_snapshot)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
+impl SerializableComponentHealthSnapshot {
+    fn from_snapshot(snapshot: &ComponentHealthSnapshot) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            component: component_name(snapshot.component),
+            state: component_state_name(snapshot.state),
+            restart_count: snapshot.restart_count,
+            last_started_at: snapshot
+                .last_started_at
+                .map(serialize_timestamp)
+                .transpose()?,
+            last_failed_at: snapshot
+                .last_failed_at
+                .map(serialize_timestamp)
+                .transpose()?,
+            last_healthcheck_at: snapshot
+                .last_healthcheck_at
+                .map(serialize_timestamp)
+                .transpose()?,
+            last_error: snapshot.last_error.clone(),
+            details: snapshot.details.clone(),
+        })
+    }
+}
+
+fn serialize_timestamp(timestamp: std::time::SystemTime) -> Result<String, serde_json::Error> {
+    format_rfc3339_timestamp(timestamp)
+        .map_err(|error| serde_json::Error::io(std::io::Error::other(error.to_string())))
+}
+
+fn daemon_phase_name(phase: SandboxdDaemonPhase) -> &'static str {
+    match phase {
+        SandboxdDaemonPhase::Uninitialized => "uninitialized",
+        SandboxdDaemonPhase::Initializing => "initializing",
+        SandboxdDaemonPhase::Initialized => "initialized",
+        SandboxdDaemonPhase::Failed => "failed",
+    }
+}
+
+fn component_name(component: SupervisedComponent) -> &'static str {
+    match component {
+        SupervisedComponent::TunnelSession => "tunnel_session",
+        SupervisedComponent::EgressProxy => "egress_proxy",
+        SupervisedComponent::CodexProxy => "codex_proxy",
+        SupervisedComponent::CodexAppServer => "codex_app_server",
+    }
+}
+
+fn component_state_name(state: ComponentHealthState) -> &'static str {
+    match state {
+        ComponentHealthState::Starting => "starting",
+        ComponentHealthState::Healthy => "healthy",
+        ComponentHealthState::Restarting => "restarting",
+        ComponentHealthState::Stopped => "stopped",
+    }
+}
+
 fn join_init_thread(init_thread: &SharedInitThread) -> Result<(), ControlError> {
     let Some(thread) = init_thread
         .lock()
@@ -620,7 +1041,9 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), ControlError> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::net::{SocketAddr, TcpStream};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
     use std::thread;
@@ -629,8 +1052,9 @@ mod tests {
     use tungstenite::{Message, accept};
 
     use crate::control::{
-        DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL, InitPhase, start_control_server, submit_init,
-        submit_resume,
+        DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL, DEFAULT_HEALTH_ENDPOINT_PATH,
+        EGRESS_PROXY_FAULT_KILL_PATH, InitPhase, TEST_FAULTS_ENABLED_ENV,
+        start_control_server_with_health_endpoint, submit_init, submit_resume,
     };
     use crate::protocol::startup::{StartupInput, StartupMode};
     use crate::test_support::TestEnvVarGuard;
@@ -650,12 +1074,7 @@ mod tests {
         let gateway = start_bootstrap_gateway();
         let startup_input =
             valid_startup_input(StartupMode::New, "bootstrap-token-value", &gateway.ws_url);
-        let server = start_control_server(
-            &socket_path,
-            ThreadSleeper,
-            DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
-        )
-        .expect("control server should start");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
 
         submit_init(&socket_path, &startup_input).expect("init submission should succeed");
 
@@ -678,12 +1097,7 @@ mod tests {
         let gateway = start_bootstrap_gateway();
         let startup_input =
             valid_startup_input(StartupMode::New, "bootstrap-token-value", &gateway.ws_url);
-        let server = start_control_server(
-            &socket_path,
-            ThreadSleeper,
-            DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
-        )
-        .expect("control server should start");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
 
         submit_init(&socket_path, &startup_input).expect("first init should succeed");
         let error = submit_init(&socket_path, &startup_input).expect_err("second init should fail");
@@ -718,12 +1132,7 @@ mod tests {
             "bootstrap-token-value-2",
             &gateway.ws_url,
         );
-        let server = start_control_server(
-            &socket_path,
-            ThreadSleeper,
-            DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
-        )
-        .expect("control server should start");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
 
         submit_init(&socket_path, &init_startup_input).expect("init submission should succeed");
         submit_resume(&socket_path, &resume_startup_input)
@@ -746,14 +1155,12 @@ mod tests {
         let test_dir = create_temp_test_dir("control_resume_before_init");
         let socket_path = test_dir.join("control.sock");
         let gateway = start_bootstrap_gateway();
-        let resume_startup_input =
-            valid_startup_input(StartupMode::Existing, "bootstrap-token-value", &gateway.ws_url);
-        let server = start_control_server(
-            &socket_path,
-            ThreadSleeper,
-            DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
-        )
-        .expect("control server should start");
+        let resume_startup_input = valid_startup_input(
+            StartupMode::Existing,
+            "bootstrap-token-value",
+            &gateway.ws_url,
+        );
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
 
         let error =
             submit_resume(&socket_path, &resume_startup_input).expect_err("resume should fail");
@@ -779,12 +1186,7 @@ mod tests {
         let gateway = start_bootstrap_gateway();
         let startup_input =
             valid_startup_input(StartupMode::New, "bootstrap-token-value", &gateway.ws_url);
-        let server = start_control_server(
-            &socket_path,
-            ThreadSleeper,
-            DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
-        )
-        .expect("control server should start");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
 
         let error = submit_init(&socket_path, &startup_input)
             .expect_err("init submission should fail when required env is missing");
@@ -815,8 +1217,11 @@ mod tests {
         let test_dir = create_temp_test_dir("control_manual_sleeper");
         let socket_path = test_dir.join("control.sock");
         let sleeper = ManualSleeper::default();
-        let server = start_control_server(&socket_path, sleeper.clone(), Duration::from_millis(7))
-            .expect("control server should start");
+        let server = start_test_control_server_with_interval(
+            &socket_path,
+            sleeper.clone(),
+            Duration::from_millis(7),
+        );
 
         assert!(
             sleeper.wait_for_sleep_requests(1, Duration::from_millis(100)),
@@ -835,10 +1240,185 @@ mod tests {
         std::fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
     }
 
+    #[test]
+    fn serves_uninitialized_health_snapshot_over_loopback_http() {
+        let test_dir = create_temp_test_dir("control_health_uninitialized");
+        let socket_path = test_dir.join("control.sock");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
+
+        let (status_code, body) = fetch_health_response(server.health_endpoint_addr());
+
+        assert_eq!(status_code, 200);
+        assert_eq!(body["daemon_phase"], "uninitialized");
+        assert!(body["snapshot"].is_null());
+        assert!(body["init_error"].is_null());
+
+        server.close().expect("control server should stop cleanly");
+        std::fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+    }
+
+    #[test]
+    fn serves_initialized_health_snapshot_over_loopback_http() {
+        let _env_guard =
+            TestEnvVarGuard::set(TOKENIZER_PROXY_EGRESS_BASE_URL_ENV, "http://127.0.0.1:5205");
+        let test_dir = create_temp_test_dir("control_health_initialized");
+        let socket_path = test_dir.join("control.sock");
+        let gateway = start_bootstrap_gateway();
+        let startup_input =
+            valid_startup_input(StartupMode::New, "bootstrap-token-value", &gateway.ws_url);
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
+
+        submit_init(&socket_path, &startup_input).expect("init submission should succeed");
+        wait_for_init_phase(&server, InitPhase::Initialized);
+
+        let (status_code, body) = fetch_health_response(server.health_endpoint_addr());
+
+        assert_eq!(status_code, 200);
+        assert_eq!(body["daemon_phase"], "initialized");
+        assert!(body["snapshot"].is_object());
+        assert!(body["init_error"].is_null());
+        let components = body["snapshot"]["components"]
+            .as_array()
+            .expect("components should serialize as an array");
+        assert!(
+            components
+                .iter()
+                .any(|component| component["component"] == "tunnel_session"),
+            "initialized health response should include the tunnel component"
+        );
+
+        server.close().expect("control server should stop cleanly");
+        gateway
+            .close()
+            .expect("bootstrap gateway should stop cleanly");
+        std::fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+    }
+
+    #[test]
+    fn rejects_fault_injection_requests_when_runtime_opt_in_is_missing() {
+        let _fault_guard = TestEnvVarGuard::unset(TEST_FAULTS_ENABLED_ENV);
+        let test_dir = create_temp_test_dir("control_fault_injection_disabled");
+        let socket_path = test_dir.join("control.sock");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
+
+        let (status_code, body) = fetch_http_json_response(
+            server.health_endpoint_addr(),
+            "POST",
+            EGRESS_PROXY_FAULT_KILL_PATH,
+        );
+
+        assert_eq!(status_code, 403);
+        assert_eq!(body["error"], "test_fault_injection_disabled");
+
+        server.close().expect("control server should stop cleanly");
+        std::fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+    }
+
+    #[test]
+    fn rejects_fault_injection_requests_when_the_target_component_is_unavailable() {
+        let _fault_guard = TestEnvVarGuard::set(TEST_FAULTS_ENABLED_ENV, "1");
+        let test_dir = create_temp_test_dir("control_fault_injection_unavailable");
+        let socket_path = test_dir.join("control.sock");
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
+
+        let (status_code, body) = fetch_http_json_response(
+            server.health_endpoint_addr(),
+            "POST",
+            EGRESS_PROXY_FAULT_KILL_PATH,
+        );
+
+        assert_eq!(status_code, 409);
+        assert_eq!(body["error"], "sandboxd is not initialized");
+
+        server.close().expect("control server should stop cleanly");
+        std::fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+    }
+
+    fn start_test_control_server<S: Sleeper + 'static>(
+        socket_path: &std::path::Path,
+        sleeper: S,
+    ) -> crate::control::ControlServer {
+        start_test_control_server_with_interval(
+            socket_path,
+            sleeper,
+            DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL,
+        )
+    }
+
+    fn start_test_control_server_with_interval<S: Sleeper + 'static>(
+        socket_path: &std::path::Path,
+        sleeper: S,
+        accept_poll_interval: Duration,
+    ) -> crate::control::ControlServer {
+        let probe_listener =
+            TcpListener::bind("127.0.0.1:0").expect("health probe listener should bind");
+        let health_endpoint_addr = probe_listener
+            .local_addr()
+            .expect("health probe listener should expose a local addr");
+        drop(probe_listener);
+
+        start_control_server_with_health_endpoint(
+            socket_path,
+            health_endpoint_addr,
+            sleeper,
+            accept_poll_interval,
+        )
+        .expect("control server should start")
+    }
+
+    fn fetch_health_response(health_endpoint_addr: SocketAddr) -> (u16, serde_json::Value) {
+        fetch_http_json_response(health_endpoint_addr, "GET", DEFAULT_HEALTH_ENDPOINT_PATH)
+    }
+
+    fn fetch_http_json_response(
+        health_endpoint_addr: SocketAddr,
+        method: &str,
+        path: &str,
+    ) -> (u16, serde_json::Value) {
+        let mut stream =
+            TcpStream::connect(health_endpoint_addr).expect("health endpoint should accept TCP");
+        stream
+            .write_all(
+                format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .expect("health endpoint request should write");
+        let mut raw_response = String::new();
+        stream
+            .read_to_string(&mut raw_response)
+            .expect("health endpoint response should read");
+
+        let (head, body) = raw_response
+            .split_once("\r\n\r\n")
+            .expect("HTTP response should contain a header/body separator");
+        let status_code = head
+            .lines()
+            .next()
+            .and_then(|status_line| status_line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())
+            .expect("HTTP response should include a numeric status code");
+        let body = serde_json::from_str(body).expect("health endpoint body should be valid json");
+
+        (status_code, body)
+    }
+
     fn wait_for_init_phase(server: &crate::control::ControlServer, expected: InitPhase) {
         for _ in 0..100 {
-            if server.init_phase() == expected {
-                return;
+            match server.init_phase() {
+                phase if phase == expected => return,
+                InitPhase::Failed(error) => {
+                    panic!(
+                        "sandboxd init failed while waiting for {:?}: {error}",
+                        expected
+                    )
+                }
+                InitPhase::Initialized => {
+                    panic!(
+                        "sandboxd reached initialized while waiting for different phase {:?}",
+                        expected
+                    )
+                }
+                InitPhase::Initializing | InitPhase::Uninitialized => {}
             }
 
             ThreadSleeper.sleep(Duration::from_millis(10));

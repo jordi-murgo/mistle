@@ -5,21 +5,28 @@
 //! client processes, runtime-specific adapters, and the live bootstrap tunnel
 //! session that publishes keepalive and serves tunnel streams.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 use url::Url;
 
+use crate::codex_proxy::CodexProxyControlHandle;
 use crate::egress_proxy::EgressProxy;
 use crate::keepalive::KeepaliveManager;
 use crate::process;
+use crate::process::{CodexAppServerControlHandle, CodexAppServerObservationHandle};
 use crate::protocol::startup::StartupInput;
 use crate::runtime;
 use crate::runtime::adapters::{RuntimeAdapterRegistry, RuntimeAdapters};
-use crate::runtime::readiness::RuntimeReadinessManager;
+use crate::runtime::readiness::{
+    RuntimeReadinessManager, RuntimeReadinessMode, derive_runtime_ready,
+};
+use crate::supervision::{SandboxdHealthSnapshot, SandboxdSupervisorHandle, SupervisedComponent};
 use crate::time::{Clock, Sleeper};
-use crate::tunnel::session::TunnelSession;
+use crate::tunnel::session::{TunnelSession, derive_sandbox_instance_id};
 
 /// Describes why the initialized daemon runtime failed to start or stop.
 #[derive(Debug)]
@@ -72,6 +79,14 @@ pub struct SandboxdState {
     egress_proxy: Option<EgressProxy>,
     process_manager: Option<process::RuntimeClientProcessManager>,
     runtime_adapters: RuntimeAdapters,
+    codex_app_server_observation_handle: Option<CodexAppServerObservationHandle>,
+    codex_app_server_control_handle: Option<CodexAppServerControlHandle>,
+    codex_proxy_control_handle: Option<CodexProxyControlHandle>,
+    codex_coordination_shutdown_requested: Arc<AtomicBool>,
+    codex_coordination_thread: Option<JoinHandle<()>>,
+    runtime_readiness_shutdown_requested: Arc<AtomicBool>,
+    runtime_readiness_thread: Option<JoinHandle<()>>,
+    supervisor_handle: SandboxdSupervisorHandle,
     keepalive_manager: Arc<Mutex<KeepaliveManager>>,
     runtime_readiness_manager: Arc<Mutex<RuntimeReadinessManager>>,
     agent_endpoint_url: Option<String>,
@@ -97,6 +112,13 @@ impl SandboxdState {
             startup_input,
             &tokenizer_proxy_egress_base_url,
         )?;
+        let sandbox_instance_id = derive_sandbox_instance_id(&startup_input.tunnel_gateway_ws_url)
+            .map_err(|error| SandboxdStateError::StartTunnelSession(error.to_string()))?;
+        let supervisor_handle = SandboxdSupervisorHandle::new(
+            sandbox_instance_id,
+            clock.clone(),
+            collect_tracked_components(&runtime_plan),
+        );
         runtime::apply_compiled_runtime_plan(&runtime_plan)
             .map_err(|error| SandboxdStateError::ApplyRuntimePlan(error.to_string()))?;
         let egress_proxy = EgressProxy::start(
@@ -104,6 +126,7 @@ impl SandboxdState {
             startup_input,
             &tokenizer_proxy_egress_base_url,
             clock.clone(),
+            supervisor_handle.clone(),
         )
         .map_err(|error| SandboxdStateError::StartEgressProxy(error.to_string()))?;
         let runtime_env = collect_runtime_environment(&runtime_plan)
@@ -119,42 +142,71 @@ impl SandboxdState {
             None
         } else {
             Some(
-                process::start_runtime_client_process_manager(
+                process::start_runtime_client_process_manager_with_supervisor(
                     &process_specs,
                     clock.as_ref(),
                     sleeper.as_ref(),
+                    supervisor_handle.clone(),
                 )
                 .map_err(|error| SandboxdStateError::StartRuntimeProcesses(error.to_string()))?,
             )
         };
+        let codex_app_server_observation_handle = process_manager
+            .as_ref()
+            .and_then(process::RuntimeClientProcessManager::codex_app_server_observation_handle)
+            .cloned();
+        let codex_app_server_control_handle = process_manager
+            .as_ref()
+            .and_then(process::RuntimeClientProcessManager::codex_app_server_control_handle)
+            .cloned();
 
         let keepalive_manager = Arc::new(Mutex::new(KeepaliveManager::default()));
         let runtime_readiness_manager = Arc::new(Mutex::new(RuntimeReadinessManager::default()));
         let runtime_adapters = RuntimeAdapterRegistry
-            .start(
+            .start_with_supervisor(
                 startup_input,
                 keepalive_manager.clone(),
                 runtime_readiness_manager.clone(),
+                supervisor_handle.clone(),
             )
             .map_err(|error| SandboxdStateError::StartRuntimeAdapters(error.to_string()))?;
+        let codex_proxy_control_handle = runtime_adapters.codex_proxy_control_handle().cloned();
         let agent_endpoint_url = match runtime_adapters.adapters() {
-            [] => {
-                runtime_readiness_manager
-                    .lock()
-                    .expect("runtime readiness manager lock should not be poisoned")
-                    .set_ready(true);
-                None
-            }
-            [adapter] => Some(adapter.listen_url().to_string()),
+            [] => None,
+            [_adapter] => Some(
+                codex_proxy_control_handle
+                    .as_ref()
+                    .ok_or_else(|| {
+                        SandboxdStateError::StartRuntimeAdapters(
+                            "sandboxd is missing the typed Codex proxy control handle for the running runtime adapter"
+                                .to_string(),
+                        )
+                    })?
+                    .listen_url()
+                    .to_string(),
+            ),
             _ => {
                 return Err(SandboxdStateError::StartTunnelSession(
                     "sandboxd currently supports exactly one runtime adapter endpoint".to_string(),
                 ));
             }
         };
+        let runtime_readiness_mode = determine_runtime_readiness_mode(&supervisor_handle);
+        sync_runtime_readiness_from_snapshot(
+            &supervisor_handle,
+            &runtime_readiness_manager,
+            runtime_readiness_mode,
+        );
+        let runtime_readiness_shutdown_requested = Arc::new(AtomicBool::new(false));
+        let runtime_readiness_thread = Some(spawn_runtime_readiness_projection_thread(
+            supervisor_handle.clone(),
+            runtime_readiness_manager.clone(),
+            runtime_readiness_mode,
+            runtime_readiness_shutdown_requested.clone(),
+        ));
 
         let tunnel_session = Some(
-            TunnelSession::start(
+            TunnelSession::start_with_supervisor(
                 startup_input,
                 keepalive_manager.clone(),
                 runtime_readiness_manager.clone(),
@@ -162,14 +214,38 @@ impl SandboxdState {
                 runtime_env.clone(),
                 clock.clone(),
                 sleeper.clone(),
+                supervisor_handle.clone(),
             )
             .map_err(|error| SandboxdStateError::StartTunnelSession(error.to_string()))?,
         );
+        let codex_coordination_shutdown_requested = Arc::new(AtomicBool::new(false));
+        let codex_coordination_thread = match (
+            codex_app_server_control_handle.clone(),
+            codex_proxy_control_handle.clone(),
+        ) {
+            (Some(codex_app_server_control_handle), Some(codex_proxy_control_handle)) => {
+                Some(spawn_codex_coordination_thread(
+                    codex_app_server_control_handle,
+                    codex_proxy_control_handle,
+                    supervisor_handle.clone(),
+                    codex_coordination_shutdown_requested.clone(),
+                ))
+            }
+            _ => None,
+        };
 
         Ok(Self {
             egress_proxy,
             process_manager,
             runtime_adapters,
+            codex_app_server_observation_handle,
+            codex_app_server_control_handle,
+            codex_proxy_control_handle,
+            codex_coordination_shutdown_requested,
+            codex_coordination_thread,
+            runtime_readiness_shutdown_requested,
+            runtime_readiness_thread,
+            supervisor_handle,
             keepalive_manager,
             runtime_readiness_manager,
             agent_endpoint_url,
@@ -186,15 +262,23 @@ impl SandboxdState {
             tunnel_session.close();
         }
 
+        let agent_endpoint_url =
+            if let Some(codex_proxy_control_handle) = &self.codex_proxy_control_handle {
+                Some(codex_proxy_control_handle.listen_url().to_string())
+            } else {
+                self.agent_endpoint_url.clone()
+            };
+
         self.tunnel_session = Some(
-            TunnelSession::start(
+            TunnelSession::start_with_supervisor(
                 startup_input,
                 self.keepalive_manager.clone(),
                 self.runtime_readiness_manager.clone(),
-                self.agent_endpoint_url.clone(),
+                agent_endpoint_url,
                 self.runtime_env.clone(),
                 self.clock.clone(),
                 self.sleeper.clone(),
+                self.supervisor_handle.clone(),
             )
             .map_err(|error| SandboxdStateError::StartTunnelSession(error.to_string()))?,
         );
@@ -206,6 +290,16 @@ impl SandboxdState {
     pub fn close(mut self) -> Result<(), SandboxdStateError> {
         if let Some(tunnel_session) = self.tunnel_session.take() {
             tunnel_session.close();
+        }
+        self.codex_coordination_shutdown_requested
+            .store(true, Ordering::Relaxed);
+        if let Some(codex_coordination_thread) = self.codex_coordination_thread.take() {
+            let _ = codex_coordination_thread.join();
+        }
+        self.runtime_readiness_shutdown_requested
+            .store(true, Ordering::Relaxed);
+        if let Some(runtime_readiness_thread) = self.runtime_readiness_thread.take() {
+            let _ = runtime_readiness_thread.join();
         }
         self.runtime_adapters
             .close()
@@ -225,6 +319,225 @@ impl SandboxdState {
 
         Ok(())
     }
+
+    /// Returns the current in-memory health snapshot for this initialized daemon.
+    pub fn health_snapshot(&self) -> SandboxdHealthSnapshot {
+        self.supervisor_handle.snapshot()
+    }
+
+    /// Returns a cloneable handle to the shared supervision state.
+    pub fn supervisor_handle(&self) -> SandboxdSupervisorHandle {
+        self.supervisor_handle.clone()
+    }
+
+    pub fn codex_app_server_observation_handle(&self) -> Option<&CodexAppServerObservationHandle> {
+        self.codex_app_server_observation_handle.as_ref()
+    }
+
+    pub fn codex_app_server_control_handle(&self) -> Option<&CodexAppServerControlHandle> {
+        self.codex_app_server_control_handle.as_ref()
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    pub fn force_egress_proxy_shutdown_for_test(&self) -> Result<(), String> {
+        let egress_proxy = self
+            .egress_proxy
+            .as_ref()
+            .ok_or_else(|| "egress proxy is not running for this sandbox".to_string())?;
+        egress_proxy
+            .force_current_server_shutdown_for_test()
+            .map_err(|error| error.to_string())
+    }
+}
+
+const CODEX_COORDINATION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+const CODEX_PROXY_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const RUNTIME_READINESS_PROJECTION_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(100);
+
+fn determine_runtime_readiness_mode(
+    supervisor_handle: &SandboxdSupervisorHandle,
+) -> RuntimeReadinessMode {
+    if supervisor_handle.tracks_component(SupervisedComponent::CodexAppServer) {
+        RuntimeReadinessMode::Codex
+    } else if supervisor_handle.tracks_component(SupervisedComponent::CodexProxy) {
+        RuntimeReadinessMode::CodexProxyOnly
+    } else {
+        RuntimeReadinessMode::NoAgentRuntime
+    }
+}
+
+fn sync_runtime_readiness_from_snapshot(
+    supervisor_handle: &SandboxdSupervisorHandle,
+    runtime_readiness_manager: &Arc<Mutex<RuntimeReadinessManager>>,
+    runtime_readiness_mode: RuntimeReadinessMode,
+) {
+    let ready = derive_runtime_ready(&supervisor_handle.snapshot(), runtime_readiness_mode);
+    runtime_readiness_manager
+        .lock()
+        .expect("runtime readiness manager lock should not be poisoned")
+        .set_ready(ready);
+}
+
+fn spawn_runtime_readiness_projection_thread(
+    supervisor_handle: SandboxdSupervisorHandle,
+    runtime_readiness_manager: Arc<Mutex<RuntimeReadinessManager>>,
+    runtime_readiness_mode: RuntimeReadinessMode,
+    shutdown_requested: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        run_runtime_readiness_projection_loop(
+            supervisor_handle,
+            runtime_readiness_manager,
+            runtime_readiness_mode,
+            shutdown_requested,
+        );
+    })
+}
+
+fn run_runtime_readiness_projection_loop(
+    supervisor_handle: SandboxdSupervisorHandle,
+    runtime_readiness_manager: Arc<Mutex<RuntimeReadinessManager>>,
+    runtime_readiness_mode: RuntimeReadinessMode,
+    shutdown_requested: Arc<AtomicBool>,
+) {
+    let mut last_projected_ready = None;
+
+    while !shutdown_requested.load(Ordering::Relaxed) {
+        let projected_ready =
+            derive_runtime_ready(&supervisor_handle.snapshot(), runtime_readiness_mode);
+        if last_projected_ready != Some(projected_ready) {
+            runtime_readiness_manager
+                .lock()
+                .expect("runtime readiness manager lock should not be poisoned")
+                .set_ready(projected_ready);
+            last_projected_ready = Some(projected_ready);
+        }
+        thread::sleep(RUNTIME_READINESS_PROJECTION_POLL_INTERVAL);
+    }
+}
+
+fn spawn_codex_coordination_thread(
+    codex_app_server_control_handle: CodexAppServerControlHandle,
+    codex_proxy_control_handle: CodexProxyControlHandle,
+    supervisor_handle: SandboxdSupervisorHandle,
+    shutdown_requested: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        run_codex_coordination_loop(
+            codex_app_server_control_handle,
+            codex_proxy_control_handle,
+            supervisor_handle,
+            shutdown_requested,
+        );
+    })
+}
+
+fn run_codex_coordination_loop(
+    codex_app_server_control_handle: CodexAppServerControlHandle,
+    codex_proxy_control_handle: CodexProxyControlHandle,
+    supervisor_handle: SandboxdSupervisorHandle,
+    shutdown_requested: Arc<AtomicBool>,
+) {
+    while !shutdown_requested.load(Ordering::Relaxed) {
+        let codex_app_server_snapshot =
+            supervisor_handle.component_snapshot(SupervisedComponent::CodexAppServer);
+        let Some(codex_app_server_snapshot) = codex_app_server_snapshot else {
+            break;
+        };
+        if codex_app_server_snapshot.state != crate::supervision::ComponentHealthState::Restarting {
+            thread::sleep(CODEX_COORDINATION_POLL_INTERVAL);
+            continue;
+        }
+
+        let restart_reason = if codex_app_server_snapshot
+            .details
+            .get("livenessState")
+            .is_some_and(|liveness_state| liveness_state == "Exited")
+        {
+            "coordinated_restart_after_exit"
+        } else {
+            "coordinated_restart_after_readiness_failure"
+        };
+        supervisor_handle.emit_component_restart_scheduled(
+            SupervisedComponent::CodexAppServer,
+            restart_reason,
+            0,
+            &[],
+        );
+
+        if codex_app_server_control_handle
+            .restart(&crate::time::SystemClock, &crate::time::ThreadSleeper)
+            .is_ok()
+            && !wait_for_codex_proxy_recovery(
+                &codex_proxy_control_handle,
+                CODEX_PROXY_RECOVERY_TIMEOUT,
+                shutdown_requested.as_ref(),
+            )
+        {
+            let _ = codex_proxy_control_handle.request_restart();
+            let _ = wait_for_codex_proxy_recovery(
+                &codex_proxy_control_handle,
+                CODEX_PROXY_RECOVERY_TIMEOUT,
+                shutdown_requested.as_ref(),
+            );
+        }
+        thread::sleep(CODEX_COORDINATION_POLL_INTERVAL);
+    }
+}
+
+fn wait_for_codex_proxy_recovery(
+    codex_proxy_control_handle: &CodexProxyControlHandle,
+    timeout: std::time::Duration,
+    shutdown_requested: &AtomicBool,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if shutdown_requested.load(Ordering::Relaxed) {
+            return false;
+        }
+        if let Some(snapshot) = codex_proxy_control_handle.snapshot() {
+            let raw_connectivity_connected = snapshot
+                .details
+                .get("rawConnectivityState")
+                .is_some_and(|state| state == "Connected");
+            let session_manager_connected = snapshot
+                .details
+                .get("sessionManagerState")
+                .is_some_and(|state| state == "Connected");
+            if snapshot.state == crate::supervision::ComponentHealthState::Healthy
+                && raw_connectivity_connected
+                && session_manager_connected
+            {
+                return true;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(CODEX_COORDINATION_POLL_INTERVAL);
+    }
+}
+
+fn collect_tracked_components(
+    runtime_plan: &runtime::CompiledRuntimePlan,
+) -> BTreeSet<SupervisedComponent> {
+    let mut tracked_components = BTreeSet::from([SupervisedComponent::TunnelSession]);
+
+    if !runtime_plan.egress_routes.is_empty() {
+        tracked_components.insert(SupervisedComponent::EgressProxy);
+    }
+
+    if runtime_plan
+        .agent_runtimes
+        .iter()
+        .any(|agent_runtime| agent_runtime.runtime_id == "codex")
+    {
+        tracked_components.insert(SupervisedComponent::CodexProxy);
+        tracked_components.insert(SupervisedComponent::CodexAppServer);
+    }
+
+    tracked_components
 }
 
 fn resolve_tokenizer_proxy_egress_base_url() -> Result<String, SandboxdStateError> {
@@ -419,15 +732,30 @@ fn join_url_path(base_path: &str, suffix_path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::net::TcpListener;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+    use crate::codex_proxy::start_codex_proxy_with_supervisor;
+    use crate::keepalive::KeepaliveManager;
+    use crate::process::start_runtime_client_process_manager_with_supervisor;
     use crate::protocol::startup::{StartupInput, StartupMode};
+    use crate::runtime::readiness::{RuntimeReadinessManager, RuntimeReadinessMode};
     use crate::runtime::{
         CompiledRuntimePlan, RuntimeClient, RuntimeClientEndpoint, RuntimeClientEndpointTransport,
         RuntimeClientProcess, RuntimeClientProcessReadiness, RuntimeClientProcessStopPolicy,
         RuntimeClientProcessStopSignal, RuntimeClientSetup, RuntimeClientSetupFile,
+        RuntimeExecCommand,
     };
-    use crate::sandboxd_state::{apply_runtime_startup_overrides, collect_runtime_environment};
+    use crate::sandboxd_state::{
+        apply_runtime_startup_overrides, collect_runtime_environment,
+        spawn_codex_coordination_thread, spawn_runtime_readiness_projection_thread,
+    };
+    use crate::supervision::{ComponentHealthState, SandboxdSupervisorHandle, SupervisedComponent};
+    use crate::time::{SystemClock, ThreadSleeper};
 
     #[test]
     fn preserves_codex_runtime_client_config_while_rewriting_workspace_sources() {
@@ -813,5 +1141,387 @@ supports_websockets = false
             error,
             "runtime plan artifacts define conflicting values for env 'GH_TOKEN'"
         );
+    }
+
+    #[test]
+    fn coordinated_codex_recovery_restarts_the_raw_app_server_and_recovers_the_proxy() {
+        let raw_port = reserve_test_port();
+        let proxy_port = reserve_test_port();
+        let marker_path = std::env::temp_dir().join(format!(
+            "mistle-codex-exit-once-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let process_spec = crate::process::RuntimeClientProcessSpec {
+            process_key: "codex-app-server".to_string(),
+            command: RuntimeExecCommand {
+                args: vec![
+                    "node".to_string(),
+                    "-e".to_string(),
+                    codex_raw_app_server_script().to_string(),
+                    raw_port.to_string(),
+                    "exit_once".to_string(),
+                    "250".to_string(),
+                    marker_path.display().to_string(),
+                ],
+                env: Some(BTreeMap::new()),
+                cwd: None,
+                timeout_ms: None,
+            },
+            readiness: RuntimeClientProcessReadiness::Ws {
+                url: format!("ws://127.0.0.1:{raw_port}/health"),
+                timeout_ms: 5_000,
+            },
+            stop: RuntimeClientProcessStopPolicy {
+                signal: RuntimeClientProcessStopSignal::Sigkill,
+                timeout_ms: 1_000,
+                grace_period_ms: None,
+            },
+        };
+        let supervisor_handle = SandboxdSupervisorHandle::new(
+            "sandbox-123",
+            Arc::new(SystemClock),
+            BTreeSet::from([
+                SupervisedComponent::CodexAppServer,
+                SupervisedComponent::CodexProxy,
+            ]),
+        );
+        let process_manager = start_runtime_client_process_manager_with_supervisor(
+            std::slice::from_ref(&process_spec),
+            &SystemClock,
+            &ThreadSleeper,
+            supervisor_handle.clone(),
+        )
+        .expect("process manager should start");
+        let codex_app_server_control_handle = process_manager
+            .codex_app_server_control_handle()
+            .expect("Codex app-server control handle should exist")
+            .clone();
+        let codex_proxy = start_codex_proxy_with_supervisor(
+            &format!("ws://127.0.0.1:{proxy_port}"),
+            &format!("ws://127.0.0.1:{raw_port}/raw"),
+            Arc::new(Mutex::new(KeepaliveManager::default())),
+            Arc::new(Mutex::new(RuntimeReadinessManager::default())),
+            supervisor_handle.clone(),
+        )
+        .expect("Codex proxy should start");
+        let shutdown_requested = Arc::new(AtomicBool::new(false));
+        let coordination_thread = spawn_codex_coordination_thread(
+            codex_app_server_control_handle,
+            codex_proxy.control_handle(),
+            supervisor_handle.clone(),
+            shutdown_requested.clone(),
+        );
+
+        wait_for_component_state(
+            &supervisor_handle,
+            SupervisedComponent::CodexAppServer,
+            ComponentHealthState::Healthy,
+            1,
+            Duration::from_secs(10),
+        );
+        wait_for_codex_proxy_connected(&supervisor_handle, Duration::from_secs(10));
+
+        let codex_app_server_snapshot = supervisor_handle
+            .component_snapshot(SupervisedComponent::CodexAppServer)
+            .expect("Codex app-server should be tracked");
+        assert_eq!(
+            codex_app_server_snapshot.state,
+            ComponentHealthState::Healthy
+        );
+        assert_eq!(
+            codex_app_server_snapshot.details.get("livenessState"),
+            Some(&"Alive".to_string())
+        );
+
+        shutdown_requested.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = coordination_thread.join();
+        codex_proxy
+            .close()
+            .expect("Codex proxy close should succeed");
+        process_manager
+            .stop(&SystemClock, &ThreadSleeper)
+            .expect("process manager stop should succeed");
+        let _ = std::fs::remove_file(marker_path);
+    }
+
+    #[test]
+    fn runtime_readiness_projection_tracks_codex_component_health() {
+        let supervisor_handle = SandboxdSupervisorHandle::new(
+            "sandbox-123",
+            Arc::new(SystemClock),
+            BTreeSet::from([
+                SupervisedComponent::CodexProxy,
+                SupervisedComponent::CodexAppServer,
+            ]),
+        );
+        let runtime_readiness_manager = Arc::new(Mutex::new(RuntimeReadinessManager::default()));
+        let shutdown_requested = Arc::new(AtomicBool::new(false));
+        let projection_thread = spawn_runtime_readiness_projection_thread(
+            supervisor_handle.clone(),
+            runtime_readiness_manager.clone(),
+            RuntimeReadinessMode::Codex,
+            shutdown_requested.clone(),
+        );
+
+        wait_for_runtime_ready_value(&runtime_readiness_manager, false, Duration::from_secs(5));
+
+        supervisor_handle.mark_component_starting(SupervisedComponent::CodexProxy);
+        supervisor_handle.replace_component_details(
+            SupervisedComponent::CodexProxy,
+            BTreeMap::from([
+                (
+                    "sessionManagerState".to_string(),
+                    "Connected".to_string(),
+                ),
+                (
+                    "rawConnectivityState".to_string(),
+                    "Connected".to_string(),
+                ),
+            ]),
+        );
+        supervisor_handle.mark_component_healthy(SupervisedComponent::CodexProxy);
+        supervisor_handle.mark_component_starting(SupervisedComponent::CodexAppServer);
+        supervisor_handle.mark_component_healthy(SupervisedComponent::CodexAppServer);
+        wait_for_runtime_ready_value(&runtime_readiness_manager, true, Duration::from_secs(5));
+
+        supervisor_handle
+            .mark_component_restarting(SupervisedComponent::CodexProxy, "proxy restart");
+        wait_for_runtime_ready_value(&runtime_readiness_manager, false, Duration::from_secs(5));
+
+        shutdown_requested.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = projection_thread.join();
+    }
+
+    fn reserve_test_port() -> u16 {
+        let listener =
+            TcpListener::bind(("127.0.0.1", 0)).expect("test listener should bind to loopback");
+        let address = listener
+            .local_addr()
+            .expect("test listener should expose its bound address");
+        drop(listener);
+        address.port()
+    }
+
+    fn wait_for_component_state(
+        supervisor_handle: &SandboxdSupervisorHandle,
+        component: SupervisedComponent,
+        expected_state: ComponentHealthState,
+        expected_restart_count: u64,
+        timeout: Duration,
+    ) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let snapshot = supervisor_handle
+                .component_snapshot(component)
+                .expect("component should be tracked");
+            if snapshot.state == expected_state && snapshot.restart_count >= expected_restart_count
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "expected {component:?} to reach state {expected_state:?} with restart_count >= {expected_restart_count}, got {snapshot:?}"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    fn wait_for_codex_proxy_connected(
+        supervisor_handle: &SandboxdSupervisorHandle,
+        timeout: Duration,
+    ) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let snapshot = supervisor_handle
+                .component_snapshot(SupervisedComponent::CodexProxy)
+                .expect("Codex proxy should be tracked");
+            let raw_connected = snapshot
+                .details
+                .get("rawConnectivityState")
+                .is_some_and(|state| state == "Connected");
+            let session_manager_connected = snapshot
+                .details
+                .get("sessionManagerState")
+                .is_some_and(|state| state == "Connected");
+            if snapshot.state == ComponentHealthState::Healthy
+                && raw_connected
+                && session_manager_connected
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "expected Codex proxy to reconnect cleanly, got {snapshot:?}"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    fn wait_for_runtime_ready_value(
+        runtime_readiness_manager: &Arc<Mutex<RuntimeReadinessManager>>,
+        expected_ready: bool,
+        timeout: Duration,
+    ) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let ready = runtime_readiness_manager
+                .lock()
+                .expect("runtime readiness manager lock should not be poisoned")
+                .ready();
+            if ready == expected_ready {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "expected runtime readiness to become {expected_ready}, got {ready}"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    fn codex_raw_app_server_script() -> &'static str {
+        r#"
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const net = require('node:net');
+
+const [portArg, mode, delayArg, markerPath] = process.argv.slice(1);
+const port = Number(portArg);
+const delayMs = Number(delayArg);
+const keepAlive = setInterval(() => {}, 1000);
+
+function websocketFrame(payload) {
+  const body = Buffer.from(payload, 'utf8');
+  const header = body.length < 126 ? Buffer.from([0x81, body.length]) : Buffer.from([0x81, 126, body.length >> 8, body.length & 0xff]);
+  return Buffer.concat([header, body]);
+}
+
+function tryReadFrame(buffer) {
+  if (buffer.length < 2) {
+    return null;
+  }
+  const secondByte = buffer[1];
+  const masked = (secondByte & 0x80) !== 0;
+  let length = secondByte & 0x7f;
+  let offset = 2;
+  if (length === 126) {
+    if (buffer.length < 4) {
+      return null;
+    }
+    length = buffer.readUInt16BE(2);
+    offset = 4;
+  }
+  const maskLength = masked ? 4 : 0;
+  if (buffer.length < offset + maskLength + length) {
+    return null;
+  }
+  const mask = masked ? buffer.subarray(offset, offset + 4) : null;
+  offset += maskLength;
+  const payload = buffer.subarray(offset, offset + length);
+  const unmasked = Buffer.alloc(payload.length);
+  for (let index = 0; index < payload.length; index += 1) {
+    unmasked[index] = masked ? payload[index] ^ mask[index % 4] : payload[index];
+  }
+  return {
+    text: unmasked.toString('utf8'),
+    consumed: offset + length,
+  };
+}
+
+const server = net.createServer((socket) => {
+  let handshake = Buffer.alloc(0);
+  let websocketReady = false;
+  let frameBuffer = Buffer.alloc(0);
+
+  socket.on('data', (chunk) => {
+    if (!websocketReady) {
+      handshake = Buffer.concat([handshake, chunk]);
+      const headerEnd = handshake.indexOf('\r\n\r\n');
+      if (headerEnd === -1) {
+        return;
+      }
+      const headerText = handshake.subarray(0, headerEnd).toString('utf8');
+      const [requestLine, ...headerLines] = headerText.split('\r\n');
+      const [, path] = requestLine.split(' ');
+      const headers = new Map();
+      for (const line of headerLines) {
+        const separator = line.indexOf(':');
+        if (separator === -1) {
+          continue;
+        }
+        headers.set(line.slice(0, separator).trim().toLowerCase(), line.slice(separator + 1).trim());
+      }
+      const key = headers.get('sec-websocket-key');
+      const accept = crypto
+        .createHash('sha1')
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest('base64');
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Connection: Upgrade\r\n' +
+        'Upgrade: websocket\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n` +
+        '\r\n',
+      );
+      if (path === '/health') {
+        socket.end();
+        return;
+      }
+      websocketReady = true;
+      frameBuffer = handshake.subarray(headerEnd + 4);
+      handshake = Buffer.alloc(0);
+    } else {
+      frameBuffer = Buffer.concat([frameBuffer, chunk]);
+    }
+
+    while (true) {
+      const frame = tryReadFrame(frameBuffer);
+      if (!frame) {
+        break;
+      }
+      frameBuffer = frameBuffer.subarray(frame.consumed);
+      const message = JSON.parse(frame.text);
+      if (message.method === 'initialize') {
+        socket.write(websocketFrame(JSON.stringify({ id: message.id, result: {} })));
+        continue;
+      }
+      if (message.method === 'thread/loaded/list') {
+        socket.write(websocketFrame(JSON.stringify({ id: message.id, result: { data: [] } })));
+        continue;
+      }
+      if (message.method === 'thread/read') {
+        socket.write(
+          websocketFrame(
+            JSON.stringify({
+              id: message.id,
+              result: {
+                thread: {
+                  id: message.params.threadId,
+                  status: { type: 'idle' },
+                },
+              },
+            }),
+          ),
+        );
+      }
+    }
+  });
+});
+
+server.listen(port, '127.0.0.1', () => {
+  if (mode === 'exit_once' && !fs.existsSync(markerPath)) {
+    setTimeout(() => {
+      fs.writeFileSync(markerPath, 'done');
+      server.close(() => {
+        clearInterval(keepAlive);
+        process.exit(0);
+      });
+    }, delayMs);
+  }
+});
+"#
     }
 }
