@@ -135,6 +135,8 @@ export type GitHubRepository = {
 };
 
 export type GitHubWebhookAutomationConversation = {
+  automationRunId: string;
+  automationInstructionsSnapshot: string | null;
   issueNumber: number;
   payloadMarker: string;
   expectedInputSubstring: string;
@@ -667,6 +669,101 @@ function hasPersistedUserMessageText(input: {
   return false;
 }
 
+function hasAssistantMessageText(input: {
+  threadReadResult: unknown;
+  expectedSubstring: string;
+}): boolean {
+  return collectAssistantMessageTexts(input.threadReadResult).some((text) =>
+    text.includes(input.expectedSubstring),
+  );
+}
+
+function collectAssistantMessageTexts(threadReadResult: unknown): string[] {
+  const assistantTexts: string[] = [];
+
+  if (!isRecord(threadReadResult)) {
+    throw new Error("thread/read result must be an object.");
+  }
+
+  const thread = threadReadResult.thread;
+  if (!isRecord(thread) || !Array.isArray(thread.turns)) {
+    throw new Error("thread/read result.thread.turns must be an array.");
+  }
+
+  for (let turnIndex = thread.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const turn = thread.turns[turnIndex];
+    if (!isRecord(turn) || !Array.isArray(turn.items)) {
+      continue;
+    }
+
+    for (let itemIndex = turn.items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+      const item = turn.items[itemIndex];
+      if (!isRecord(item) || item.type !== "assistantMessage" || !Array.isArray(item.content)) {
+        continue;
+      }
+
+      for (const contentItem of item.content) {
+        if (!isRecord(contentItem)) {
+          continue;
+        }
+
+        if (contentItem.type !== "text" || typeof contentItem.text !== "string") {
+          continue;
+        }
+
+        assistantTexts.push(contentItem.text);
+      }
+    }
+  }
+
+  return assistantTexts;
+}
+
+export async function waitForCodexAssistantMessageText(input: {
+  rpcClient: CodexJsonRpcClient;
+  threadId: string;
+  expectedSubstring: string;
+  timeoutMs: number;
+}): Promise<CodexThreadReadResult> {
+  let lastAssistantTexts: string[] = [];
+
+  try {
+    return await waitForCondition({
+      description: `Codex assistant message containing '${input.expectedSubstring}'`,
+      timeoutMs: input.timeoutMs,
+      evaluate: async () => {
+        const result = await readCodexThread({
+          rpcClient: input.rpcClient,
+          threadId: input.threadId,
+        });
+
+        lastAssistantTexts = collectAssistantMessageTexts(result.response);
+
+        return hasAssistantMessageText({
+          threadReadResult: result.response,
+          expectedSubstring: input.expectedSubstring,
+        })
+          ? result
+          : null;
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Timed out waiting for ")) {
+      const recentAssistantTexts = lastAssistantTexts
+        .slice(0, 3)
+        .map((text) => JSON.stringify(text))
+        .join(", ");
+      const suffix =
+        recentAssistantTexts.length === 0
+          ? " No assistant text messages were observed."
+          : ` Recent assistant texts: ${recentAssistantTexts}`;
+      throw new Error(`${error.message}${suffix}`);
+    }
+
+    throw error;
+  }
+}
+
 async function createOpenAiConnection(input: {
   fixture: SystemTestFixture;
   session: AuthenticatedSession;
@@ -954,6 +1051,7 @@ async function createWebhookAutomation(input: {
   githubWebhookSource: GitHubWebhookSource;
   sandboxProfileId: string;
   payloadMarker: string;
+  instructions?: string;
 }): Promise<void> {
   const automation = await requestJsonOrThrow({
     request: input.fixture.request,
@@ -980,6 +1078,7 @@ async function createWebhookAutomation(input: {
           },
         },
         inputTemplate: "GitHub issue comment webhook: {{payload.comment.body}}",
+        instructions: input.instructions ?? null,
         conversationKeyTemplate: "github-issue-{{payload.issue.number}}",
         idempotencyKeyTemplate: "{{webhookEvent.externalDeliveryId}}",
         target: {
@@ -997,6 +1096,7 @@ async function createWebhookAutomation(input: {
 
 export async function startGitHubWebhookAutomationConversation(input: {
   fixture: SystemTestFixture;
+  automationInstructions?: string;
 }): Promise<GitHubWebhookAutomationConversation> {
   const repository = parseGitHubRepository(
     requireGitHubWebhookAutomationEnv("MISTLE_TEST_GITHUB_TEST_REPOSITORY"),
@@ -1170,6 +1270,9 @@ export async function startGitHubWebhookAutomationConversation(input: {
       githubWebhookSource,
       sandboxProfileId,
       payloadMarker,
+      ...(input.automationInstructions === undefined
+        ? {}
+        : { instructions: input.automationInstructions }),
     });
 
     originalGitHubAppWebhookConfig = await readGitHubAppWebhookConfig();
@@ -1421,6 +1524,8 @@ export async function startGitHubWebhookAutomationConversation(input: {
     }
 
     return {
+      automationRunId: automationRun.id,
+      automationInstructionsSnapshot: automationRun.instructions,
       issueNumber,
       payloadMarker,
       expectedInputSubstring,

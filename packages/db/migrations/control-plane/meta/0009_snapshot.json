@@ -1,6 +1,6 @@
 {
-  "id": "3da7ce04-9bf5-4f2c-ac44-fada93464de0",
-  "prevId": "e647dd96-2ca8-4aaa-8a88-ead9c4ea63e6",
+  "id": "f4d7dd75-ea82-4f95-9596-66a65f0166e6",
+  "prevId": "3da7ce04-9bf5-4f2c-ac44-fada93464de0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -859,6 +859,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "instructions": {
+          "name": "instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -1371,6 +1377,264 @@
           "columns": ["connection_id", "slot_key"]
         }
       },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "control_plane.integration_connection_device_authorization_attempts": {
+      "name": "integration_connection_device_authorization_attempts",
+      "schema": "control_plane",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_key": {
+          "name": "target_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_method_id": {
+          "name": "connection_method_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "provider_state_encrypted": {
+          "name": "provider_state_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verification_url": {
+          "name": "verification_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_code": {
+          "name": "user_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "poll_after_at": {
+          "name": "poll_after_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelled_at": {
+          "name": "cancelled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "int_conn_dev_auth_attempts_org_idx": {
+          "name": "int_conn_dev_auth_attempts_org_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "int_conn_dev_auth_attempts_org_target_idx": {
+          "name": "int_conn_dev_auth_attempts_org_target_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "target_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "int_conn_dev_auth_attempts_org_status_idx": {
+          "name": "int_conn_dev_auth_attempts_org_status_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "int_conn_dev_auth_attempts_expires_at_idx": {
+          "name": "int_conn_dev_auth_attempts_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "int_conn_dev_auth_attempts_poll_after_at_idx": {
+          "name": "int_conn_dev_auth_attempts_poll_after_at_idx",
+          "columns": [
+            {
+              "expression": "poll_after_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "int_conn_dev_auth_attempts_connection_id_idx": {
+          "name": "int_conn_dev_auth_attempts_connection_id_idx",
+          "columns": [
+            {
+              "expression": "connection_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "integration_connection_device_authorization_attempts_organization_id_organizations_id_fk": {
+          "name": "integration_connection_device_authorization_attempts_organization_id_organizations_id_fk",
+          "tableFrom": "integration_connection_device_authorization_attempts",
+          "tableTo": "organizations",
+          "schemaTo": "control_plane",
+          "columnsFrom": ["organization_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "integration_connection_device_authorization_attempts_target_key_integration_targets_target_key_fk": {
+          "name": "integration_connection_device_authorization_attempts_target_key_integration_targets_target_key_fk",
+          "tableFrom": "integration_connection_device_authorization_attempts",
+          "tableTo": "integration_targets",
+          "schemaTo": "control_plane",
+          "columnsFrom": ["target_key"],
+          "columnsTo": ["target_key"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "integration_connection_device_authorization_attempts_connection_id_integration_connections_id_fk": {
+          "name": "integration_connection_device_authorization_attempts_connection_id_integration_connections_id_fk",
+          "tableFrom": "integration_connection_device_authorization_attempts",
+          "tableTo": "integration_connections",
+          "schemaTo": "control_plane",
+          "columnsFrom": ["connection_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -4139,6 +4403,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "instructions": {
+          "name": "instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "conversation_key_template": {
           "name": "conversation_key_template",
           "type": "text",
@@ -4217,264 +4487,6 @@
           "columnsFrom": ["integration_webhook_source_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "control_plane.integration_connection_device_authorization_attempts": {
-      "name": "integration_connection_device_authorization_attempts",
-      "schema": "control_plane",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target_key": {
-          "name": "target_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "connection_method_id": {
-          "name": "connection_method_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "display_name": {
-          "name": "display_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "provider_state_encrypted": {
-          "name": "provider_state_encrypted",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "verification_url": {
-          "name": "verification_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_code": {
-          "name": "user_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "poll_after_at": {
-          "name": "poll_after_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "connection_id": {
-          "name": "connection_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_code": {
-          "name": "error_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_message": {
-          "name": "error_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_at": {
-          "name": "cancelled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "int_conn_dev_auth_attempts_org_idx": {
-          "name": "int_conn_dev_auth_attempts_org_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "int_conn_dev_auth_attempts_org_target_idx": {
-          "name": "int_conn_dev_auth_attempts_org_target_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "target_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "int_conn_dev_auth_attempts_org_status_idx": {
-          "name": "int_conn_dev_auth_attempts_org_status_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "int_conn_dev_auth_attempts_expires_at_idx": {
-          "name": "int_conn_dev_auth_attempts_expires_at_idx",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "int_conn_dev_auth_attempts_poll_after_at_idx": {
-          "name": "int_conn_dev_auth_attempts_poll_after_at_idx",
-          "columns": [
-            {
-              "expression": "poll_after_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "int_conn_dev_auth_attempts_connection_id_idx": {
-          "name": "int_conn_dev_auth_attempts_connection_id_idx",
-          "columns": [
-            {
-              "expression": "connection_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "integration_connection_device_authorization_attempts_organization_id_organizations_id_fk": {
-          "name": "integration_connection_device_authorization_attempts_organization_id_organizations_id_fk",
-          "tableFrom": "integration_connection_device_authorization_attempts",
-          "tableTo": "organizations",
-          "schemaTo": "control_plane",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "integration_connection_device_authorization_attempts_target_key_integration_targets_target_key_fk": {
-          "name": "integration_connection_device_authorization_attempts_target_key_integration_targets_target_key_fk",
-          "tableFrom": "integration_connection_device_authorization_attempts",
-          "tableTo": "integration_targets",
-          "schemaTo": "control_plane",
-          "columnsFrom": ["target_key"],
-          "columnsTo": ["target_key"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "integration_connection_device_authorization_attempts_connection_id_integration_connections_id_fk": {
-          "name": "integration_connection_device_authorization_attempts_connection_id_integration_connections_id_fk",
-          "tableFrom": "integration_connection_device_authorization_attempts",
-          "tableTo": "integration_connections",
-          "schemaTo": "control_plane",
-          "columnsFrom": ["connection_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

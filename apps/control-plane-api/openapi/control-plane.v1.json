@@ -290,6 +290,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "instructions": {
+                    "type": ["string", "null"],
+                    "minLength": 1
+                  },
                   "conversationKeyTemplate": {
                     "type": "string",
                     "minLength": 1
@@ -368,6 +372,10 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "instructions": {
+                      "type": ["string", "null"],
+                      "minLength": 1
+                    },
                     "conversationKeyTemplate": {
                       "type": "string",
                       "minLength": 1
@@ -413,6 +421,7 @@
                     "eventTypes",
                     "payloadFilter",
                     "inputTemplate",
+                    "instructions",
                     "conversationKeyTemplate",
                     "idempotencyKeyTemplate",
                     "target",
@@ -574,6 +583,10 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "instructions": {
+                      "type": ["string", "null"],
+                      "minLength": 1
+                    },
                     "conversationKeyTemplate": {
                       "type": "string",
                       "minLength": 1
@@ -619,6 +632,7 @@
                     "eventTypes",
                     "payloadFilter",
                     "inputTemplate",
+                    "instructions",
                     "conversationKeyTemplate",
                     "idempotencyKeyTemplate",
                     "target",
@@ -768,6 +782,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "instructions": {
+                    "type": ["string", "null"],
+                    "minLength": 1
+                  },
                   "conversationKeyTemplate": {
                     "type": "string",
                     "minLength": 1
@@ -838,6 +856,10 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "instructions": {
+                      "type": ["string", "null"],
+                      "minLength": 1
+                    },
                     "conversationKeyTemplate": {
                       "type": "string",
                       "minLength": 1
@@ -883,6 +905,7 @@
                     "eventTypes",
                     "payloadFilter",
                     "inputTemplate",
+                    "instructions",
                     "conversationKeyTemplate",
                     "idempotencyKeyTemplate",
                     "target",

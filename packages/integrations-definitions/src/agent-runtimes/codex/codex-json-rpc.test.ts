@@ -443,6 +443,9 @@ describe("openai codex json-rpc client", () => {
           title: "Mistle Agent Client",
           version: "0.1.0",
         },
+        capabilities: {
+          experimentalApi: true,
+        },
       },
     });
     expect(JSON.parse(await server.initializedNotification)).toMatchObject({
