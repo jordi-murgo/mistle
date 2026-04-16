@@ -1,3 +1,4 @@
+import { ControlPlaneInternalClient } from "@mistle/control-plane-internal-client";
 import { createDataPlaneDatabase, type DataPlaneDatabase } from "@mistle/db/data-plane";
 import type { SandboxAdapter } from "@mistle/sandbox";
 import { Pool } from "pg";
@@ -16,6 +17,7 @@ export type AppRuntimeResources = {
   openWorkflow: ReturnType<typeof createDataPlaneOpenWorkflow>;
   runtimeStateReader: SandboxRuntimeStateReader;
   sandboxAdapter: SandboxAdapter;
+  controlPlaneInternalClient: ControlPlaneInternalClient;
 };
 
 export async function createAppResources(
@@ -31,6 +33,10 @@ export async function createAppResources(
   const runtimeStateReader = new GatewayHttpSandboxRuntimeStateReader({
     baseUrl: runtimeConfig.app.runtimeState.gatewayBaseUrl,
     serviceToken: runtimeConfig.internalAuthServiceToken,
+  });
+  const controlPlaneInternalClient = new ControlPlaneInternalClient({
+    baseUrl: runtimeConfig.app.controlPlaneApi.baseUrl,
+    internalAuthServiceToken: runtimeConfig.internalAuthServiceToken,
   });
   const sandboxAdapter = createSandboxRuntimeAdapter(runtimeConfig);
 
@@ -56,6 +62,7 @@ export async function createAppResources(
     openWorkflow: createDataPlaneOpenWorkflow({ backend: workflowBackend }),
     runtimeStateReader,
     sandboxAdapter,
+    controlPlaneInternalClient,
   };
 }
 
