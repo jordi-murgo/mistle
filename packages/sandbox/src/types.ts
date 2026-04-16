@@ -23,6 +23,29 @@ export interface SandboxPrepareStorageForStartRequest {
   readonly sandboxInstanceId: string;
 }
 
+export const SandboxAttachedStorageBackends = {
+  ARCHIL: "archil",
+} as const;
+export type SandboxAttachedStorageBackend =
+  (typeof SandboxAttachedStorageBackends)[keyof typeof SandboxAttachedStorageBackends];
+
+export interface SandboxAttachedArchilStorage {
+  readonly backend: typeof SandboxAttachedStorageBackends.ARCHIL;
+  readonly handle: string;
+  readonly region: string;
+  readonly credential: string;
+}
+
+export type SandboxAttachedStorage = SandboxAttachedArchilStorage;
+
+export interface SandboxCleanupArchilStorage {
+  readonly backend: typeof SandboxAttachedStorageBackends.ARCHIL;
+  readonly handle: string;
+  readonly region: string;
+}
+
+export type SandboxCleanupStorage = SandboxCleanupArchilStorage;
+
 export const SandboxStorageAttachLifecycles = {
   START: "start",
   RESUME: "resume",
@@ -48,11 +71,13 @@ export interface SandboxAttachStorageRequest {
   readonly sandboxInstanceId: string;
   readonly sandbox: SandboxHandle;
   readonly lifecycle: SandboxStorageAttachLifecycle;
+  readonly storage: SandboxAttachedStorage;
 }
 
 export interface SandboxCleanupStorageRequest {
   readonly sandboxInstanceId: string;
   readonly sandbox: SandboxHandle;
+  readonly storage: SandboxCleanupStorage;
   readonly lifecycle: SandboxStorageCleanupLifecycle;
   readonly timing: SandboxStorageCleanupTiming;
 }

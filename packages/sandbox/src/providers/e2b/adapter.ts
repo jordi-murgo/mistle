@@ -17,9 +17,14 @@ import {
   type SandboxStartRequest,
   type SandboxStopRequest,
 } from "../../types.js";
-import { E2BClientError, E2BClientErrorCodes } from "./client-errors.js";
+import { E2BClientError, E2BClientErrorCodes, E2BClientOperationIds } from "./client-errors.js";
 import type { E2BClient } from "./client.js";
+import { createE2BAttachStorageCommand, createE2BCleanupStorageCommand } from "./storage.js";
 import type { E2BSandboxInspectResult } from "./types.js";
+
+const ArchilMountTokenEnv = "ARCHIL_MOUNT_TOKEN";
+const E2BAttachStorageCommandTimeoutMs = 2 * 60 * 1000;
+const E2BCleanupStorageCommandTimeoutMs = 5 * 60 * 1000;
 
 function createSandboxHandle(sandboxId: string): SandboxHandle {
   return {
@@ -97,12 +102,41 @@ export class E2BSandboxAdapter implements SandboxAdapter {
     }
   }
 
-  async attachStorage(_request: SandboxAttachStorageRequest): Promise<void> {
-    return;
+  async attachStorage(request: SandboxAttachStorageRequest): Promise<void> {
+    await this.#client.runCommand({
+      sandboxId: request.sandbox.id,
+      command: createE2BAttachStorageCommand({
+        storage: request.storage,
+      }),
+      operation: E2BClientOperationIds.ATTACH_STORAGE,
+      commandDescription: "E2B sandbox storage attach command",
+      env: {
+        [ArchilMountTokenEnv]: request.storage.credential,
+      },
+      cwd: "/",
+      timeoutMs: E2BAttachStorageCommandTimeoutMs,
+      user: "root",
+    });
   }
 
-  async cleanupStorage(_request: SandboxCleanupStorageRequest): Promise<void> {
-    return;
+  async cleanupStorage(request: SandboxCleanupStorageRequest): Promise<void> {
+    const command = createE2BCleanupStorageCommand({
+      request,
+    });
+
+    if (command === null) {
+      return;
+    }
+
+    await this.#client.runCommand({
+      sandboxId: request.sandbox.id,
+      command,
+      operation: E2BClientOperationIds.CLEANUP_STORAGE,
+      commandDescription: "E2B sandbox storage cleanup command",
+      cwd: "/",
+      timeoutMs: E2BCleanupStorageCommandTimeoutMs,
+      user: "root",
+    });
   }
 
   async stop(request: SandboxStopRequest): Promise<void> {

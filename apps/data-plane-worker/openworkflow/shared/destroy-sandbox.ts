@@ -1,12 +1,16 @@
-import type { SandboxInstancePersistenceMode } from "@mistle/db/data-plane";
+import type { DataPlaneDatabase, SandboxInstancePersistenceMode } from "@mistle/db/data-plane";
 import type { SandboxAdapter, SandboxProvider } from "@mistle/sandbox";
 
 import type { DataPlaneWorkerRuntimeConfig } from "../core/config.js";
 import { cleanupSandboxStorage } from "./cleanup-sandbox-storage.js";
-import { throwSandboxTeardownOutcome } from "./teardown-outcome.js";
+import {
+  combineSandboxStorageCleanupErrors,
+  throwSandboxTeardownOutcome,
+} from "./teardown-outcome.js";
 
 export async function destroySandbox(
   ctx: {
+    db: DataPlaneDatabase;
     config: DataPlaneWorkerRuntimeConfig;
     sandboxAdapter: SandboxAdapter;
   },
@@ -23,20 +27,26 @@ export async function destroySandbox(
     );
   }
 
-  await cleanupSandboxStorage(
-    {
-      configuredSandboxProvider: ctx.config.sandbox.provider,
-      sandboxAdapter: ctx.sandboxAdapter,
-    },
-    {
-      sandboxInstanceId: input.sandboxInstanceId,
-      persistenceMode: input.persistenceMode,
-      runtimeProvider: input.runtimeProvider,
-      providerSandboxId: input.providerSandboxId,
-      lifecycle: "destroy",
-      timing: "before_compute_teardown",
-    },
-  );
+  let beforeComputeStorageCleanupError: unknown;
+  try {
+    await cleanupSandboxStorage(
+      {
+        db: ctx.db,
+        configuredSandboxProvider: ctx.config.sandbox.provider,
+        sandboxAdapter: ctx.sandboxAdapter,
+      },
+      {
+        sandboxInstanceId: input.sandboxInstanceId,
+        persistenceMode: input.persistenceMode,
+        runtimeProvider: input.runtimeProvider,
+        providerSandboxId: input.providerSandboxId,
+        lifecycle: "destroy",
+        timing: "before_compute_teardown",
+      },
+    );
+  } catch (error) {
+    beforeComputeStorageCleanupError = error;
+  }
 
   let destroyError: unknown;
   try {
@@ -47,10 +57,11 @@ export async function destroySandbox(
     destroyError = error;
   }
 
-  let storageCleanupError: unknown;
+  let afterComputeStorageCleanupError: unknown;
   try {
     await cleanupSandboxStorage(
       {
+        db: ctx.db,
         configuredSandboxProvider: ctx.config.sandbox.provider,
         sandboxAdapter: ctx.sandboxAdapter,
       },
@@ -64,12 +75,16 @@ export async function destroySandbox(
       },
     );
   } catch (error) {
-    storageCleanupError = error;
+    afterComputeStorageCleanupError = error;
   }
 
   throwSandboxTeardownOutcome({
     lifecycle: "destroy",
     computeTeardownError: destroyError,
-    storageCleanupError,
+    storageCleanupError: combineSandboxStorageCleanupErrors({
+      lifecycle: "destroy",
+      beforeComputeTeardownError: beforeComputeStorageCleanupError,
+      afterComputeTeardownError: afterComputeStorageCleanupError,
+    }),
   });
 }
