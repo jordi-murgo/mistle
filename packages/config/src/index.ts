@@ -1,6 +1,14 @@
-export { loadConfig } from "./loader.js";
+export { loadConfig, loadConfigSection } from "./loader.js";
 export { AppIds } from "./modules.js";
 export { readRepositoryVersion } from "./repository-version.js";
+export {
+  loadDataPlaneApiDatabaseEnv,
+  loadDataPlaneApiDatabaseToml,
+  loadDataPlaneApiWorkflowEnv,
+  loadDataPlaneApiWorkflowToml,
+  DataPlaneApiDatabaseConfigSchema,
+  DataPlaneApiWorkflowConfigSchema,
+} from "./apps/data-plane-api/index.js";
 export {
   deriveDashboardAuthMethods,
   type DashboardAuthMethodsConfig,
