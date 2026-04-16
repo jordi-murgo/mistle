@@ -216,6 +216,9 @@ endpoint = "https://s3.example.com"
 access_key_id = "replace-with-archil-mount-access-key-id"
 secret_access_key = "replace-with-archil-mount-secret-access-key"
 
+#[apps.data_plane_worker.sandbox_storage.docker_volume]
+#name_prefix = "mistle-"
+
 [apps.tokenizer_proxy.server]
 host = "0.0.0.0"
 port = 8085

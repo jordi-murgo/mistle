@@ -7,6 +7,7 @@ import {
   sandboxInstances,
   type DataPlaneDatabase,
 } from "@mistle/db/data-plane";
+import { SandboxProvider } from "@mistle/sandbox";
 import { StartSandboxInstanceWorkflowSpec } from "@mistle/workflow-registry/data-plane";
 import { typeid } from "typeid-js";
 import { z } from "zod";
@@ -59,13 +60,17 @@ function createSandboxInstanceId(): string {
 export function resolveSandboxInstancePersistenceMode(input: {
   organizationId: string;
   persistentSandboxesEnabled: boolean;
+  sandboxProvider: DataPlaneApiGlobalConfig["sandbox"]["provider"];
   configuredStorageBackend: DataPlaneApiSandboxStorageBackend;
 }): SandboxInstancePersistenceMode {
   if (!input.persistentSandboxesEnabled) {
     return SandboxInstancePersistenceModes.EPHEMERAL;
   }
 
-  if (input.configuredStorageBackend === "archil") {
+  if (
+    input.sandboxProvider === SandboxProvider.E2B &&
+    input.configuredStorageBackend === "archil"
+  ) {
     return SandboxInstancePersistenceModes.PERSISTENT;
   }
 
@@ -116,6 +121,7 @@ export async function startSandboxInstance(
   const persistenceMode = resolveSandboxInstancePersistenceMode({
     organizationId: input.organizationId,
     persistentSandboxesEnabled: storagePersistenceMode.persistentSandboxesEnabled,
+    sandboxProvider: ctx.sandboxProvider,
     configuredStorageBackend: ctx.sandboxStorageBackend,
   });
 
