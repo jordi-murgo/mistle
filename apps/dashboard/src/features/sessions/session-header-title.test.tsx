@@ -39,10 +39,12 @@ describe("SessionHeaderTitle", () => {
       title: "Investigate flaky title rendering",
     });
 
-    expect(screen.getByRole("textbox", { name: "Session title" })).toHaveProperty(
-      "value",
-      "Investigate flaky title rendering",
-    );
+    const input = screen.getByRole("textbox", { name: "Session title" });
+
+    expect(input).toHaveProperty("value", "Investigate flaky title rendering");
+    expect(input.className).toContain("h-7");
+    expect(input.className).toContain("text-sm");
+    expect(input.className).toContain("truncate");
   });
 
   it("shows validation feedback when the edited title is blank", async () => {

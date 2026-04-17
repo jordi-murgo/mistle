@@ -15,13 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@mistle/ui";
-import {
-  ArrowClockwiseIcon,
-  CaretDownIcon,
-  CaretRightIcon,
-  InfoIcon,
-  TrashIcon,
-} from "@phosphor-icons/react";
+import { TrashIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
 import type { IntegrationWebhookSourceSectionState } from "../pages/use-integration-webhook-source-state.js";
@@ -29,16 +23,14 @@ import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
 import { CopyableValue } from "../shared/copyable-value.js";
 import {
   formatConnectionStatusLabel,
-  formatResourceCountSummary,
-  formatResourceInlineMetadata,
-  formatResourceLabel,
-  formatSyncStateLabel,
   formatWebhookSourceStatusLabel,
 } from "./integration-connection-detail-formatters.js";
-import type {
-  IntegrationConnectionResource,
-  IntegrationWebhookSource,
-} from "./integrations-service.js";
+import { IntegrationResourceList } from "./integration-resource-list.js";
+import {
+  type IntegrationResourceListItemData,
+  type IntegrationResourceListItemResourceSummary,
+} from "./integration-resource-row.js";
+import type { IntegrationWebhookSource } from "./integrations-service.js";
 
 const JiraWebhookEventDisplayNameByType = new Map(
   JiraSupportedWebhookEvents.map((eventDefinition) => {
@@ -46,14 +38,7 @@ const JiraWebhookEventDisplayNameByType = new Map(
   }),
 );
 
-export type IntegrationConnectionDetailResourceSummary = {
-  count: number;
-  isRefreshing?: boolean;
-  kind: string;
-  lastErrorMessage?: string;
-  lastSyncedAt?: string;
-  syncState: "never-synced" | "syncing" | "ready" | "error";
-};
+export type IntegrationConnectionDetailResourceSummary = IntegrationResourceListItemResourceSummary;
 
 export type IntegrationConnectionDetailItem = {
   authFields?: readonly {
@@ -93,15 +78,7 @@ export type IntegrationConnectionDetailViewProps = {
   onEditAuthentication?: (connectionId: string) => void;
   onStartGitHubAppInstallation?: (connectionId: string) => Promise<void> | void;
   onRefreshResource?: (input: { connectionId: string; kind: string }) => void;
-  resourceContentByKey?: ReadonlyMap<
-    string,
-    {
-      errorMessage: string | null;
-      isLoading: boolean;
-      items: readonly IntegrationConnectionResource[];
-      kind: string;
-    }
-  >;
+  resourceItemsByKey?: ReadonlyMap<string, IntegrationResourceListItemData>;
   titleEditor?:
     | {
         disabled: boolean;
@@ -286,9 +263,9 @@ export function IntegrationConnectionDetailView(
             {...(props.onStartGitHubAppInstallation === undefined
               ? {}
               : { onStartGitHubAppInstallation: props.onStartGitHubAppInstallation })}
-            {...(props.resourceContentByKey === undefined
+            {...(props.resourceItemsByKey === undefined
               ? {}
-              : { resourceContentByKey: props.resourceContentByKey })}
+              : { resourceItemsByKey: props.resourceItemsByKey })}
             {...(props.webhookPolicy === undefined ? {} : { webhookPolicy: props.webhookPolicy })}
             {...(props.titleEditor === undefined ? {} : { titleEditor: props.titleEditor })}
             {...(selectedWebhookSourceState === undefined
@@ -309,7 +286,7 @@ function ConnectionDetailPane(input: {
   onEditAuthentication?: (connectionId: string) => void;
   onStartGitHubAppInstallation?: (connectionId: string) => Promise<void> | void;
   onRefreshResource?: (input: { connectionId: string; kind: string }) => void;
-  resourceContentByKey?: IntegrationConnectionDetailViewProps["resourceContentByKey"];
+  resourceItemsByKey?: IntegrationConnectionDetailViewProps["resourceItemsByKey"];
   titleEditor?: IntegrationConnectionDetailViewProps["titleEditor"];
   webhookPolicy?: IntegrationConnectionDetailViewProps["webhookPolicy"];
   webhookSourceState?: IntegrationWebhookSourceSectionState;
@@ -478,7 +455,7 @@ function ConnectionDetailPane(input: {
           <ResourcesSection
             connectionId={input.connection.id}
             onRefreshResource={input.onRefreshResource}
-            resourceContentByKey={input.resourceContentByKey}
+            resourceItemsByKey={input.resourceItemsByKey}
             resources={input.connection.resources}
           />
         </SectionBlock>
@@ -598,12 +575,6 @@ function EditableConnectionTitle(input: {
   );
 }
 
-function shouldShowResourceSyncStateBadge(
-  syncState: IntegrationConnectionDetailResourceSummary["syncState"],
-): boolean {
-  return syncState !== "ready" && syncState !== "syncing";
-}
-
 function ConnectionAuthSection(input: {
   authFields?: readonly {
     label: string;
@@ -701,147 +672,24 @@ function resolveGitHubPostInstallationSetupUrl(input: {
   return input.fallbackUrl;
 }
 
-function ResourceScopeRow(input: {
-  connectionId: string;
-  onRefreshResource: ((input: { connectionId: string; kind: string }) => void) | undefined;
-  resource: IntegrationConnectionDetailResourceSummary;
-  resourceItems: {
-    errorMessage: string | null;
-    isLoading: boolean;
-    items: readonly IntegrationConnectionResource[];
-    kind: string;
-  } | null;
-}): React.JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const resourceLabel = formatResourceLabel(input.resource.kind);
-  const resourceCount = input.resource.count;
-  const resourceStateIndicator = resolveResourceStateIndicator({
-    errorMessage: input.resourceItems?.errorMessage ?? null,
-    kindLabel: resourceLabel,
-  });
-  const shouldReplaceMetadataWithPreviewError = input.resourceItems?.errorMessage != null;
-
-  return (
-    <div className={`flex flex-col gap-2 ${isExpanded ? "pb-4" : ""}`}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex items-center gap-2">
-          <Button
-            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${resourceLabel.toLowerCase()} resources`}
-            className="-ml-2 h-auto justify-start rounded-sm px-1 py-0 text-left text-muted-foreground shadow-none transition-colors hover:bg-transparent hover:text-foreground"
-            onClick={() => {
-              setIsExpanded((current) => !current);
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {isExpanded ? (
-              <CaretDownIcon aria-hidden className="size-4" />
-            ) : (
-              <CaretRightIcon aria-hidden className="size-4" />
-            )}
-            <span className="text-sm font-medium leading-tight">
-              {resourceLabel} <span className="text-current/80">- {resourceCount}</span>
-            </span>
-          </Button>
-          {shouldShowResourceSyncStateBadge(input.resource.syncState) ? (
-            <Badge variant="secondary">{formatSyncStateLabel(input.resource.syncState)}</Badge>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2 sm:shrink-0">
-          {shouldReplaceMetadataWithPreviewError ? (
-            <div className="flex items-center">{resourceStateIndicator}</div>
-          ) : (
-            <div className="text-muted-foreground text-xs">
-              <span className="sr-only">{formatResourceCountSummary(input.resource)}. </span>
-              {formatResourceInlineMetadata(input.resource)}
-            </div>
-          )}
-          {input.onRefreshResource ? (
-            <Button
-              aria-label={`Refresh ${input.resource.kind}`}
-              disabled={input.resource.isRefreshing === true}
-              onClick={() => {
-                input.onRefreshResource?.({
-                  connectionId: input.connectionId,
-                  kind: input.resource.kind,
-                });
-              }}
-              size="icon-sm"
-              title="Sync resource"
-              type="button"
-              variant="outline"
-            >
-              <ArrowClockwiseIcon
-                aria-hidden
-                className={input.resource.isRefreshing === true ? "size-4 animate-spin" : "size-4"}
-              />
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {input.resource.lastErrorMessage ? (
-        <Notice variant="alert">{input.resource.lastErrorMessage}</Notice>
-      ) : null}
-      {input.resourceItems?.errorMessage === null ? resourceStateIndicator : null}
-      {isExpanded && input.resourceItems !== null && input.resourceItems.items.length > 0 ? (
-        <div className="gap-2 flex flex-wrap pl-5">
-          {input.resourceItems.items.map((item) => (
-            <span className="rounded-full border px-2.5 py-1 text-xs" key={item.id}>
-              {item.displayName}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function ResourcesSection(input: {
   connectionId: string;
   onRefreshResource: ((input: { connectionId: string; kind: string }) => void) | undefined;
-  resourceContentByKey: IntegrationConnectionDetailViewProps["resourceContentByKey"];
+  resourceItemsByKey: IntegrationConnectionDetailViewProps["resourceItemsByKey"];
   resources: readonly IntegrationConnectionDetailResourceSummary[];
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-0.5">
-      {input.resources.map((resource) => (
-        <ResourceScopeRow
-          connectionId={input.connectionId}
-          key={`${input.connectionId}:${resource.kind}`}
-          onRefreshResource={input.onRefreshResource}
-          resource={resource}
-          resourceItems={
-            input.resourceContentByKey?.get(`${input.connectionId}:${resource.kind}`) ?? null
-          }
-        />
-      ))}
-    </div>
+    <IntegrationResourceList
+      connectionId={input.connectionId}
+      resources={input.resources}
+      {...(input.resourceItemsByKey === undefined
+        ? {}
+        : { resourceItemsByKey: input.resourceItemsByKey })}
+      {...(input.onRefreshResource === undefined
+        ? {}
+        : { onRefreshResource: input.onRefreshResource })}
+    />
   );
-}
-
-function resolveResourceStateIndicator(input: {
-  errorMessage: string | null;
-  kindLabel: string;
-}): React.JSX.Element | null {
-  if (input.errorMessage !== null) {
-    return (
-      <Tooltip delay={0}>
-        <TooltipTrigger
-          aria-label={`View ${input.kindLabel.toLowerCase()} load error`}
-          render={<Badge render={<span aria-hidden="true" />} variant="destructive" />}
-        >
-          Error
-          <InfoIcon className="size-3.5" data-icon="inline-end" />
-        </TooltipTrigger>
-        <TooltipContent className="max-w-80 whitespace-pre-wrap text-left" side="top">
-          {input.errorMessage}
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  return null;
 }
 
 function WebhookSourcesSection(input: {
