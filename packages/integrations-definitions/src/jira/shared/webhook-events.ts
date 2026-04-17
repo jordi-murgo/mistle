@@ -1,5 +1,7 @@
 import type { IntegrationWebhookEventDefinition } from "@mistle/integrations-core";
 
+import { createInvocationTokenParameter } from "../../shared/invocation-token-parameter.js";
+
 const JiraIssueConversationKeyOption = {
   id: "issue",
   label: "Issue",
@@ -25,6 +27,8 @@ const JiraActorParameter = {
   placeholder: "Any actor",
 } as const;
 
+const JiraInvocationTokenParameter = createInvocationTokenParameter(["comment", "mistlePlainText"]);
+
 type JiraWebhookEventType =
   | "jira:issue_created"
   | "jira:issue_updated"
@@ -46,7 +50,13 @@ function createJiraWebhookEventDefinition(
     displayName: input.displayName,
     category: input.category,
     conversationKeyOptions: [JiraIssueConversationKeyOption],
-    parameters: [JiraIssueKeyParameter, JiraActorParameter],
+    parameters: [
+      ...(input.eventType === "comment_created" || input.eventType === "comment_updated"
+        ? [JiraInvocationTokenParameter]
+        : []),
+      JiraIssueKeyParameter,
+      JiraActorParameter,
+    ],
   };
 }
 
