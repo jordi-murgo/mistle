@@ -40,6 +40,9 @@ export const GitHubCloudBaseDefinition: GitHubCloudBaseIntegrationDefinition = {
   targetSecretSchema: GitHubTargetSecretSchema,
   bindingConfigSchema: GitHubCloudBindingConfigSchema,
   bindingConfigForm: resolveGitHubBindingConfigForm,
+  identityLinking: {
+    eligibleConnectionMethodIds: [IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION],
+  },
   connectionMethods: [
     {
       id: IntegrationConnectionMethodIds.API_KEY,

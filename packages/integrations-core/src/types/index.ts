@@ -102,6 +102,10 @@ export type IntegrationConnection = {
   config: Record<string, unknown>;
 };
 
+export type IntegrationIdentityLinkingCapability = {
+  eligibleConnectionMethodIds: ReadonlyArray<IntegrationConnectionMethodId>;
+};
+
 export type IntegrationBinding = {
   id: string;
   kind: IntegrationKind;
@@ -1674,6 +1678,7 @@ export type IntegrationDefinition<
       TConnectionConfig
     >
   >;
+  identityLinking?: IntegrationIdentityLinkingCapability;
   credentialResolvers?: IntegrationCredentialResolvers;
   oauth2AuthorizationCode?: IntegrationOAuth2AuthorizationCodeCapability<
     ParsedSchemaOutput<TTargetConfigSchema>,

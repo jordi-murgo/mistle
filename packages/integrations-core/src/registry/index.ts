@@ -41,6 +41,44 @@ function validateDefinition(input: AnyIntegrationDefinition): void {
     );
   }
 
+  const identityLinking = input.identityLinking;
+  if (identityLinking !== undefined) {
+    const definedConnectionMethodIds = new Set(input.connectionMethods.map((method) => method.id));
+    const eligibleConnectionMethodIds = new Set<string>();
+
+    if (identityLinking.eligibleConnectionMethodIds.length === 0) {
+      throw new IntegrationDefinitionRegistryError(
+        DefinitionRegistryErrorCodes.INVALID_DEFINITION,
+        "Integration definition identityLinking.eligibleConnectionMethodIds must be non-empty.",
+      );
+    }
+
+    for (const eligibleConnectionMethodId of identityLinking.eligibleConnectionMethodIds) {
+      if (eligibleConnectionMethodId.trim().length === 0) {
+        throw new IntegrationDefinitionRegistryError(
+          DefinitionRegistryErrorCodes.INVALID_DEFINITION,
+          "Integration definition identityLinking.eligibleConnectionMethodIds[*] must be non-empty.",
+        );
+      }
+
+      if (!definedConnectionMethodIds.has(eligibleConnectionMethodId)) {
+        throw new IntegrationDefinitionRegistryError(
+          DefinitionRegistryErrorCodes.INVALID_DEFINITION,
+          "Integration definition identityLinking.eligibleConnectionMethodIds[*] must reference an existing connection method id.",
+        );
+      }
+
+      if (eligibleConnectionMethodIds.has(eligibleConnectionMethodId)) {
+        throw new IntegrationDefinitionRegistryError(
+          DefinitionRegistryErrorCodes.INVALID_DEFINITION,
+          `Integration definition identityLinking contains duplicate eligible connection method id '${eligibleConnectionMethodId}'.`,
+        );
+      }
+
+      eligibleConnectionMethodIds.add(eligibleConnectionMethodId);
+    }
+  }
+
   for (const supportedWebhookEvent of input.supportedWebhookEvents ?? []) {
     if (supportedWebhookEvent.eventType.trim().length === 0) {
       throw new IntegrationDefinitionRegistryError(

@@ -251,6 +251,9 @@ describe("integrations-definitions index", () => {
     expect(githubCloudDefinition?.redirectHandler).toBeUndefined();
     expect(githubCloudDefinition?.webhookHandler).toBeUndefined();
     expect(githubCloudDefinition?.webhookSource).toBeUndefined();
+    expect(githubCloudDefinition?.identityLinking).toEqual({
+      eligibleConnectionMethodIds: ["github-app-installation"],
+    });
     expect(githubCloudDefinition?.supportedWebhookEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -392,6 +395,9 @@ describe("integrations-definitions index", () => {
     });
     expect(slackDefinition?.webhookSource).toBeUndefined();
     expect(slackDefinition?.webhookHandler).toBeUndefined();
+    expect(slackDefinition?.identityLinking).toEqual({
+      eligibleConnectionMethodIds: ["slack-bot-token"],
+    });
     expect(slackDefinition?.supportedWebhookEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

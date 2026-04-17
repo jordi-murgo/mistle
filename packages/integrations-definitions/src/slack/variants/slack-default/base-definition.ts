@@ -33,6 +33,9 @@ export const SlackBaseDefinition: SlackBaseIntegrationDefinition = {
   targetSecretSchema: SlackTargetSecretSchema,
   bindingConfigSchema: SlackBindingConfigSchema,
   bindingConfigForm: resolveSlackBindingConfigForm,
+  identityLinking: {
+    eligibleConnectionMethodIds: [SlackConnectionMethodIds.SLACK_BOT_TOKEN],
+  },
   connectionMethods: [
     {
       id: SlackConnectionMethodIds.SLACK_BOT_TOKEN,

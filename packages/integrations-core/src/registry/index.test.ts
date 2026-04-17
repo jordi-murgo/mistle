@@ -295,6 +295,65 @@ describe("integration registry", () => {
     expect(definition?.credentialResolvers?.custom?.github_installation_token).toBeDefined();
   });
 
+  it("registers definitions with static identity-linking metadata", () => {
+    const registry = new IntegrationRegistry();
+
+    registry.register({
+      familyId: "github",
+      variantId: "github-cloud",
+      kind: "git",
+      displayName: "GitHub",
+      logoKey: "github",
+      targetConfigSchema: ConfigSchema,
+      targetSecretSchema: EmptySecretsSchema,
+      bindingConfigSchema: ConfigSchema,
+      connectionMethods: GitHubConnectionMethods,
+      identityLinking: {
+        eligibleConnectionMethodIds: [IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION],
+      },
+      compileBinding: () => ({
+        egressRoutes: [],
+        artifacts: [],
+        runtimeClients: [],
+      }),
+    });
+
+    expect(
+      registry.getDefinition({
+        familyId: "github",
+        variantId: "github-cloud",
+      })?.identityLinking,
+    ).toEqual({
+      eligibleConnectionMethodIds: [IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION],
+    });
+  });
+
+  it("rejects identity-linking metadata with unknown eligible connection methods", () => {
+    const registry = new IntegrationRegistry();
+
+    expect(() =>
+      registry.register({
+        familyId: "github",
+        variantId: "github-cloud",
+        kind: "git",
+        displayName: "GitHub",
+        logoKey: "github",
+        targetConfigSchema: ConfigSchema,
+        targetSecretSchema: EmptySecretsSchema,
+        bindingConfigSchema: ConfigSchema,
+        connectionMethods: GitHubConnectionMethods,
+        identityLinking: {
+          eligibleConnectionMethodIds: ["missing-method"],
+        },
+        compileBinding: () => ({
+          egressRoutes: [],
+          artifacts: [],
+          runtimeClients: [],
+        }),
+      }),
+    ).toThrow(IntegrationDefinitionRegistryError);
+  });
+
   it("registers definitions with oauth2 client-credentials capability", () => {
     const registry = new IntegrationRegistry();
 
