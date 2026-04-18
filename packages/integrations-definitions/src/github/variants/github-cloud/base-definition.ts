@@ -76,6 +76,16 @@ export const GitHubCloudBaseDefinition: GitHubCloudBaseIntegrationDefinition = {
           slotKey: GitHubCredentialSlotKeys.GITHUB_CLOUD_APP_PRIVATE_KEY_PEM,
         },
         {
+          name: "clientSecret",
+          label: "Client secret (Linked User Auth)",
+          placeholder: "Enter client secret",
+          description:
+            "Required only for Identity Linking / linked user authorization. Not required for installation-only GitHub App usage.",
+          inputType: "password",
+          secretType: "oauth2_client_secret",
+          slotKey: GitHubCredentialSlotKeys.GITHUB_CLOUD_APP_CLIENT_SECRET,
+        },
+        {
           name: "webhookSecret",
           label: "Webhook secret",
           placeholder: "Enter webhook secret",

@@ -1,12 +1,22 @@
-import type { ControlPlaneDatabase } from "@mistle/db/control-plane";
+import {
+  integrationConnectionCredentials,
+  type ControlPlaneDatabase,
+} from "@mistle/db/control-plane";
 import { BadRequestError, NotFoundError } from "@mistle/http/errors.js";
+import type { IntegrationRegistry } from "@mistle/integrations-core";
+import { eq } from "drizzle-orm";
 
 import { IdentityLinkingBadRequestCodes, IdentityLinkingNotFoundCodes } from "../constants.js";
+import {
+  resolveIdentityLinkingDefinitionOrThrow,
+  supportsIdentityLinkingConnection,
+} from "./identity-linking-definition.js";
 import type { IdentityLinkProviderMetadata } from "./provider-metadata.js";
 
 export async function resolveValidatedProviderConnectionOrThrow(
   ctx: {
     db: ControlPlaneDatabase;
+    integrationRegistry: IntegrationRegistry;
   },
   input: {
     organizationId: string;
@@ -61,6 +71,38 @@ export async function resolveValidatedProviderConnectionOrThrow(
     throw new BadRequestError(
       IdentityLinkingBadRequestCodes.INVALID_PROVIDER_CONFIG_INPUT,
       `Integration connection '${input.integrationConnectionId}' uses connection method '${rawConnectionMethodId}', which is not eligible for identity linking provider '${input.provider.providerFamily}'.`,
+    );
+  }
+
+  const credentialLinks = await ctx.db
+    .select({
+      slotKey: integrationConnectionCredentials.slotKey,
+    })
+    .from(integrationConnectionCredentials)
+    .where(eq(integrationConnectionCredentials.connectionId, connection.id));
+  const credentialSlotKeys = new Set(
+    credentialLinks.map((credentialLink) => credentialLink.slotKey),
+  );
+
+  const definition = resolveIdentityLinkingDefinitionOrThrow({
+    integrationRegistry: ctx.integrationRegistry,
+    target: {
+      targetKey: connection.targetKey,
+      familyId: input.provider.familyId,
+      variantId: input.provider.variantId,
+    },
+  });
+
+  if (
+    !(await supportsIdentityLinkingConnection({
+      definition,
+      connection,
+      availableConnectionSecretSlotKeys: credentialSlotKeys,
+    }))
+  ) {
+    throw new BadRequestError(
+      IdentityLinkingBadRequestCodes.INVALID_PROVIDER_CONFIG_INPUT,
+      `Integration connection '${input.integrationConnectionId}' is missing required linked-user authorization configuration for identity linking.`,
     );
   }
 

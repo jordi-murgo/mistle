@@ -178,6 +178,13 @@ describe("integration targets discovery integration", () => {
               slotKey: "github.github-cloud.github-app-installation.app-private-key-pem",
             },
             {
+              name: "clientSecret",
+              label: "Client secret (Linked User Auth)",
+              placeholder: "Enter client secret",
+              inputType: "password",
+              slotKey: "github.github-cloud.github-app-installation.client-secret",
+            },
+            {
               name: "webhookSecret",
               label: "Webhook secret",
               placeholder: "Enter webhook secret",
@@ -247,7 +254,8 @@ describe("integration targets discovery integration", () => {
       variantId: "openai-default",
       enabled: true,
       displayName: "OpenAI",
-      description: "Enable OpenAI model access with API key authentication.",
+      description:
+        "Enable OpenAI model access with API key or ChatGPT subscription authentication.",
       logoKey: "openai",
       connectionMethods: [
         {
@@ -263,6 +271,22 @@ describe("integration targets discovery integration", () => {
               slotKey: "openai.openai-default.api-key.api-key",
             },
           ],
+        },
+        {
+          id: "chatgpt-device-code",
+          label: "ChatGPT subscription",
+          kind: "device-authorization",
+          ui: {
+            create: {
+              helperText: "Connect with your ChatGPT subscription using a device code.",
+              submitLabel: "Connect",
+            },
+            pending: {
+              title: "Approve In ChatGPT",
+              description:
+                "Open the verification link, enter the device code, and approve access in ChatGPT.",
+            },
+          },
         },
       ],
       targetHealth: {
@@ -422,6 +446,12 @@ describe("integration targets discovery integration", () => {
               slotKey: "github.github-cloud.github-app-installation.app-private-key-pem",
             },
             {
+              name: "clientSecret",
+              label: "Client secret (Linked User Auth)",
+              inputType: "password",
+              slotKey: "github.github-cloud.github-app-installation.client-secret",
+            },
+            {
               name: "webhookSecret",
               label: "Webhook secret",
               inputType: "password",
@@ -522,6 +552,22 @@ describe("integration targets discovery integration", () => {
             slotKey: "openai.openai-default.api-key.api-key",
           },
         ],
+      },
+      {
+        id: "chatgpt-device-code",
+        label: "ChatGPT subscription",
+        kind: "device-authorization",
+        ui: {
+          create: {
+            helperText: "Connect with your ChatGPT subscription using a device code.",
+            submitLabel: "Connect",
+          },
+          pending: {
+            title: "Approve In ChatGPT",
+            description:
+              "Open the verification link, enter the device code, and approve access in ChatGPT.",
+          },
+        },
       },
     ]);
     expect("resolvedBindingEditorUi" in (openAiTarget ?? {})).toBe(false);
