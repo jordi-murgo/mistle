@@ -38,6 +38,19 @@ function createTarget(
     };
   }
 
+  if (kind === "connector") {
+    return {
+      targetKey,
+      displayName: targetKey,
+      familyId: "linear",
+      variantId: "linear-default",
+      config: {},
+      targetHealth: {
+        configStatus: "valid",
+      },
+    };
+  }
+
   return {
     targetKey,
     displayName: targetKey,
@@ -76,11 +89,21 @@ function Harness(): React.JSX.Element {
       targetKey: "target-git",
       status: "active",
     },
+    {
+      id: "conn-connector",
+      displayName: "Linear Workspace",
+      targetKey: "target-connector",
+      status: "active",
+      config: {
+        connection_method: "api-key",
+      },
+    },
   ];
   const targets: readonly IntegrationTargetSummary[] = [
     createTarget("target-agent", "agent"),
     createTarget("target-agent-2", "agent"),
     createTarget("target-git", "git"),
+    createTarget("target-connector", "connector"),
   ];
 
   return (
@@ -135,7 +158,7 @@ function getSectionContainer(sectionTitle: string): HTMLElement {
     throw new Error(`Could not resolve section heading for ${sectionTitle}.`);
   }
 
-  const sectionContainer = sectionHeading.parentElement?.parentElement;
+  const sectionContainer = sectionHeading.closest("section");
 
   if (sectionContainer === null || sectionContainer === undefined) {
     throw new Error(`Could not resolve section container for ${sectionTitle}.`);
@@ -146,6 +169,10 @@ function getSectionContainer(sectionTitle: string): HTMLElement {
 
 function getSectionAddButton(sectionTitle: string): HTMLButtonElement {
   return within(getSectionContainer(sectionTitle)).getByRole("button", { name: "Add" });
+}
+
+function getOpenDialog(): HTMLElement {
+  return screen.getByRole("dialog");
 }
 
 describe("IntegrationsEditorSection", () => {
@@ -162,16 +189,18 @@ describe("IntegrationsEditorSection", () => {
 
     expect(screen.getByRole("heading", { name: "Add agent harness" })).toBeDefined();
 
-    fireEvent.click(screen.getByRole("combobox", { name: "Add binding connection" }));
+    const dialog = getOpenDialog();
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Add binding connection" }));
     const listbox = await screen.findByRole("listbox");
     fireEvent.click(within(listbox).getByText("Primary OpenAI Workspace"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Edit binding" })).toBeDefined();
-      expect(screen.getByText("target-agent")).toBeDefined();
-      expect(screen.getByText("Primary OpenAI Workspace")).toBeDefined();
+      const agentSection = getSectionContainer("Agent Harness");
+      expect(within(agentSection).getByRole("button", { name: "Edit binding" })).toBeDefined();
+      expect(within(agentSection).getByText("target-agent")).toBeDefined();
+      expect(within(agentSection).getByText("Primary OpenAI Workspace")).toBeDefined();
     });
   }, 10000);
 
@@ -185,7 +214,7 @@ describe("IntegrationsEditorSection", () => {
     );
 
     fireEvent.click(getSectionAddButton("Agent Harness"));
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(within(getOpenDialog()).getByRole("button", { name: "Add" }));
 
     expect(screen.getByText("Select a connection to add this binding.")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Edit binding" })).toBeNull();
@@ -201,11 +230,14 @@ describe("IntegrationsEditorSection", () => {
     );
 
     fireEvent.click(getSectionAddButton("Git Providers"));
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(within(getOpenDialog()).getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Edit binding" })).toBeDefined();
-      expect(screen.getByText("target-git")).toBeDefined();
+      const gitProvidersSection = getSectionContainer("Git Providers");
+      expect(
+        within(gitProvidersSection).getByRole("button", { name: "Edit binding" }),
+      ).toBeDefined();
+      expect(within(gitProvidersSection).getByText("target-git")).toBeDefined();
     });
   });
 
@@ -219,12 +251,53 @@ describe("IntegrationsEditorSection", () => {
     );
 
     fireEvent.click(getSectionAddButton("Agent Harness"));
-    fireEvent.click(screen.getByRole("combobox", { name: "Add binding connection" }));
+    fireEvent.click(
+      within(getOpenDialog()).getByRole("combobox", { name: "Add binding connection" }),
+    );
 
     const listbox = await screen.findByRole("listbox");
 
     expect(within(listbox).getByText("Primary OpenAI Workspace")).toBeDefined();
     expect(within(listbox).getByText("Backup OpenAI Workspace")).toBeDefined();
+  });
+
+  it("renders connector bindings as inline tool switches without an edit action", async () => {
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(getSectionAddButton("Connectors"));
+    fireEvent.click(within(getOpenDialog()).getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Add connector" })).toBeNull();
+    });
+
+    const connectorsSection = getSectionContainer("Connectors");
+    const linearMcpCheckboxes = within(connectorsSection).getAllByRole("checkbox", {
+      name: /Linear MCP/,
+    });
+    const removeBindingButtons = within(connectorsSection).getAllByRole("button", {
+      name: "Remove binding",
+    });
+    const linearMcpCheckbox = linearMcpCheckboxes[0];
+    if (linearMcpCheckbox === undefined) {
+      throw new Error("Expected at least one Linear MCP checkbox.");
+    }
+
+    expect(within(connectorsSection).queryByRole("button", { name: "Edit binding" })).toBeNull();
+    expect(removeBindingButtons[0]).toBeDefined();
+    expect(linearMcpCheckbox.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(linearMcpCheckbox);
+
+    await waitFor(() => {
+      expect(linearMcpCheckbox.getAttribute("aria-checked")).toBe("true");
+    });
   });
 
   it("disables adding another agent harness after one is assigned", async () => {
@@ -237,10 +310,11 @@ describe("IntegrationsEditorSection", () => {
     );
 
     fireEvent.click(getSectionAddButton("Agent Harness"));
-    fireEvent.click(screen.getByRole("combobox", { name: "Add binding connection" }));
+    const dialog = getOpenDialog();
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Add binding connection" }));
     const listbox = await screen.findByRole("listbox");
     fireEvent.click(within(listbox).getByText("Primary OpenAI Workspace"));
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
 
     await waitFor(() => {
       expect(getSectionAddButton("Agent Harness").hasAttribute("disabled")).toBe(true);

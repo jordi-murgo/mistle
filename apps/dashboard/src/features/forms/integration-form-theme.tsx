@@ -35,10 +35,13 @@ import {
   enumOptionsValueForIndex,
   optionId,
 } from "@rjsf/utils";
+import * as React from "react";
 
 import { isRecord } from "../shared/is-record.js";
 import type { IntegrationFormContext } from "./integration-form-context.js";
 import { IntegrationResourceStringArrayWidget } from "./integration-resource-string-array-widget.js";
+import { MultiSelectStringArrayComboboxField } from "./multi-select-string-array-combobox-field.js";
+import { SingleSelectStringComboboxField } from "./single-select-string-combobox-field.js";
 
 type JsonObject = Record<string, unknown>;
 type IntegrationFieldLayout = "horizontal" | "vertical";
@@ -80,6 +83,115 @@ function resolveCommaSeparatedOptions(
   };
 }
 
+function resolveMultiSelectStringComboboxOptions(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+): readonly { label: string; value: string }[] {
+  const itemsSchema = isRecord(props.schema.items) ? props.schema.items : null;
+  if (itemsSchema === null) {
+    return [];
+  }
+
+  if (Array.isArray(itemsSchema.oneOf)) {
+    return itemsSchema.oneOf.flatMap((option) => {
+      if (
+        !isRecord(option) ||
+        typeof option.const !== "string" ||
+        typeof option.title !== "string"
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          label: option.title,
+          value: option.const,
+        },
+      ];
+    });
+  }
+
+  if (!Array.isArray(itemsSchema.enum)) {
+    return [];
+  }
+
+  const enumNames = Array.isArray(props.uiSchema?.["ui:enumNames"])
+    ? props.uiSchema["ui:enumNames"]
+    : [];
+
+  return itemsSchema.enum.flatMap((entry, index) => {
+    if (typeof entry !== "string") {
+      return [];
+    }
+
+    const candidateLabel = enumNames[index];
+    return [
+      {
+        label: typeof candidateLabel === "string" ? candidateLabel : entry,
+        value: entry,
+      },
+    ];
+  });
+}
+
+function resolveSingleSelectStringComboboxOptions(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+): readonly { label: string; value: string }[] {
+  if (Array.isArray(props.schema.oneOf)) {
+    return props.schema.oneOf.flatMap((option) => {
+      if (
+        !isRecord(option) ||
+        typeof option.const !== "string" ||
+        typeof option.title !== "string"
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          label: option.title,
+          value: option.const,
+        },
+      ];
+    });
+  }
+
+  if (!Array.isArray(props.schema.enum)) {
+    return [];
+  }
+
+  const enumNames = Array.isArray(props.uiSchema?.["ui:enumNames"])
+    ? props.uiSchema["ui:enumNames"]
+    : [];
+
+  return props.schema.enum.flatMap((entry, index) => {
+    if (typeof entry !== "string") {
+      return [];
+    }
+
+    const candidateLabel = enumNames[index];
+    return [
+      {
+        label: typeof candidateLabel === "string" ? candidateLabel : entry,
+        value: entry,
+      },
+    ];
+  });
+}
+
+function forwardWidgetBlur<TValue>(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  value: TValue,
+): void {
+  props.onBlur(props.id, value);
+}
+
+function forwardWidgetFocus<TValue>(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  value: TValue,
+): void {
+  props.onFocus(props.id, value);
+}
+
 function CommaSeparatedStringArrayWidget(
   props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
 ): React.JSX.Element {
@@ -87,6 +199,24 @@ function CommaSeparatedStringArrayWidget(
   const value = Array.isArray(props.value)
     ? props.value.filter((entry): entry is string => typeof entry === "string")
     : [];
+  const normalizedValue = value.join(`${delimiter} `);
+  const [draftValue, setDraftValue] = React.useState(() => normalizedValue);
+  const [isFocused, setIsFocused] = React.useState(false);
+
+  React.useEffect(() => {
+    if (isFocused) {
+      return;
+    }
+
+    setDraftValue(normalizedValue);
+  }, [isFocused, normalizedValue]);
+
+  function parseDraftValue(input: string): string[] {
+    return input
+      .split(delimiter)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
 
   return (
     <Input
@@ -95,20 +225,96 @@ function CommaSeparatedStringArrayWidget(
       disabled={props.disabled || props.readonly}
       id={props.id}
       onBlur={() => {
-        props.onBlur(props.id, value);
+        const nextValue = parseDraftValue(draftValue);
+        const normalizedValue = nextValue.join(`${delimiter} `);
+        setIsFocused(false);
+        setDraftValue(normalizedValue);
+        props.onChange(nextValue);
+        props.onBlur(props.id, nextValue);
       }}
       onChange={(event) => {
-        const nextValue = event.currentTarget.value
-          .split(delimiter)
-          .map((entry) => entry.trim())
-          .filter((entry) => entry.length > 0);
-        props.onChange(nextValue);
+        const nextDraftValue = event.currentTarget.value;
+        setDraftValue(nextDraftValue);
       }}
       onFocus={() => {
+        setIsFocused(true);
         props.onFocus(props.id, value);
       }}
       placeholder={placeholder}
-      value={value.join(`${delimiter} `)}
+      value={draftValue}
+    />
+  );
+}
+
+function MultiSelectStringArrayComboboxWidget(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+): React.JSX.Element {
+  const selectedValues = Array.isArray(props.value)
+    ? props.value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const options = resolveMultiSelectStringComboboxOptions(props);
+  return (
+    <MultiSelectStringArrayComboboxField
+      emptyMessage={
+        typeof props.options.emptyMessage === "string"
+          ? props.options.emptyMessage
+          : "No matching options."
+      }
+      inputId={props.id}
+      inputLabel={props.label}
+      invalid={props.rawErrors !== undefined && props.rawErrors.length > 0}
+      onBlur={(value) => {
+        forwardWidgetBlur(props, value);
+      }}
+      onChange={(value) => {
+        props.onChange(value);
+      }}
+      onFocus={(value) => {
+        forwardWidgetFocus(props, value);
+      }}
+      options={options}
+      placeholder={typeof props.placeholder === "string" ? props.placeholder : props.label}
+      readonly={props.disabled || props.readonly}
+      value={selectedValues}
+    />
+  );
+}
+
+function SingleSelectStringComboboxWidget(
+  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+): React.JSX.Element {
+  const options = resolveSingleSelectStringComboboxOptions(props);
+  const selectedValue = typeof props.value === "string" ? props.value : "";
+  const placeholder =
+    typeof props.placeholder === "string"
+      ? props.placeholder
+      : typeof props.label === "string" && props.label.length > 0
+        ? `Select ${props.label.toLowerCase()}`
+        : "Select an option";
+
+  return (
+    <SingleSelectStringComboboxField
+      emptyMessage={
+        typeof props.options.emptyMessage === "string"
+          ? props.options.emptyMessage
+          : "No matching options."
+      }
+      inputId={props.id}
+      inputLabel={props.label}
+      invalid={props.rawErrors !== undefined && props.rawErrors.length > 0}
+      onBlur={(value) => {
+        forwardWidgetBlur(props, value);
+      }}
+      onChange={(value) => {
+        props.onChange(value);
+      }}
+      onFocus={(value) => {
+        forwardWidgetFocus(props, value);
+      }}
+      options={options}
+      placeholder={placeholder}
+      readonly={props.disabled || props.readonly}
+      value={selectedValue.length === 0 ? undefined : selectedValue}
     />
   );
 }
@@ -684,6 +890,8 @@ export const IntegrationFormWidgets = {
   checkboxes: CheckboxesWidget,
   "comma-separated-string-array": CommaSeparatedStringArrayWidget,
   "integration-resource-string-array": IntegrationResourceStringArrayWidget,
+  "multi-select-string-array-combobox": MultiSelectStringArrayComboboxWidget,
+  "single-select-string-combobox": SingleSelectStringComboboxWidget,
 };
 
 function HiddenSubmitButton(
