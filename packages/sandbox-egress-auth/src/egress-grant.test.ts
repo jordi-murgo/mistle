@@ -76,6 +76,7 @@ const linkedPrincipalClaims = {
   credentialResolverKind: "linked_principal",
   providerFamily: "github",
   actingUserRequired: true,
+  resolutionMode: "required",
   actingUserId: "usr_123",
   credentialKind: "github_app_user_access_token",
   upstreamBaseUrl: "https://api.github.com",
@@ -163,6 +164,26 @@ describe("egress-grant", () => {
         token,
       }),
     ).resolves.toEqual(linkedPrincipalClaims);
+  });
+
+  it("round-trips actingUserId on integration-connection grants", async () => {
+    const claims = {
+      ...defaultClaims,
+      actingUserId: "usr_123",
+    } satisfies EgressGrantClaims;
+
+    const token = await mintEgressGrant({
+      config: defaultConfig,
+      claims,
+      ttlSeconds: 60,
+    });
+
+    await expect(
+      verifyEgressGrant({
+        config: defaultConfig,
+        token,
+      }),
+    ).resolves.toEqual(claims);
   });
 
   it("allows basic auth grants to carry authInjectionUsername", async () => {

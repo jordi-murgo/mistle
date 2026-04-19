@@ -60,6 +60,7 @@ export async function mintEgressGrant(input: {
       organizationId: claims.organizationId,
       familyId: claims.familyId,
       variantId: claims.variantId,
+      ...(claims.actingUserId === undefined ? {} : { actingUserId: claims.actingUserId }),
       credentialResolverKind: claims.credentialResolverKind,
       ...(claims.credentialResolverKind === "integration_connection"
         ? {
@@ -71,7 +72,7 @@ export async function mintEgressGrant(input: {
         : {
             providerFamily: claims.providerFamily,
             actingUserRequired: claims.actingUserRequired,
-            ...(claims.actingUserId === undefined ? {} : { actingUserId: claims.actingUserId }),
+            resolutionMode: claims.resolutionMode,
             ...(claims.credentialKind === undefined
               ? {}
               : { credentialKind: claims.credentialKind }),
@@ -176,6 +177,10 @@ export async function verifyEgressGrant(input: {
         : {}),
       ...(typeof verificationResult.payload.actingUserRequired === "boolean"
         ? { actingUserRequired: verificationResult.payload.actingUserRequired }
+        : {}),
+      ...(verificationResult.payload.resolutionMode === "required" ||
+      verificationResult.payload.resolutionMode === "preferred"
+        ? { resolutionMode: verificationResult.payload.resolutionMode }
         : {}),
       ...(typeof verificationResult.payload.actingUserId === "string"
         ? { actingUserId: verificationResult.payload.actingUserId }

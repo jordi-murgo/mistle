@@ -1163,16 +1163,26 @@ export type IntegrationConnectionEgressCredentialResolverRef = {
   resolverKey?: string;
 };
 
+export type LinkedPrincipalEgressCredentialResolutionMode = "required" | "preferred";
+
 export type LinkedPrincipalEgressCredentialResolverRef = {
   kind: "linked_principal";
   providerFamily: string;
   credentialKind?: string;
   actingUserRequired: boolean;
+  resolutionMode: LinkedPrincipalEgressCredentialResolutionMode;
 };
 
 export type EgressCredentialResolverRef =
   | IntegrationConnectionEgressCredentialResolverRef
   | LinkedPrincipalEgressCredentialResolverRef;
+
+export type IntegrationEgressCredentialResolverSelectionInput = {
+  organizationId: string;
+  actingUserId?: string;
+  request: ProxyMutableRequest;
+  defaultCredentialResolver: EgressCredentialResolverRef;
+};
 
 export type EgressCredentialHeaderInjection = {
   header: string;
@@ -1886,6 +1896,9 @@ export type IntegrationDefinition<
   resourceDefinitions?: ReadonlyArray<IntegrationResourceDefinition>;
   resourceSyncTriggers?: ReadonlyArray<IntegrationResourceSyncTrigger>;
   egressRequestMiddleware?: ReadonlyArray<IntegrationEgressRequestMiddleware>;
+  resolveEgressCredentialResolver?(
+    input: IntegrationEgressCredentialResolverSelectionInput,
+  ): MaybePromise<EgressCredentialResolverRef>;
   capabilities?: IntegrationCapabilityContributor<
     ParsedSchemaOutput<TTargetConfigSchema>,
     ParsedSchemaOutput<TBindingConfigSchema>,
