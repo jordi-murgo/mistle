@@ -139,6 +139,7 @@ function resolveConnectionMethod(
         label: field.label,
         ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
         ...(field.description === undefined ? {} : { description: field.description }),
+        optional: field.optional ?? false,
         inputType: field.inputType,
         slotKey: field.slotKey,
       })),

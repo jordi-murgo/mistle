@@ -263,6 +263,7 @@ function renderConnectionEditorFields(props: IntegrationConnectionEditorProps) {
                 <div className="flex items-center justify-between gap-3">
                   <FieldLabel htmlFor={`connection-secret-${editor.targetKey}-${secretField.name}`}>
                     {secretField.label}
+                    {secretField.optional ? " (Optional)" : ""}
                   </FieldLabel>
                   {isUpdateMode && props.isSecretChanged ? (
                     <span className="text-muted-foreground text-xs">Will update</span>

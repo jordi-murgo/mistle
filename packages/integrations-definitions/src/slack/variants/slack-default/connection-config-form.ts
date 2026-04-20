@@ -1,12 +1,17 @@
 import type { ResolvedIntegrationForm } from "@mistle/integrations-core";
 
-import { SlackConnectionMethodIds } from "./auth.js";
+import { SlackConnectionMethodId } from "./auth.js";
 
-export const SlackBotTokenConnectionConfigForm: ResolvedIntegrationForm = {
+export const SlackConnectionConfigForm: ResolvedIntegrationForm = {
   schema: {
     properties: {
       connection_method: {
-        default: SlackConnectionMethodIds.SLACK_BOT_TOKEN,
+        default: SlackConnectionMethodId,
+      },
+      client_id: {
+        title: "Client ID (Linked User Auth)",
+        description:
+          "Required only for Identity Linking / linked user authorization. Not required for standard Slack app bot-token usage.",
       },
     },
   },

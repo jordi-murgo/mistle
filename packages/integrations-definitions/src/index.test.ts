@@ -380,7 +380,7 @@ describe("integrations-definitions index", () => {
       connectionMethods: [
         {
           id: "slack-bot-token",
-          label: "Bot token",
+          label: "Slack app",
           kind: "form",
           secretFields: [
             {
@@ -394,6 +394,15 @@ describe("integrations-definitions index", () => {
               label: "Signing secret",
               inputType: "password",
               slotKey: "slack.slack-default.slack-bot-token.signing-secret",
+            },
+            {
+              name: "clientSecret",
+              label: "Client secret (Linked User Auth)",
+              description:
+                "Required only for Identity Linking / linked user authorization. Not required for standard Slack app bot-token usage.",
+              inputType: "password",
+              optional: true,
+              slotKey: "slack.slack-default.slack-bot-token.client-secret",
             },
           ],
         },
