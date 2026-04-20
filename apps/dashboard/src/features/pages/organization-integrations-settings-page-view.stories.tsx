@@ -37,7 +37,6 @@ const meta = {
   args: {
     availableCards: AvailableCards,
     connectedCards: ConnectedCards,
-    isLoading: false,
     loadErrorMessage: null,
   },
 } satisfies Meta<typeof OrganizationIntegrationsSettingsPageView>;
@@ -47,12 +46,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
-
-export const Loading: Story = {
-  args: {
-    isLoading: true,
-  },
-};
 
 export const LoadError: Story = {
   args: {

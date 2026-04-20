@@ -5,17 +5,14 @@ import { MemberRoleChangeDialog } from "../settings/members/member-role-change-d
 import { canManageInvitations } from "../settings/members/members-capability-policy.js";
 import { MembersDirectoryTable } from "../settings/members/members-directory-table.js";
 import { clampMembersDirectoryOffset } from "../settings/members/members-pagination.js";
-import {
-  MembersLoadErrorState,
-  MembersLoadingState,
-} from "../settings/members/members-query-states.js";
+import { MembersLoadErrorState } from "../settings/members/members-query-states.js";
 import type { OrganizationMembersSettingsPageViewModel } from "../settings/members/organization-members-settings-view-model.js";
 import { TableListingFooter } from "../shared/table-listing-footer.js";
 import { TablePagination } from "../shared/table-pagination.js";
 
 export function OrganizationMembersSettingsPageView(input: {
   viewModel: OrganizationMembersSettingsPageViewModel;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const props = input.viewModel;
   const canInviteMembers = canManageInvitations(props.capabilities);
   const visibleRowCount = props.members.length + props.invitations.length;
@@ -24,10 +21,6 @@ export function OrganizationMembersSettingsPageView(input: {
     offset: props.offset,
     total: props.total,
   });
-
-  if (props.isLoading) {
-    return <MembersLoadingState />;
-  }
 
   if (props.loadErrorMessage) {
     return <MembersLoadErrorState message={props.loadErrorMessage} />;

@@ -12,7 +12,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Skeleton,
   Switch,
 } from "@mistle/ui";
 
@@ -32,7 +31,6 @@ const ArchilRegionOptions = [
 
 export type OrganizationSandboxStorageSettingsPageViewProps = {
   state: OrganizationSandboxStorageFormState;
-  isLoading: boolean;
   isSaving: boolean;
   hasUnsavedChanges: boolean;
   saveErrorMessage: string | null;
@@ -52,21 +50,6 @@ export function OrganizationSandboxStorageSettingsPageView(
       ? undefined
       : (ArchilRegionOptions.find((option) => option.value === input.state.region)?.label ??
         input.state.region);
-
-  if (input.isLoading) {
-    return (
-      <FormPageStack>
-        <FormPageSection>
-          <div className="flex flex-col gap-4 p-4">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        </FormPageSection>
-      </FormPageStack>
-    );
-  }
 
   if (input.loadErrorMessage !== null) {
     return (

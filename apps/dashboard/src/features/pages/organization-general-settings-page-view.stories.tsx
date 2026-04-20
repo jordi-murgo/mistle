@@ -8,7 +8,6 @@ const meta = {
   component: OrganizationGeneralSettingsPageView,
   decorators: [withDashboardPageStory],
   args: {
-    isLoading: false,
     isSaving: false,
     loadErrorMessage: null,
     logoBusy: false,
@@ -42,12 +41,6 @@ export const LogoBusy: Story = {
 export const LogoError: Story = {
   args: {
     logoErrorMessage: "Could not upload organization logo.",
-  },
-};
-
-export const Loading: Story = {
-  args: {
-    isLoading: true,
   },
 };
 

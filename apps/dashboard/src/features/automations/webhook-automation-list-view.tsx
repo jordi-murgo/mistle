@@ -1,6 +1,5 @@
 import {
   Notice,
-  Skeleton,
   Table,
   TableBody,
   TableCell,
@@ -51,7 +50,6 @@ function renderAutomationPagination(input: {
 
 type WebhookAutomationListViewProps = {
   items: readonly WebhookAutomationListItemViewModel[];
-  isLoading: boolean;
   errorMessage: string | null;
   totalResults: number | null;
   hasNextPage: boolean;
@@ -62,16 +60,6 @@ type WebhookAutomationListViewProps = {
   onPreviousPage: () => void;
   onOpenAutomation: (automationId: string) => void;
 };
-
-function LoadingState(): React.JSX.Element {
-  return (
-    <div className="space-y-3">
-      <Skeleton className="h-12 w-full" />
-      <Skeleton className="h-12 w-full" />
-      <Skeleton className="h-12 w-full" />
-    </div>
-  );
-}
 
 export function buildEventSummaryTitle(events: readonly WebhookAutomationListEvent[]): string {
   return events
@@ -196,9 +184,7 @@ export function WebhookAutomationListView(
 
   return (
     <div className="flex flex-col gap-4">
-      {input.isLoading ? (
-        <LoadingState />
-      ) : input.errorMessage !== null ? (
+      {input.errorMessage !== null ? (
         <Notice title="Could not load automations" variant="alert">
           {input.errorMessage}
         </Notice>
