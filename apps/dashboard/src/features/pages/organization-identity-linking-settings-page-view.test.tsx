@@ -44,6 +44,18 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
               saveActionDisabled: false,
               saveActionPending: false,
               statusActionPending: false,
+              memberLinksLoading: false,
+              memberLinksErrorMessage: null,
+              memberLinks: [
+                {
+                  userId: "usr_owner",
+                  name: "Owner User",
+                  email: "owner@example.com",
+                  statusLabel: "Linked",
+                  principalSummary: "owner-github",
+                  updatedAt: "2026-04-20T00:00:00.000Z",
+                },
+              ],
             },
             {
               providerFamily: "slack",
@@ -67,6 +79,18 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
               saveActionDisabled: true,
               saveActionPending: false,
               statusActionPending: false,
+              memberLinksLoading: false,
+              memberLinksErrorMessage: null,
+              memberLinks: [
+                {
+                  userId: "usr_member",
+                  name: "Member User",
+                  email: "member@example.com",
+                  statusLabel: "Not linked",
+                  principalSummary: null,
+                  updatedAt: null,
+                },
+              ],
             },
           ]}
         />
@@ -75,6 +99,7 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
 
     expect(screen.getByText("GitHub")).toBeTruthy();
     expect(screen.getByText("Enabled")).toBeTruthy();
+    expect(screen.queryByText("Owner User")).toBeNull();
     const githubConnectionSelect = screen.getByRole("combobox", {
       name: "Select approved GitHub connection",
     });
@@ -89,6 +114,7 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
 
     expect(screen.getByText("Slack")).toBeTruthy();
     expect(screen.getByText("Not enabled")).toBeTruthy();
+    expect(screen.queryByText("Member User")).toBeNull();
     expect(
       screen.getByText("No eligible active connections yet. Connect a new one first."),
     ).toBeTruthy();
@@ -96,6 +122,17 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
     const saveButtons = screen.getAllByRole("button", { name: "Save" });
     expect(saveButtons).toHaveLength(2);
     expect(saveButtons[1]?.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Linked users/ })[0]!);
+
+    expect(screen.getByText("Owner User")).toBeTruthy();
+    expect(screen.getByText("owner-github")).toBeTruthy();
+    expect(screen.getByText("Updated 2026-04-20T00:00:00.000Z")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Linked users/ })[1]!);
+
+    expect(screen.getByText("Member User")).toBeTruthy();
+    expect(screen.getByText("Not linked")).toBeTruthy();
   });
 
   it("runs save and disable flows through the provided handlers", async () => {
@@ -133,6 +170,9 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
           saveActionDisabled: false,
           saveActionPending: false,
           statusActionPending: false,
+          memberLinksLoading: false,
+          memberLinksErrorMessage: null,
+          memberLinks: [],
         },
       ]);
 
@@ -225,6 +265,9 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
               saveActionDisabled: true,
               saveActionPending: false,
               statusActionPending: false,
+              memberLinksLoading: false,
+              memberLinksErrorMessage: null,
+              memberLinks: [],
             },
           ]}
         />
@@ -235,5 +278,50 @@ describe("OrganizationIdentityLinkingSettingsPageView", () => {
     expect(
       screen.getByRole("link", { name: "Connect new (github-enterprise-server)" }),
     ).toBeTruthy();
+  });
+
+  it("renders a provider-scoped member visibility error", () => {
+    render(
+      <MemoryRouter>
+        <OrganizationIdentityLinkingSettingsPageView
+          loadErrorMessage={null}
+          onProviderConnectionChange={() => {}}
+          onSaveProvider={async () => {}}
+          onStatusAction={async () => {}}
+          providers={[
+            {
+              providerFamily: "github",
+              displayName: "GitHub",
+              logoKey: "github",
+              configurationStatusLabel: "Enabled",
+              configurationStatusTone: "active",
+              eligibleConnections: [],
+              selectedConnectionId: null,
+              configureActionLabel: "Save",
+              statusActionLabel: "Disable",
+              statusActionNextStatus: "disabled",
+              addConnectionOptions: [
+                {
+                  href: "/integrations/github-cloud/add?returnTo=%2Fsettings%2Forganization%2Fidentity-linking",
+                  label: "Connect new",
+                },
+              ],
+              statusActionVisible: false,
+              statusActionDisabled: false,
+              saveActionDisabled: true,
+              saveActionPending: false,
+              statusActionPending: false,
+              memberLinksLoading: false,
+              memberLinksErrorMessage: "Could not load linked-member visibility.",
+              memberLinks: [],
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Linked users/ }));
+
+    expect(screen.getByText("Could not load linked-member visibility.")).toBeTruthy();
   });
 });
