@@ -58,6 +58,7 @@ export const CodexFixtureSessionServerRequests: readonly CodexApprovalRequestEnt
 
 export const SessionComposerFixtureProps: ChatComposerViewModel = {
   composerText: "Focus on dashboard asset ownership next.",
+  pendingDiffCommentSummary: null,
   pendingAttachments: [],
   modelOptions: CodexFixtureSessionModelOptions,
   selectedModel: "gpt-5.4",
@@ -75,6 +76,7 @@ export const SessionComposerFixtureProps: ChatComposerViewModel = {
   onModelChange: function onModelChange() {},
   onReasoningEffortChange: function onReasoningEffortChange() {},
   onPendingImageFilesAdded: function onPendingImageFilesAdded() {},
+  onClearPendingDiffComments: function onClearPendingDiffComments() {},
   onRemovePendingAttachment: function onRemovePendingAttachment() {},
 };
 
@@ -85,6 +87,22 @@ export const SessionComposerFixturePropsWithPendingImageAttachments: ChatCompose
     { id: "attachment-1", name: "session-workbench-overview.png" },
     { id: "attachment-2", name: "terminal-panel-empty-state.webp" },
   ],
+};
+
+export const SessionComposerFixturePropsWithPendingDiffComments: ChatComposerViewModel = {
+  ...SessionComposerFixtureProps,
+  composerText: "Please address the diff comments before sending the next patch.",
+  pendingDiffCommentSummary: {
+    count: 2,
+    label: "2 comments",
+    title: [
+      "apps/dashboard/src/features/pages/session-workbench-page.tsx R140",
+      "Request change",
+      "",
+      "apps/dashboard/src/features/pages/session-diff-panel.tsx R4",
+      "Use the shared overflow tooltip here.",
+    ].join("\n"),
+  },
 };
 
 export const SessionComposerFixturePropsUploadingImageAttachments: ChatComposerViewModel = {

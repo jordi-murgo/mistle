@@ -8,7 +8,7 @@ describe("resolveComposerSubmitAction", () => {
       resolveComposerSubmitAction({
         composerText: "  hello world  ",
         hasActiveTurn: false,
-        hasPendingAttachments: false,
+        hasPendingInput: false,
       }),
     ).toEqual({
       type: "start_turn",
@@ -23,7 +23,7 @@ describe("resolveComposerSubmitAction", () => {
       resolveComposerSubmitAction({
         composerText: "   ",
         hasActiveTurn: true,
-        hasPendingAttachments: false,
+        hasPendingInput: false,
       }),
     ).toEqual({
       type: "interrupt_turn",
@@ -37,12 +37,42 @@ describe("resolveComposerSubmitAction", () => {
       resolveComposerSubmitAction({
         composerText: "  refine this  ",
         hasActiveTurn: true,
-        hasPendingAttachments: false,
+        hasPendingInput: false,
       }),
     ).toEqual({
       type: "steer_turn",
       submitMode: "steer",
       prompt: "refine this",
+      shouldClearComposer: true,
+    });
+  });
+
+  it("starts a turn when only pending input is present", () => {
+    expect(
+      resolveComposerSubmitAction({
+        composerText: "   ",
+        hasActiveTurn: false,
+        hasPendingInput: true,
+      }),
+    ).toEqual({
+      type: "start_turn",
+      submitMode: "start",
+      prompt: "",
+      shouldClearComposer: true,
+    });
+  });
+
+  it("steers an active turn when only pending input is present", () => {
+    expect(
+      resolveComposerSubmitAction({
+        composerText: "   ",
+        hasActiveTurn: true,
+        hasPendingInput: true,
+      }),
+    ).toEqual({
+      type: "steer_turn",
+      submitMode: "steer",
+      prompt: "",
       shouldClearComposer: true,
     });
   });

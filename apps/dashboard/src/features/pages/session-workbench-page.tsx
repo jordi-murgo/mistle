@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router";
 
 import type { ChatComposerViewModel } from "../chat/components/chat-composer.js";
@@ -10,6 +10,12 @@ import {
   SessionConversationBottomPanelController,
   SessionConversationMainContent,
 } from "./session-conversation-pane.js";
+import type {
+  PendingSessionDiffComment,
+  PendingSessionDiffCommentInput,
+} from "./session-diff-comment.js";
+import { reconcilePendingSessionDiffComments } from "./session-diff-comment.js";
+import { parseSessionDiffPatch } from "./session-diff-panel-model.js";
 import { SessionDiffPanel } from "./session-diff-panel.js";
 import { SessionPortAccessPopover } from "./session-port-access-popover.js";
 import { SessionTerminalPanel } from "./session-terminal-panel.js";
@@ -36,6 +42,45 @@ function SessionWorkbenchPageContent(input: {
     sandboxInstanceId: input.sandboxInstanceId,
   });
   const conversationScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [composerText, setComposerText] = useState("");
+  const [pendingDiffComments, setPendingDiffComments] = useState<
+    readonly PendingSessionDiffComment[]
+  >([]);
+  const handleAddPendingDiffComment = useCallback(
+    (comment: PendingSessionDiffCommentInput): void => {
+      setPendingDiffComments((currentComments) => [
+        ...currentComments,
+        {
+          ...comment,
+          id: crypto.randomUUID(),
+          status: comment.status ?? {
+            kind: "current",
+          },
+        },
+      ]);
+    },
+    [],
+  );
+  const handleClearPendingDiffComments = useCallback((): void => {
+    setPendingDiffComments([]);
+  }, []);
+  const handleUpdatePendingDiffComment = useCallback((commentId: string, body: string): void => {
+    setPendingDiffComments((currentComments) =>
+      currentComments.map((comment) =>
+        comment.id !== commentId
+          ? comment
+          : {
+              ...comment,
+              body,
+            },
+      ),
+    );
+  }, []);
+  const handleRemovePendingDiffComment = useCallback((commentId: string): void => {
+    setPendingDiffComments((currentComments) =>
+      currentComments.filter((comment) => comment.id !== commentId),
+    );
+  }, []);
   const isTerminalOpenDisabled =
     !workbench.terminalPanelState.isVisible && !workbench.connectionReadiness.canConnect;
   const terminalButtonLabel = workbench.terminalPanelState.isVisible ? "Terminal" : "Open terminal";
@@ -230,6 +275,22 @@ function SessionWorkbenchPageContent(input: {
   const diffPanelPatch = workbench.connectionReadiness.canConnect
     ? workbench.diffPanelState.patch
     : "";
+  const primaryRepositoryPath = workbench.primaryRepositoryState.selectedRepositoryPath;
+
+  useEffect(() => {
+    if (!workbench.connectionReadiness.canConnect) {
+      return;
+    }
+
+    const parsedPatch = parseSessionDiffPatch(diffPanelPatch);
+    setPendingDiffComments((currentComments) =>
+      reconcilePendingSessionDiffComments({
+        comments: currentComments,
+        currentRepositoryPath: primaryRepositoryPath,
+        fileDiffs: parsedPatch.kind === "parsed" ? parsedPatch.files : [],
+      }),
+    );
+  }, [diffPanelPatch, primaryRepositoryPath, workbench.connectionReadiness.canConnect]);
 
   const alert: SessionWorkbenchAlert | null = workbench.sandboxStatusQuery.isError
     ? {
@@ -356,6 +417,12 @@ function SessionWorkbenchPageContent(input: {
           <SessionConversationBottomPanelController
             chatEntries={conversationPane.chatState.entries}
             composerStateInput={conversationPane.composerStateInput}
+            draftState={{
+              composerText,
+              pendingDiffComments,
+              clearPendingDiffComments: handleClearPendingDiffComments,
+              setComposerText,
+            }}
             isRespondingToServerRequest={
               conversationPane.serverRequestsState.isRespondingToServerRequest
             }
@@ -373,7 +440,12 @@ function SessionWorkbenchPageContent(input: {
         <SessionDiffPanel
           errorNotice={diffPanelErrorNotice}
           isLoading={workbench.connectionReadiness.canConnect && workbench.diffPanelState.isLoading}
+          onAddComment={handleAddPendingDiffComment}
+          onDeleteComment={handleRemovePendingDiffComment}
+          onUpdateComment={handleUpdatePendingDiffComment}
+          pendingComments={pendingDiffComments}
           patch={diffPanelPatch}
+          repositoryPath={primaryRepositoryPath}
           summaryLabel="Compared with main"
           title="Current changes"
         />
@@ -428,6 +500,7 @@ function renderPrimaryPanelMainContent(input: {
 function createEmptyComposerViewModel(): ChatComposerViewModel {
   return {
     composerText: "",
+    pendingDiffCommentSummary: null,
     isSubmitPending: false,
     pendingAttachments: [],
     modelOptions: [],
@@ -445,6 +518,7 @@ function createEmptyComposerViewModel(): ChatComposerViewModel {
     onModelChange: function onModelChange() {},
     onReasoningEffortChange: function onReasoningEffortChange() {},
     onPendingImageFilesAdded: function onPendingImageFilesAdded() {},
+    onClearPendingDiffComments: function onClearPendingDiffComments() {},
     onRemovePendingAttachment: function onRemovePendingAttachment() {},
   };
 }
