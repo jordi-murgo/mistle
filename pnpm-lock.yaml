@@ -1051,8 +1051,8 @@ importers:
         specifier: ^11.13.0
         version: 11.13.0
       mailpit-api:
-        specifier: ^1.8.1
-        version: 1.8.1(react@19.2.4)
+        specifier: ^1.9.0
+        version: 1.9.0(react@19.2.4)
       testcontainers:
         specifier: ^11.14.0
         version: 11.14.0
@@ -8348,8 +8348,8 @@ packages:
     resolution: {integrity: sha512-YyZM99iHrqLKjmt4LJDj58KI+fYyufRLBSYcqycxf//KpBk9FoewoGX0450m9nB44qrZnovzC2oeP5hUibxc/g==}
     engines: {node: '>=18'}
 
-  follow-redirects@1.15.11:
-    resolution: {integrity: sha512-deG2P0JfjrTxl50XGCDyfI97ZGVCxIpfKYmfyrQ54n5FO/0gfIES8C/Psl6kWVDolizcaaxZJnTS0QSMxvnsBQ==}
+  follow-redirects@1.16.0:
+    resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -9604,8 +9604,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  mailpit-api@1.8.1:
-    resolution: {integrity: sha512-nLbgP6cXIFS8U2DN6vDI3z13x1+6T198kVsX/jNwf1L6KEGJkRFCauh/pLxiW5DQoWHmVeOTLQ4scRma40uZRQ==}
+  mailpit-api@1.9.0:
+    resolution: {integrity: sha512-KoZIR7vfE7boEBLZ7fOw6SpGxn2pF207eLEWCoYePKAayFe3zYxGUgxNwxzEAp0hwVYSoe0lJQdeprHLEuelhA==}
     engines: {node: '>=18.0.0'}
 
   markdown-extensions@2.0.0:
@@ -18883,7 +18883,7 @@ snapshots:
 
   axios@1.13.6:
     dependencies:
-      follow-redirects: 1.15.11
+      follow-redirects: 1.16.0
       form-data: 4.0.5
       proxy-from-env: 1.1.0
     transitivePeerDependencies:
@@ -20546,7 +20546,7 @@ snapshots:
       path-exists: 5.0.0
       unicorn-magic: 0.1.0
 
-  follow-redirects@1.15.11: {}
+  follow-redirects@1.16.0: {}
 
   for-each@0.3.5:
     dependencies:
@@ -21988,7 +21988,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  mailpit-api@1.8.1(react@19.2.4):
+  mailpit-api@1.9.0(react@19.2.4):
     dependencies:
       axios: 1.13.6
       isomorphic-ws: 5.0.0(ws@8.20.0)
