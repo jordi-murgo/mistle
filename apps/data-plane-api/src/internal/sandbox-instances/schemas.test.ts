@@ -113,6 +113,14 @@ describe("StartSandboxInstanceInputSchema", () => {
       gitIdentity: {
         name: "Mistle User",
         email: "mistle-user@example.com",
+        signing: {
+          format: "ssh",
+          program: "/opt/mistle/bin/mistle-ssh-sign",
+          keyRef: "key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLE",
+          organizationId: "org_123",
+          providerFamily: "github",
+          actingUserId: "usr_123",
+        },
       },
       source: "dashboard",
       image: {
@@ -187,6 +195,14 @@ describe("ResumeSandboxInstanceInputSchema", () => {
       gitIdentity: {
         name: "Mistle User",
         email: "mistle-user@example.com",
+        signing: {
+          format: "ssh",
+          program: "/opt/mistle/bin/mistle-ssh-sign",
+          keyRef: "key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLE",
+          organizationId: "org_123",
+          providerFamily: "github",
+          actingUserId: "usr_123",
+        },
       },
       idempotencyKey: "req_456",
     };

@@ -31,6 +31,14 @@ export type StartSandboxInstanceWorkflowImageInput = Pick<
 export type SandboxWorkflowGitIdentityInput = {
   name: string;
   email: string;
+  signing?: {
+    format: "ssh";
+    program: string;
+    keyRef: string;
+    organizationId: string;
+    providerFamily: string;
+    actingUserId: string;
+  };
 };
 
 export type StartSandboxInstanceWorkflowInput = {

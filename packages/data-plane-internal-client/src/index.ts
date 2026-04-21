@@ -37,6 +37,14 @@ export type StartSandboxInstanceInput = {
   gitIdentity?: {
     name: string;
     email: string;
+    signing?: {
+      format: "ssh";
+      program: string;
+      keyRef: string;
+      organizationId: string;
+      providerFamily: string;
+      actingUserId: string;
+    };
   };
   source: SandboxInstanceSource;
   image: Pick<SandboxImageHandle, "imageId" | "createdAt">;
@@ -51,6 +59,14 @@ export type ResumeSandboxInstanceInput = {
   gitIdentity?: {
     name: string;
     email: string;
+    signing?: {
+      format: "ssh";
+      program: string;
+      keyRef: string;
+      organizationId: string;
+      providerFamily: string;
+      actingUserId: string;
+    };
   };
   idempotencyKey?: string;
 };

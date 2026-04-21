@@ -1225,6 +1225,49 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "signing": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "const": "ssh"
+            },
+            "program": {
+              "type": "string",
+              "minLength": 1
+            },
+            "keyRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "organizationId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "providerFamily": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actingUserId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "grant": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "format",
+            "program",
+            "keyRef",
+            "organizationId",
+            "providerFamily",
+            "actingUserId",
+            "grant"
+          ],
+          "additionalProperties": false
         }
       },
       "required": ["name", "email"],
