@@ -34,6 +34,7 @@ import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { ensureCommitSignBinaryInstalled } from "../../control-plane-api/integration/helpers/commit-sign.js";
 import type { DataPlaneWorkerConfig } from "../openworkflow/core/config.js";
 import {
   createArchilDiskName,
@@ -389,6 +390,7 @@ describeIfArchilIntegration("provisionSandboxStorage integration", () => {
   });
 
   beforeAll(async () => {
+    await ensureCommitSignBinaryInstalled();
     databaseStack = await startPostgresWithPgBouncer();
 
     await runControlPlaneMigrations({

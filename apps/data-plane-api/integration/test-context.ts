@@ -23,6 +23,7 @@ import { Pool, Client } from "pg";
 import { it as vitestIt } from "vitest";
 import { z } from "zod";
 
+import { ensureCommitSignBinaryInstalled } from "../../control-plane-api/integration/helpers/commit-sign.js";
 import { createDataPlaneApiRuntime } from "../src/main.js";
 import type { DataPlaneApiConfig } from "../src/types.js";
 
@@ -381,6 +382,7 @@ export const it = vitestIt.extend<{ fixture: DataPlaneApiIntegrationFixture }>({
     async ({}, use) => {
       const cleanupTasks: Array<() => Promise<void>> = [];
       const sharedInfraConfig = await readSharedInfraConfig();
+      await ensureCommitSignBinaryInstalled();
       const runtimeDatabaseName = createFileScopedDatabaseName({
         integrationRunId: sharedInfraConfig.integrationRunId,
         filePath: getCurrentVitestFilePath(),

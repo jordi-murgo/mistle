@@ -28,6 +28,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { ensureCommitSignBinaryInstalled } from "../../control-plane-api/integration/helpers/commit-sign.js";
 import type { DataPlaneWorkerConfig } from "../openworkflow/core/config.js";
 import { createSandboxStorageBackendAdapter } from "../openworkflow/shared/sandbox-storage/create-sandbox-storage-backend-adapter.js";
 import { getSandboxInstanceStorageBySandboxInstanceId } from "../openworkflow/shared/sandbox-storage/storage-persistence.js";
@@ -172,6 +173,7 @@ describeIfArchilIntegration("deprovisionSandboxStorage integration", () => {
   }
 
   beforeAll(async () => {
+    await ensureCommitSignBinaryInstalled();
     databaseStack = await startPostgresWithPgBouncer();
 
     await runControlPlaneMigrations({

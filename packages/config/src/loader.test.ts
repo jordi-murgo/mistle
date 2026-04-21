@@ -195,6 +195,9 @@ describe("parseConfigRecord", () => {
           dataPlaneApi: {
             baseUrl: "http://127.0.0.1:5200",
           },
+          controlPlaneApi: {
+            baseUrl: "http://127.0.0.1:5000",
+          },
         },
         tokenizer_proxy: {
           server: {
@@ -404,6 +407,9 @@ describe("parseConfigRecord", () => {
           dataPlaneApi: {
             baseUrl: "http://127.0.0.1:5200",
           },
+          controlPlaneApi: {
+            baseUrl: "http://127.0.0.1:5000",
+          },
         },
         tokenizer_proxy: {
           server: {
@@ -608,6 +614,9 @@ describe("parseConfigRecord", () => {
           },
           dataPlaneApi: {
             baseUrl: "http://127.0.0.1:5200",
+          },
+          controlPlaneApi: {
+            baseUrl: "http://127.0.0.1:5000",
           },
         },
         tokenizer_proxy: {

@@ -166,6 +166,9 @@ key_prefix = "mistle:runtime-state"
 [apps.data_plane_gateway.data_plane_api]
 base_url = "http://data-plane-api:8082"
 
+[apps.data_plane_gateway.control_plane_api]
+base_url = "http://control-plane-api:8080"
+
 # Optional. Omit this block to use the built-in gateway defaults.
 #[apps.data_plane_gateway.lifecycle]
 #idle_timeout_ms = 300000

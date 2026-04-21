@@ -99,6 +99,11 @@ async function main(): Promise<void> {
     sandbox: {
       defaultBaseImage: "127.0.0.1:5001/mistle/sandbox-base:dev",
       gatewayWsUrl: "ws://127.0.0.1:5202/tunnel/sandbox",
+      bootstrap: {
+        tokenSecret: "integration-bootstrap-token-secret",
+        tokenIssuer: "integration-data-plane-worker",
+        tokenAudience: "integration-data-plane-gateway",
+      },
       storageBackend: env.MISTLE_TEST_CONTROL_PLANE_API_SANDBOX_STORAGE_BACKEND,
     },
   });
