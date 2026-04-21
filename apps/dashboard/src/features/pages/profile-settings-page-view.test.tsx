@@ -18,11 +18,13 @@ const baseProps = {
   linkedAccountsEmptyStateMessage: null,
   linkedAccountsLoading: false,
   linkedAccountsLoadErrorMessage: null,
+  onDeleteLinkedAccountCommitSigningKey: async () => {},
   onDeleteProfileImage: async () => {},
   onLinkLinkedAccount: async () => {},
   onSaveChanges: async () => {},
   onUnlinkLinkedAccount: async () => {},
   onUpdateLinkedAccountPreferredEmail: async () => {},
+  onUploadLinkedAccountCommitSigningKey: async () => {},
   onUploadProfileImage: async () => {},
   profileImageBusy: false,
   profileImageErrorMessage: null,
@@ -141,6 +143,7 @@ describe("ProfileSettingsPageView", () => {
             linkedAtLabel: null,
             helperMessage: null,
             emailPreference: null,
+            commitSigning: null,
             primaryActionLabel: "Link account",
             secondaryActionLabel: null,
           },
@@ -181,6 +184,14 @@ describe("ProfileSettingsPageView", () => {
                 },
               ],
               helperText: "Used for sandbox Git identity and commit signing.",
+            },
+            commitSigning: {
+              statusLabel: "Not configured",
+              keySummaryLabel: null,
+              helperLabel: "SSH private key",
+              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
+              uploadActionLabel: "Upload private key",
+              removeActionLabel: null,
             },
             primaryActionLabel: "Relink",
             secondaryActionLabel: "Unlink",
@@ -242,6 +253,14 @@ describe("ProfileSettingsPageView", () => {
             linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
             helperMessage: null,
             emailPreference: null,
+            commitSigning: {
+              statusLabel: "Not configured",
+              keySummaryLabel: null,
+              helperLabel: "SSH private key",
+              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
+              uploadActionLabel: "Upload private key",
+              removeActionLabel: null,
+            },
             primaryActionLabel: "Relink",
             secondaryActionLabel: "Unlink",
           },
@@ -255,6 +274,7 @@ describe("ProfileSettingsPageView", () => {
             linkedAtLabel: null,
             helperMessage: null,
             emailPreference: null,
+            commitSigning: null,
             primaryActionLabel: "Link account",
             secondaryActionLabel: null,
           },
@@ -286,6 +306,7 @@ describe("ProfileSettingsPageView", () => {
             linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
             helperMessage: "GitHub needs to be linked again before Mistle can act as you.",
             emailPreference: null,
+            commitSigning: null,
             primaryActionLabel: "Relink",
             secondaryActionLabel: "Unlink",
           },
@@ -308,7 +329,7 @@ describe("ProfileSettingsPageView", () => {
     });
   });
 
-  it("renders GitHub commit email controls when selectable emails are available", () => {
+  it("renders GitHub commit email and signing controls when available", () => {
     render(
       <ProfileSettingsPageView
         {...baseProps}
@@ -336,6 +357,14 @@ describe("ProfileSettingsPageView", () => {
               ],
               helperText: "Used for sandbox Git identity and commit signing.",
             },
+            commitSigning: {
+              statusLabel: "Configured",
+              keySummaryLabel: "SHA256:abc123",
+              helperLabel: "SSH private key",
+              helperCommand: null,
+              uploadActionLabel: "Replace private key",
+              removeActionLabel: "Remove key",
+            },
             primaryActionLabel: "Relink",
             secondaryActionLabel: "Unlink",
           },
@@ -344,8 +373,122 @@ describe("ProfileSettingsPageView", () => {
     );
 
     expect(screen.getByText("Commit email")).toBeTruthy();
+    expect(screen.getByText("Commit signing")).toBeTruthy();
     expect(screen.getByRole("combobox")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Replace private key" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove key" })).toBeTruthy();
+    expect(screen.getByText("SSH private key")).toBeTruthy();
     expect(screen.getByText("Used for sandbox Git identity and commit signing.")).toBeTruthy();
+  });
+
+  it("uploads a pasted GitHub commit signing key through the provided handler", async () => {
+    const uploadedFiles: File[] = [];
+
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[
+          {
+            providerFamily: "github",
+            displayName: "GitHub",
+            logoKey: "github",
+            statusLabel: "Linked",
+            statusTone: "active",
+            accountLabel: "@mistle-user",
+            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
+            helperMessage: null,
+            emailPreference: null,
+            commitSigning: {
+              statusLabel: "Not configured",
+              keySummaryLabel: null,
+              helperLabel: "SSH private key",
+              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
+              uploadActionLabel: "Upload private key",
+              removeActionLabel: null,
+            },
+            primaryActionLabel: "Relink",
+            secondaryActionLabel: "Unlink",
+          },
+        ]}
+        onUploadLinkedAccountCommitSigningKey={async (_providerFamily, file) => {
+          uploadedFiles.push(file);
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload private key" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Paste your SSH private key"), {
+      target: {
+        value: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----\n",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload private key" }));
+
+    await waitFor(() => {
+      expect(uploadedFiles).toHaveLength(1);
+    });
+    expect(uploadedFiles[0]?.name).toBe("my-signing-key");
+    expect(uploadedFiles[0]?.type).toBe("text/plain");
+  });
+
+  it("uploads a GitHub commit signing key from the file chooser", async () => {
+    const uploadedFiles: File[] = [];
+
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[
+          {
+            providerFamily: "github",
+            displayName: "GitHub",
+            logoKey: "github",
+            statusLabel: "Linked",
+            statusTone: "active",
+            accountLabel: "@mistle-user",
+            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
+            helperMessage: null,
+            emailPreference: null,
+            commitSigning: {
+              statusLabel: "Not configured",
+              keySummaryLabel: null,
+              helperLabel: "SSH private key",
+              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
+              uploadActionLabel: "Upload private key",
+              removeActionLabel: null,
+            },
+            primaryActionLabel: "Relink",
+            secondaryActionLabel: "Unlink",
+          },
+        ]}
+        onUploadLinkedAccountCommitSigningKey={async (_providerFamily, file) => {
+          uploadedFiles.push(file);
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload private key" }));
+
+    const uploadInput = screen.getByLabelText("Choose GitHub commit signing private key file", {
+      selector: "input",
+    });
+    const uploadFile = new File(
+      ["-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----\n"],
+      "my-signing-key",
+      {
+        type: "application/octet-stream",
+      },
+    );
+
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [uploadFile],
+      },
+    });
+
+    await waitFor(() => {
+      expect(uploadedFiles).toEqual([uploadFile]);
+    });
   });
 });

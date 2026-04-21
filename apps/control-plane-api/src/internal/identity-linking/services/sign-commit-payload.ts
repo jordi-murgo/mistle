@@ -13,19 +13,16 @@ import { SigningGrantError, verifySigningGrant } from "@mistle/sandbox-signing-a
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
+import {
+  GitSshSigningCredentialKind,
+  GitSshSigningSecretMetadataSchema,
+} from "../../../identity-linking/github-signing.js";
 import { createCredentialSecretResolver } from "./credential-secret-resolution.js";
 import { InternalIdentityLinkingError, InternalIdentityLinkingErrorCodes } from "./errors.js";
 
-const GitSshSigningCredentialKind = "git_ssh_signing_key";
 const SshSigningFormat = "ssh";
 const CommitSignSignatureEncoding = "pem";
-const CommitSignBinaryPath = "/usr/local/bin/commit-sign";
-
-const GitSigningSecretMetadataSchema = z
-  .object({
-    publicKey: z.string().min(1),
-  })
-  .loose();
+const DefaultCommitSignBinaryPath = "/usr/local/bin/commit-sign";
 
 const CommitSignResponseSchema = z
   .object({
@@ -72,11 +69,12 @@ function resolveRequestedKeyRefOrThrow(keyRef: string): string {
 }
 
 async function runCommitSignBinary(input: {
+  binaryPath: string;
   format: "ssh";
   privateKey: string;
   payloadBase64: string;
 }): Promise<SignCommitPayloadResult> {
-  const child = spawn(CommitSignBinaryPath, [], {
+  const child = spawn(input.binaryPath, [], {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -130,6 +128,9 @@ export async function signCommitPayload(
       activeMasterEncryptionKeyVersion: number;
       masterEncryptionKeys: Record<string, string>;
     };
+    commitSignConfig?: {
+      binaryPath: string;
+    };
     sandboxBootstrapConfig: {
       tokenSecret: string;
       tokenIssuer: string;
@@ -145,6 +146,8 @@ export async function signCommitPayload(
       `Git commit signing format '${input.format}' is not supported yet.`,
     );
   }
+
+  const commitSignBinaryPath = ctx.commitSignConfig?.binaryPath ?? DefaultCommitSignBinaryPath;
 
   let verifiedGrant;
   try {
@@ -294,7 +297,7 @@ export async function signCommitPayload(
     throw new Error("Expected Git SSH signing credential secret candidate.");
   }
 
-  const parsedSigningMetadata = GitSigningSecretMetadataSchema.safeParse(
+  const parsedSigningMetadata = GitSshSigningSecretMetadataSchema.safeParse(
     signingCredentialSecret.metadata ?? {},
   );
   if (!parsedSigningMetadata.success) {
@@ -343,6 +346,7 @@ export async function signCommitPayload(
       UserExternalPrincipalCredentialSecretKinds.GIT_SSH_PRIVATE_KEY,
     );
     return await runCommitSignBinary({
+      binaryPath: commitSignBinaryPath,
       format: SshSigningFormat,
       privateKey,
       payloadBase64: input.payload,
