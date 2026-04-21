@@ -9,11 +9,12 @@ import {
   Notice,
 } from "@mistle/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SyntheticEvent } from "react";
+import { useState, type SyntheticEvent } from "react";
 import { useNavigate, useParams } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import { useAppPageMeta } from "../navigation/route-meta.js";
+import { UnsavedChangesGuard } from "../navigation/unsaved-changes-guard.js";
 import { SandboxProfilesApiError } from "../sandbox-profiles/sandbox-profiles-api-errors.js";
 import {
   sandboxProfileDetailQueryKey,
@@ -21,7 +22,7 @@ import {
 } from "../sandbox-profiles/sandbox-profiles-query-keys.js";
 import { getSandboxProfile } from "../sandbox-profiles/sandbox-profiles-service.js";
 import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
-import { PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
+import { FormPageFrame, PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
 import { IntegrationsEditorSection } from "./integrations-editor-section.js";
 import type {
   IntegrationConnectionSummary,
@@ -69,7 +70,7 @@ function CreateSandboxProfileEditorPage(): React.JSX.Element {
   }
 
   return (
-    <PageFrame description={description} title={title}>
+    <FormPageFrame description={description} title={title}>
       <div className="gap-4 flex flex-col">
         {metaState.saveError ? (
           <Notice title="Create failed" variant="alert">
@@ -116,7 +117,7 @@ function CreateSandboxProfileEditorPage(): React.JSX.Element {
           </CardContent>
         </Card>
       </div>
-    </PageFrame>
+    </FormPageFrame>
   );
 }
 
@@ -137,7 +138,11 @@ function EditSandboxProfileEditorPage(): React.JSX.Element {
   });
 
   if (profileQuery.isPending) {
-    return <PageFrame title="">{null}</PageFrame>;
+    return (
+      <PageFrame maxWidthClassName="max-w-5xl" title="">
+        {null}
+      </PageFrame>
+    );
   }
 
   if (profileQuery.isError || profileQuery.data === undefined) {
@@ -145,7 +150,7 @@ function EditSandboxProfileEditorPage(): React.JSX.Element {
       profileQuery.error instanceof SandboxProfilesApiError && profileQuery.error.status === 404;
 
     return (
-      <PageFrame title="">
+      <PageFrame maxWidthClassName="max-w-5xl" title="">
         <div className="gap-4 flex flex-col">
           <h1 className="text-xl font-semibold">Edit profile</h1>
           <Card>
@@ -180,7 +185,7 @@ function EditSandboxProfileEditorPage(): React.JSX.Element {
   }
 
   return (
-    <PageFrame title="">
+    <PageFrame maxWidthClassName="max-w-5xl" title="">
       <LoadedSandboxProfileEditorPage
         navigate={navigate}
         profileId={profileId}
@@ -219,9 +224,15 @@ function LoadedSandboxProfileEditorPage(input: {
   const integrationsLoader = useSandboxProfileIntegrationsLoader({
     profileId: input.profileId,
   });
+  const [hasUnsavedIntegrationChanges, setHasUnsavedIntegrationChanges] = useState(false);
 
   return (
     <div className="gap-4 flex flex-col">
+      <UnsavedChangesGuard
+        description="You have unsaved integration changes. If you leave this page, your changes will be discarded."
+        when={hasUnsavedIntegrationChanges}
+      />
+
       <LoadedSandboxProfileMetaSection
         key={`${input.profileId}:${input.profile.displayName}`}
         invalidateProfileDetail={input.invalidateProfileDetail}
@@ -238,6 +249,7 @@ function LoadedSandboxProfileEditorPage(input: {
             : `${input.profileId}:${String(integrationsLoader.version)}`
         }
         loader={integrationsLoader}
+        onHasUnsavedChangesChange={setHasUnsavedIntegrationChanges}
         profileId={input.profileId}
         invalidateVersionBindings={input.invalidateVersionBindings}
       />
@@ -280,6 +292,7 @@ function LoadedSandboxProfileIntegrationsSection(input: {
   profileId: string;
   loader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
   invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
+  onHasUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
 }): React.JSX.Element {
   if (
     input.loader.integrationBindingsQuery.isPending ||
@@ -302,7 +315,9 @@ function LoadedSandboxProfileIntegrationsSection(input: {
         onAddIntegrationBindingRow={async () => false}
         onIntegrationBindingRowChange={() => {}}
         onRemoveIntegrationBindingRow={() => {}}
-        resolveSelectedConnectionDisplayName={() => undefined}
+        {...(input.onHasUnsavedChangesChange === undefined
+          ? {}
+          : { onHasUnsavedChangesChange: input.onHasUnsavedChangesChange })}
       />
     );
   }
@@ -331,6 +346,7 @@ function ReadySandboxProfileIntegrationsSection(input: {
   integrationDirectoryQuery: ReturnType<
     typeof useSandboxProfileIntegrationsLoader
   >["integrationDirectoryQuery"];
+  onHasUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
 }): React.JSX.Element {
   const integrationsState = useLoadedSandboxProfileIntegrationsState({
     profileId: input.profileId,
@@ -358,7 +374,9 @@ function ReadySandboxProfileIntegrationsSection(input: {
       onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
       onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
       onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
-      resolveSelectedConnectionDisplayName={integrationsState.resolveSelectedConnectionDisplayName}
+      {...(input.onHasUnsavedChangesChange === undefined
+        ? {}
+        : { onHasUnsavedChangesChange: input.onHasUnsavedChangesChange })}
     />
   );
 }

@@ -8,29 +8,13 @@ import type {
   IntegrationTargetSummary,
   SandboxProfileBindingEditorRow,
 } from "./sandbox-profile-binding-config-editor.js";
-import { formatSandboxProfileBindingSummaryItems } from "./sandbox-profile-binding-summary.js";
+import { resolveBindingConfigSummaryItems } from "./sandbox-profile-binding-config-editor.js";
+import { resolveRowBindingMetadata } from "./sandbox-profile-binding-shared.js";
 
-function resolveRowBindingMetadata(input: {
-  row: SandboxProfileBindingEditorRow;
-  availableConnections: readonly IntegrationConnectionSummary[];
-  availableTargets: readonly IntegrationTargetSummary[];
-}): {
-  connection: IntegrationConnectionSummary;
-  target: IntegrationTargetSummary | undefined;
-} | null {
-  const connection = input.availableConnections.find(
-    (candidate) => candidate.id === input.row.connectionId,
-  );
-  if (connection === undefined) {
-    return null;
-  }
+const DefaultSummaryItemCount = 2;
 
-  return {
-    connection,
-    target: input.availableTargets.find(
-      (candidate) => candidate.targetKey === connection.targetKey,
-    ),
-  };
+function shouldRenderAllSummaryItems(kind: SandboxProfileBindingEditorRow["kind"]): boolean {
+  return kind === "agent" || kind === "git";
 }
 
 export function SandboxProfileBindingCard(input: {
@@ -47,10 +31,13 @@ export function SandboxProfileBindingCard(input: {
     availableTargets: input.availableTargets,
   });
   const target = rowMetadata?.target;
-  const summaryItems = formatSandboxProfileBindingSummaryItems({
+  const summaryItems = resolveBindingConfigSummaryItems({
     row: input.row,
-    availableConnections: input.availableConnections,
-    availableTargets: input.availableTargets,
+    connections: input.availableConnections,
+    targets: input.availableTargets,
+    maxItems: shouldRenderAllSummaryItems(input.row.kind)
+      ? Number.POSITIVE_INFINITY
+      : DefaultSummaryItemCount,
   });
   const connectionDisplayName =
     rowMetadata === null
@@ -60,7 +47,7 @@ export function SandboxProfileBindingCard(input: {
         });
 
   return (
-    <div className="gap-4 rounded-md border p-4 flex flex-col">
+    <div className="flex flex-col gap-3 py-2">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0 flex items-center gap-2">
           {target?.logoKey ? (
@@ -81,22 +68,22 @@ export function SandboxProfileBindingCard(input: {
             )}
           </div>
         </div>
-        <div className="gap-2 flex">
+        <div className="flex gap-1">
           <Button
             aria-label="Edit binding"
+            className="h-7 w-7"
             onClick={input.onEdit}
-            size="icon-sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             <PencilSimpleIcon aria-hidden className="size-4" />
           </Button>
           <Button
             aria-label="Remove binding"
+            className="h-7 w-7"
             onClick={input.onRemove}
-            size="icon-sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             <TrashIcon aria-hidden className="size-4" />
           </Button>
@@ -104,7 +91,7 @@ export function SandboxProfileBindingCard(input: {
       </div>
 
       {summaryItems.length > 0 ? (
-        <dl className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <dl className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           {summaryItems.map((item) => (
             <div className="gap-1 flex flex-col" key={item.label}>
               <DetailLabel>{item.label}</DetailLabel>

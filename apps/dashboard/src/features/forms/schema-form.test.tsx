@@ -1,0 +1,188 @@
+// @vitest-environment jsdom
+
+import type { RJSFSchema, UiSchema } from "@rjsf/utils";
+import validator from "@rjsf/validator-ajv8";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import type { SchemaFormContext } from "./schema-form.js";
+import { SchemaFormWithoutSubmit } from "./schema-form.js";
+
+type JsonObject = Record<string, unknown>;
+
+const Schema: RJSFSchema = {
+  type: "object",
+  properties: {
+    defaultRegion: {
+      title: "Default region",
+      type: "string",
+      oneOf: [
+        {
+          const: "us-east-1",
+          title: "us-east-1",
+        },
+        {
+          const: "us-west-2",
+          title: "us-west-2",
+        },
+      ],
+    },
+  },
+};
+
+const UiSchema: UiSchema<JsonObject, RJSFSchema, SchemaFormContext> = {
+  defaultRegion: {
+    "ui:placeholder": "Select default region",
+    "ui:widget": "single-select-string-combobox",
+  },
+};
+
+function SingleSelectHarness(input: { formData: JsonObject }): React.JSX.Element {
+  return (
+    <SchemaFormWithoutSubmit
+      formContext={{}}
+      formData={input.formData}
+      noHtml5Validate
+      onChange={() => {}}
+      schema={Schema}
+      showErrorList={false}
+      uiSchema={UiSchema}
+      validator={validator}
+    />
+  );
+}
+
+const NestedSchema: RJSFSchema = {
+  type: "object",
+  properties: {
+    model: {
+      type: "object",
+      properties: {
+        defaultModel: {
+          title: "Default model",
+          type: "string",
+          oneOf: [
+            {
+              const: "gpt-5.3-codex",
+              title: "gpt-5.3-codex",
+            },
+            {
+              const: "gpt-5.4",
+              title: "gpt-5.4",
+            },
+          ],
+        },
+        options: {
+          type: "object",
+          properties: {
+            reasoningEffort: {
+              title: "Reasoning effort",
+              type: "string",
+              oneOf: [
+                {
+                  const: "medium",
+                  title: "medium",
+                },
+                {
+                  const: "high",
+                  title: "high",
+                },
+              ],
+            },
+            additionalInstructions: {
+              title: "Agent Instructions",
+              type: "string",
+              description: "Appended to the developer message.",
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const NestedUiSchema: UiSchema<JsonObject, RJSFSchema, SchemaFormContext> = {
+  model: {
+    defaultModel: {
+      "ui:widget": "single-select-string-combobox",
+    },
+    options: {
+      reasoningEffort: {
+        "ui:widget": "single-select-string-combobox",
+      },
+      additionalInstructions: {
+        "ui:widget": "TextareaWidget",
+        "ui:options": {
+          rows: 8,
+        },
+      },
+    },
+  },
+};
+
+function NestedObjectLayoutHarness(input: { formData: JsonObject }): React.JSX.Element {
+  return (
+    <SchemaFormWithoutSubmit
+      formContext={{
+        columns: 2,
+        labelTone: "detail",
+        layout: "vertical",
+      }}
+      formData={input.formData}
+      noHtml5Validate
+      onChange={() => {}}
+      schema={NestedSchema}
+      showErrorList={false}
+      uiSchema={NestedUiSchema}
+      validator={validator}
+    />
+  );
+}
+
+describe("SchemaFormWithoutSubmit", () => {
+  it("wires the single-select combobox widget through the form theme", async () => {
+    render(
+      <SingleSelectHarness
+        formData={{
+          defaultRegion: "us-east-1",
+        }}
+      />,
+    );
+
+    const input = screen.getByLabelText("Default region");
+    expect(input).toHaveProperty("value", "us-east-1");
+
+    fireEvent.focus(input);
+
+    const listbox = await screen.findByRole("listbox");
+
+    expect(within(listbox).getByText("us-east-1")).toBeDefined();
+    expect(within(listbox).getByText("us-west-2")).toBeDefined();
+
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Default region")).toHaveProperty("value", "us-east-1");
+    });
+  });
+
+  it("flattens nested wrapper objects into the parent two-column layout", () => {
+    render(
+      <NestedObjectLayoutHarness
+        formData={{
+          model: {
+            defaultModel: "gpt-5.3-codex",
+            options: {
+              reasoningEffort: "medium",
+              additionalInstructions: "Stay concise and ask before destructive changes.",
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Default model")).toBeDefined();
+    expect(screen.getByLabelText("Reasoning effort")).toBeDefined();
+    expect(screen.getByLabelText("Agent Instructions").closest(".md\\:col-span-2")).not.toBeNull();
+  });
+});

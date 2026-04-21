@@ -14,16 +14,26 @@ import * as React from "react";
 import { formatConnectionDisplayName } from "../integrations/format-connection-display-name.js";
 import { resolveIntegrationLogoPath } from "../integrations/logo.js";
 import type { SandboxIntegrationBindingKind } from "../sandbox-profiles/sandbox-profiles-types.js";
+import { ActionTile } from "../shared/action-tile.js";
 import { SandboxProfileBindingCard } from "./sandbox-profile-binding-card.js";
 import type {
   IntegrationConnectionSummary,
   IntegrationTargetSummary,
   SandboxProfileBindingEditorRow,
 } from "./sandbox-profile-binding-config-editor.js";
-import { resolveBindingToolToggleModel } from "./sandbox-profile-binding-config-editor.js";
-import { formatSandboxProfileBindingSummaryItems } from "./sandbox-profile-binding-summary.js";
+import {
+  createDefaultBindingConfig,
+  resolveBindingConfigSummaryItems,
+  resolveBindingKindFromTarget,
+  resolveBindingToolToggleModel,
+  SandboxProfileBindingConfigEditor,
+} from "./sandbox-profile-binding-config-editor.js";
+import {
+  BindingConnectionField,
+  resolveRowBindingMetadata,
+} from "./sandbox-profile-binding-shared.js";
 
-function formatBindingSectionTitle(kind: SandboxIntegrationBindingKind): string {
+export function formatBindingSectionTitle(kind: SandboxIntegrationBindingKind): string {
   if (kind === "agent") {
     return "Agent Harness";
   }
@@ -43,34 +53,298 @@ function formatBindingSectionEmptyState(kind: SandboxIntegrationBindingKind): st
   return "Add connectors to give the agent access to external tools and their resources, like Linear or Slack.";
 }
 
-function formatBindingSectionConstraint(kind: SandboxIntegrationBindingKind): string | null {
+export function formatBindingSectionConstraint(kind: SandboxIntegrationBindingKind): string | null {
   if (kind === "agent") {
     return "Only one agent harness can be assigned to a sandbox profile.";
   }
   return null;
 }
 
-function resolveRowBindingMetadata(input: {
-  row: SandboxProfileBindingEditorRow;
-  availableConnections: readonly IntegrationConnectionSummary[];
-  availableTargets: readonly IntegrationTargetSummary[];
-}): {
-  connection: IntegrationConnectionSummary;
-  target: IntegrationTargetSummary | undefined;
-} | null {
-  const connection = input.availableConnections.find(
-    (candidate) => candidate.id === input.row.connectionId,
-  );
-  if (connection === undefined) {
-    return null;
-  }
+export function shouldHideBindingSectionAddAction(input: {
+  kind: SandboxIntegrationBindingKind;
+  rowCount: number;
+}): boolean {
+  return (input.kind === "agent" || input.kind === "git") && input.rowCount > 0;
+}
+
+function serializeBindingRowState(row: Omit<SandboxProfileBindingEditorRow, "clientId">): string {
+  return JSON.stringify({
+    id: row.id,
+    connectionId: row.connectionId,
+    kind: row.kind,
+    config: row.config,
+  });
+}
+
+function useDraftBindingRow(row: SandboxProfileBindingEditorRow): {
+  draftRow: SandboxProfileBindingEditorRow;
+  isDirty: boolean;
+  setDraftRow: React.Dispatch<React.SetStateAction<SandboxProfileBindingEditorRow>>;
+  resetDraftRow: () => void;
+} {
+  const persistedSignature = serializeBindingRowState(row);
+  const persistedRowRef = React.useRef(row);
+  const [draftRow, setDraftRow] = React.useState(row);
+
+  persistedRowRef.current = row;
+
+  React.useEffect(() => {
+    setDraftRow(persistedRowRef.current);
+  }, [persistedSignature]);
 
   return {
-    connection,
-    target: input.availableTargets.find(
-      (candidate) => candidate.targetKey === connection.targetKey,
-    ),
+    draftRow,
+    isDirty: serializeBindingRowState(draftRow) !== persistedSignature,
+    setDraftRow,
+    resetDraftRow: () => {
+      setDraftRow(row);
+    },
   };
+}
+
+function BindingDraftActions(input: {
+  isDirty: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <Button disabled={!input.isDirty} onClick={input.onCancel} type="button" variant="outline">
+        Cancel
+      </Button>
+      <Button disabled={!input.isDirty} onClick={input.onSave} type="button">
+        Save
+      </Button>
+    </div>
+  );
+}
+
+function resolveAvailableConnectionsForBindingKind(input: {
+  kind: SandboxIntegrationBindingKind;
+  availableConnections: readonly IntegrationConnectionSummary[];
+  availableTargets: readonly IntegrationTargetSummary[];
+}): readonly IntegrationConnectionSummary[] {
+  return input.availableConnections.filter((connection) => {
+    const target = input.availableTargets.find(
+      (candidate) => candidate.targetKey === connection.targetKey,
+    );
+    return resolveBindingKindFromTarget(target) === input.kind;
+  });
+}
+
+function SchemaBindingConnectionPicker(input: {
+  availableConnections: readonly IntegrationConnectionSummary[];
+  availableTargets: readonly IntegrationTargetSummary[];
+  disabled: boolean;
+  onCreateBindingFromConnection:
+    | ((input: {
+        kind: SandboxIntegrationBindingKind;
+        connectionId: string;
+      }) => Promise<void> | void)
+    | undefined;
+  kind: SandboxIntegrationBindingKind;
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <BindingConnectionField
+        ariaLabel="Connection"
+        availableConnections={input.availableConnections}
+        availableTargets={input.availableTargets}
+        disabled={input.disabled}
+        onValueChange={(nextValue) => {
+          if (input.onCreateBindingFromConnection === undefined) {
+            return;
+          }
+          void input.onCreateBindingFromConnection({
+            kind: input.kind,
+            connectionId: nextValue,
+          });
+        }}
+        placeholder="Select a connection"
+        selectedConnectionId={null}
+      />
+    </div>
+  );
+}
+
+function renderSchemaBindingRemoveAction(input: {
+  kind: SandboxIntegrationBindingKind;
+  row: SandboxProfileBindingEditorRow;
+  onRemove: (clientId: string) => void;
+}): React.ReactNode {
+  if (input.kind !== "git") {
+    return undefined;
+  }
+
+  return (
+    <Button
+      aria-label="Remove binding"
+      className="mt-6 h-7 w-7 shrink-0"
+      onClick={() => {
+        input.onRemove(input.row.clientId);
+      }}
+      type="button"
+      variant="ghost"
+    >
+      <TrashIcon aria-hidden className="size-4" />
+    </Button>
+  );
+}
+
+function SchemaBindingRowEditor(input: {
+  row: SandboxProfileBindingEditorRow;
+  availableConnectionsForKind: readonly IntegrationConnectionSummary[];
+  availableConnections: readonly IntegrationConnectionSummary[];
+  availableTargets: readonly IntegrationTargetSummary[];
+  rowError: string | undefined;
+  onChange: (
+    clientId: string,
+    changes: Partial<Omit<SandboxProfileBindingEditorRow, "clientId">>,
+  ) => void;
+  onDraftDirtyChange?: (clientId: string, isDirty: boolean) => void;
+  removeAction?: React.ReactNode;
+  fieldId: string;
+}): React.JSX.Element {
+  const { draftRow, isDirty, resetDraftRow, setDraftRow } = useDraftBindingRow(input.row);
+
+  React.useEffect(() => {
+    input.onDraftDirtyChange?.(input.row.clientId, isDirty);
+
+    return () => {
+      input.onDraftDirtyChange?.(input.row.clientId, false);
+    };
+  }, [input.onDraftDirtyChange, input.row.clientId, isDirty]);
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <div className="flex flex-col gap-4">
+        <BindingConnectionField
+          ariaLabel="Connection"
+          availableConnections={input.availableConnectionsForKind}
+          availableTargets={input.availableTargets}
+          id={input.fieldId}
+          onValueChange={(nextValue) => {
+            const nextConnection = input.availableConnectionsForKind.find(
+              (connection) => connection.id === nextValue,
+            );
+            const nextTarget = input.availableTargets.find(
+              (candidate) => candidate.targetKey === nextConnection?.targetKey,
+            );
+
+            setDraftRow((currentRow) => ({
+              ...currentRow,
+              connectionId: nextValue,
+              config:
+                nextConnection === undefined || nextTarget === undefined
+                  ? {}
+                  : createDefaultBindingConfig({
+                      connection: nextConnection,
+                      target: nextTarget,
+                    }),
+            }));
+          }}
+          placeholder="Select integration connection"
+          selectedConnectionId={draftRow.connectionId}
+          trailingAction={input.removeAction}
+        />
+
+        <SandboxProfileBindingConfigEditor
+          availableConnections={input.availableConnections}
+          availableTargets={input.availableTargets}
+          formContext={{
+            columns: 2,
+            labelTone: "detail",
+            layout: "vertical",
+          }}
+          onIntegrationBindingRowChange={(clientId, changes) => {
+            setDraftRow((currentRow) =>
+              clientId === currentRow.clientId ? { ...currentRow, ...changes } : currentRow,
+            );
+          }}
+          row={draftRow}
+        />
+
+        <BindingDraftActions
+          isDirty={isDirty}
+          onCancel={resetDraftRow}
+          onSave={() => {
+            input.onChange(input.row.clientId, {
+              connectionId: draftRow.connectionId,
+              kind: draftRow.kind,
+              config: draftRow.config,
+            });
+          }}
+        />
+
+        {input.rowError === undefined ? null : <Notice variant="alert">{input.rowError}</Notice>}
+      </div>
+    </div>
+  );
+}
+
+function SchemaBindingRows(input: {
+  kind: Extract<SandboxIntegrationBindingKind, "agent" | "git">;
+  rows: readonly SandboxProfileBindingEditorRow[];
+  availableConnections: readonly IntegrationConnectionSummary[];
+  availableTargets: readonly IntegrationTargetSummary[];
+  rowErrorsByClientId: Readonly<Record<string, string>>;
+  onChange: (
+    clientId: string,
+    changes: Partial<Omit<SandboxProfileBindingEditorRow, "clientId">>,
+  ) => void;
+  onRemove: (clientId: string) => void;
+  onDraftDirtyChange?: (clientId: string, isDirty: boolean) => void;
+  onCreateBindingFromConnection?: (input: {
+    kind: SandboxIntegrationBindingKind;
+    connectionId: string;
+  }) => Promise<void> | void;
+}): React.JSX.Element {
+  const availableConnectionsForKind = resolveAvailableConnectionsForBindingKind({
+    kind: input.kind,
+    availableConnections: input.availableConnections,
+    availableTargets: input.availableTargets,
+  });
+
+  return (
+    <div className="flex flex-col divide-y">
+      {input.rows.length === 0 ? (
+        <SchemaBindingConnectionPicker
+          availableConnections={availableConnectionsForKind}
+          availableTargets={input.availableTargets}
+          disabled={
+            availableConnectionsForKind.length === 0 ||
+            input.onCreateBindingFromConnection === undefined
+          }
+          kind={input.kind}
+          onCreateBindingFromConnection={input.onCreateBindingFromConnection}
+        />
+      ) : null}
+      {input.rows.map((row) => (
+        <SchemaBindingRowEditor
+          availableConnections={input.availableConnections}
+          availableConnectionsForKind={availableConnectionsForKind}
+          availableTargets={input.availableTargets}
+          fieldId={`${input.kind}-binding-connection-${row.clientId}`}
+          key={row.clientId}
+          onChange={input.onChange}
+          row={row}
+          rowError={input.rowErrorsByClientId[row.clientId]}
+          {...(input.onDraftDirtyChange === undefined
+            ? {}
+            : { onDraftDirtyChange: input.onDraftDirtyChange })}
+          {...(input.kind !== "git"
+            ? {}
+            : {
+                removeAction: renderSchemaBindingRemoveAction({
+                  kind: input.kind,
+                  onRemove: input.onRemove,
+                  row,
+                }),
+              })}
+        />
+      ))}
+    </div>
+  );
 }
 
 function ConnectorBindingRows(input: {
@@ -84,38 +358,9 @@ function ConnectorBindingRows(input: {
     changes: Partial<Omit<SandboxProfileBindingEditorRow, "clientId">>,
   ) => void;
   onRemove: (clientId: string) => void;
+  emptyStateAction: React.ReactNode | undefined;
+  emptyStateMessage: string | undefined;
 }): React.JSX.Element {
-  function resolveConfigSummaryItems(params: { row: SandboxProfileBindingEditorRow }) {
-    return formatSandboxProfileBindingSummaryItems({
-      row: params.row,
-      availableConnections: input.availableConnections,
-      availableTargets: input.availableTargets,
-      excludedPropertyKeys: ["tools"],
-      maxItems: 3,
-    });
-  }
-
-  function renderConfigSummary(params: {
-    summaryItems: ReturnType<typeof resolveConfigSummaryItems>;
-  }): React.JSX.Element | null {
-    const summaryItems = params.summaryItems;
-
-    if (summaryItems.length === 0) {
-      return null;
-    }
-
-    return (
-      <div className="flex min-w-0 flex-col gap-2">
-        {summaryItems.map((item) => (
-          <div className="min-w-0" key={item.label}>
-            <DetailLabel as="p">{item.label}</DetailLabel>
-            <p className="truncate text-sm">{item.value}</p>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   function renderToolContent(params: {
     row: SandboxProfileBindingEditorRow;
     toolToggleModel: ReturnType<typeof resolveBindingToolToggleModel>;
@@ -186,6 +431,16 @@ function ConnectorBindingRows(input: {
         <p>Configuration</p>
         <div />
       </div>
+      {input.rows.length === 0 ? (
+        <div className="border-b py-4">
+          <ActionTile
+            action={input.emptyStateAction}
+            className="border-0 px-0 py-0 shadow-none"
+            description={input.emptyStateMessage ?? ""}
+            title={<span className="sr-only">Add connectors</span>}
+          />
+        </div>
+      ) : null}
       <div className="hidden md:flex md:flex-col">
         {input.rows.map((row) => {
           const rowMetadata = resolveRowBindingMetadata({
@@ -206,12 +461,24 @@ function ConnectorBindingRows(input: {
             targets: input.availableTargets,
           });
           const rowErrorMessage = input.rowErrorsByClientId[row.clientId];
-          const summaryItems = resolveConfigSummaryItems({
+          const summaryItems = resolveBindingConfigSummaryItems({
             row,
+            connections: input.availableConnections,
+            targets: input.availableTargets,
+            excludedPropertyKeys: ["tools"],
+            maxItems: 3,
           });
-          const configSummary = renderConfigSummary({
-            summaryItems,
-          });
+          const configSummary =
+            summaryItems.length === 0 ? null : (
+              <div className="flex min-w-0 flex-col gap-2">
+                {summaryItems.map((item) => (
+                  <div className="min-w-0" key={item.label}>
+                    <DetailLabel as="p">{item.label}</DetailLabel>
+                    <p className="truncate text-sm">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            );
           const showEditAction = summaryItems.length > 0;
 
           return (
@@ -303,12 +570,24 @@ function ConnectorBindingRows(input: {
             targets: input.availableTargets,
           });
           const rowErrorMessage = input.rowErrorsByClientId[row.clientId];
-          const summaryItems = resolveConfigSummaryItems({
+          const summaryItems = resolveBindingConfigSummaryItems({
             row,
+            connections: input.availableConnections,
+            targets: input.availableTargets,
+            excludedPropertyKeys: ["tools"],
+            maxItems: 3,
           });
-          const configSummary = renderConfigSummary({
-            summaryItems,
-          });
+          const configSummary =
+            summaryItems.length === 0 ? null : (
+              <div className="flex min-w-0 flex-col gap-2">
+                {summaryItems.map((item) => (
+                  <div className="min-w-0" key={item.label}>
+                    <DetailLabel as="p">{item.label}</DetailLabel>
+                    <p className="truncate text-sm">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            );
           const showEditAction = summaryItems.length > 0;
 
           return (
@@ -391,9 +670,26 @@ export function SandboxProfileBindingSection(input: {
     changes: Partial<Omit<SandboxProfileBindingEditorRow, "clientId">>,
   ) => void;
   onRemove: (clientId: string) => void;
+  showSectionChrome?: boolean;
+  onRowDraftDirtyChange?: (clientId: string, isDirty: boolean) => void;
+  onCreateBindingFromConnection?: (input: {
+    kind: SandboxIntegrationBindingKind;
+    connectionId: string;
+  }) => Promise<void> | void;
 }): React.JSX.Element {
+  const showSectionChrome = input.showSectionChrome ?? true;
+  const availableConnectionsForKind = input.availableConnections.filter((connection) => {
+    const target = input.availableTargets.find(
+      (candidate) => candidate.targetKey === connection.targetKey,
+    );
+    return resolveBindingKindFromTarget(target) === input.kind;
+  });
   const addConstraintMessage =
     input.rows.length > 0 && input.addDisabled ? formatBindingSectionConstraint(input.kind) : null;
+  const hideAddAction = shouldHideBindingSectionAddAction({
+    kind: input.kind,
+    rowCount: input.rows.length,
+  });
   const addButton = (
     <Button disabled={input.addDisabled} onClick={input.onAdd} type="button" variant="outline">
       <PlusIcon />
@@ -401,11 +697,84 @@ export function SandboxProfileBindingSection(input: {
     </Button>
   );
 
+  const sectionContent =
+    input.kind === "connector" ? (
+      <ConnectorBindingRows
+        availableConnections={input.availableConnections}
+        availableTargets={input.availableTargets}
+        emptyStateAction={input.rows.length === 0 ? addButton : undefined}
+        emptyStateMessage={
+          input.rows.length === 0 ? formatBindingSectionEmptyState(input.kind) : undefined
+        }
+        onEdit={input.onEdit}
+        onChange={input.onRowChange}
+        onRemove={input.onRemove}
+        rowErrorsByClientId={input.rowErrorsByClientId}
+        rows={input.rows}
+      />
+    ) : input.kind === "agent" ? (
+      <SchemaBindingRows
+        availableConnections={input.availableConnections}
+        availableTargets={input.availableTargets}
+        kind="agent"
+        onChange={input.onRowChange}
+        onRemove={input.onRemove}
+        rowErrorsByClientId={input.rowErrorsByClientId}
+        rows={input.rows}
+        {...(input.onRowDraftDirtyChange === undefined
+          ? {}
+          : { onDraftDirtyChange: input.onRowDraftDirtyChange })}
+        {...(input.onCreateBindingFromConnection === undefined
+          ? {}
+          : { onCreateBindingFromConnection: input.onCreateBindingFromConnection })}
+      />
+    ) : input.kind === "git" ? (
+      <SchemaBindingRows
+        availableConnections={input.availableConnections}
+        availableTargets={input.availableTargets}
+        kind="git"
+        onChange={input.onRowChange}
+        onRemove={input.onRemove}
+        rowErrorsByClientId={input.rowErrorsByClientId}
+        rows={input.rows}
+        {...(input.onRowDraftDirtyChange === undefined
+          ? {}
+          : { onDraftDirtyChange: input.onRowDraftDirtyChange })}
+        {...(input.onCreateBindingFromConnection === undefined
+          ? {}
+          : { onCreateBindingFromConnection: input.onCreateBindingFromConnection })}
+      />
+    ) : (
+      <div className="flex flex-col divide-y">
+        {input.rows.map((row) => (
+          <SandboxProfileBindingCard
+            availableConnections={input.availableConnections}
+            availableTargets={input.availableTargets}
+            errorMessage={input.rowErrorsByClientId[row.clientId]}
+            key={row.clientId}
+            onEdit={() => {
+              input.onEdit(row);
+            }}
+            onRemove={() => {
+              input.onRemove(row.clientId);
+            }}
+            row={row}
+          />
+        ))}
+      </div>
+    );
+
+  if (!showSectionChrome) {
+    return sectionContent;
+  }
+
   if (input.rows.length === 0) {
     return (
       <SectionBlock
         action={
-          addConstraintMessage === null ? (
+          ((input.kind === "agent" || input.kind === "git") &&
+            availableConnectionsForKind.length > 0) ||
+          hideAddAction ? null : addConstraintMessage === null ? (
             addButton
           ) : (
             <Tooltip delay={0}>
@@ -414,7 +783,11 @@ export function SandboxProfileBindingSection(input: {
             </Tooltip>
           )
         }
-        emptyState={formatBindingSectionEmptyState(input.kind)}
+        {...(((input.kind === "agent" || input.kind === "git") &&
+          availableConnectionsForKind.length > 0) ||
+        input.rows.length > 0
+          ? { children: sectionContent }
+          : { emptyState: formatBindingSectionEmptyState(input.kind) })}
         title={formatBindingSectionTitle(input.kind)}
       />
     );
@@ -423,7 +796,7 @@ export function SandboxProfileBindingSection(input: {
   return (
     <SectionBlock
       action={
-        addConstraintMessage === null ? (
+        hideAddAction ? null : addConstraintMessage === null ? (
           addButton
         ) : (
           <Tooltip delay={0}>
@@ -432,35 +805,7 @@ export function SandboxProfileBindingSection(input: {
           </Tooltip>
         )
       }
-      children={
-        input.kind === "connector" ? (
-          <ConnectorBindingRows
-            availableConnections={input.availableConnections}
-            availableTargets={input.availableTargets}
-            onEdit={input.onEdit}
-            onChange={input.onRowChange}
-            onRemove={input.onRemove}
-            rowErrorsByClientId={input.rowErrorsByClientId}
-            rows={input.rows}
-          />
-        ) : (
-          input.rows.map((row) => (
-            <SandboxProfileBindingCard
-              availableConnections={input.availableConnections}
-              availableTargets={input.availableTargets}
-              errorMessage={input.rowErrorsByClientId[row.clientId]}
-              key={row.clientId}
-              onEdit={() => {
-                input.onEdit(row);
-              }}
-              onRemove={() => {
-                input.onRemove(row.clientId);
-              }}
-              row={row}
-            />
-          ))
-        )
-      }
+      children={sectionContent}
       title={formatBindingSectionTitle(input.kind)}
     />
   );

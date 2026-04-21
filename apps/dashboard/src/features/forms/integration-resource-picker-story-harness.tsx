@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 import type { IntegrationConnectionResource } from "../integrations/integrations-service.js";
-import { filterRepositoryItems } from "./integration-resource-string-array-widget-story-support.js";
-import { buildIntegrationResourceWidgetViewModel } from "./integration-resource-string-array-widget-view-model.js";
+import { filterRepositoryItems } from "./integration-resource-picker-story-support.js";
+import { buildIntegrationResourcePickerViewModel } from "./integration-resource-picker-view-model.js";
 
-export function useIntegrationResourceStringArrayWidgetStoryState(input: {
+export function useIntegrationResourcePickerStoryState(input: {
   items: readonly IntegrationConnectionResource[];
   title: string;
   refreshLabel: string;
@@ -18,7 +18,7 @@ export function useIntegrationResourceStringArrayWidgetStoryState(input: {
   );
 
   const visibleItems = filterRepositoryItems(input.items, search);
-  const viewModel = buildIntegrationResourceWidgetViewModel({
+  const viewModel = buildIntegrationResourcePickerViewModel({
     title: input.title,
     availableCount: input.items.length,
     refreshLabel: input.refreshLabel,
@@ -35,14 +35,6 @@ export function useIntegrationResourceStringArrayWidgetStoryState(input: {
     },
     visibleItemsCount: visibleItems.length,
   });
-
-  function toggleHandle(handle: string): void {
-    setSelectedHandles((current) =>
-      current.includes(handle)
-        ? current.filter((selectedHandle) => selectedHandle !== handle)
-        : [...current, handle],
-    );
-  }
 
   function toggleAll(): void {
     const visibleHandleSet = new Set(visibleItems.map((item) => item.handle));
@@ -63,7 +55,7 @@ export function useIntegrationResourceStringArrayWidgetStoryState(input: {
     search,
     setSearch,
     selectedHandles,
-    toggleHandle,
+    setSelectedHandles,
     toggleAll,
     visibleItems,
     viewModel,

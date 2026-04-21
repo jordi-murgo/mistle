@@ -47,7 +47,14 @@ const InitialRows: readonly SandboxProfileBindingEditorRow[] = [
     connectionId: StoryGithubConnection.id,
     kind: "git",
     config: {
-      repositories: ["mistle/main-app", "mistle/docs"],
+      repositories: [
+        "mistle/main-dashboard",
+        "mistle/control-plane-api",
+        "mistle/sandbox-runtime",
+        "mistle/codex-bridge",
+        "mistle/session-workbench",
+        "mistle/integration-runtime",
+      ],
       tools: ["github-cli"],
     },
   },
@@ -102,7 +109,7 @@ function SandboxProfileIntegrationsPageViewStory(): React.JSX.Element {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <PageFrame title="">
+      <PageFrame maxWidthClassName="max-w-5xl" title="">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <AutoSaveTitleHeading
@@ -155,10 +162,6 @@ function SandboxProfileIntegrationsPageViewStory(): React.JSX.Element {
             onRemoveIntegrationBindingRow={(clientId) => {
               setRows((currentRows) => currentRows.filter((row) => row.clientId !== clientId));
             }}
-            resolveSelectedConnectionDisplayName={(row) =>
-              StoryIntegrationConnections.find((connection) => connection.id === row.connectionId)
-                ?.displayName
-            }
           />
         </div>
       </PageFrame>

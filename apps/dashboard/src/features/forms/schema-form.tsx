@@ -1,8 +1,8 @@
 import {
   Checkbox,
+  DetailLabel,
   Field,
   FieldContent,
-  FieldDescription,
   FieldError,
   FieldHeader,
   FieldLabel,
@@ -14,8 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
   cn,
 } from "@mistle/ui";
+import { InfoIcon } from "@phosphor-icons/react";
 import { withTheme } from "@rjsf/core";
 import type {
   DescriptionFieldProps,
@@ -38,17 +42,51 @@ import {
 import * as React from "react";
 
 import { isRecord } from "../shared/is-record.js";
-import type { IntegrationFormContext } from "./integration-form-context.js";
-import { IntegrationResourceStringArrayWidget } from "./integration-resource-string-array-widget.js";
+import { IntegrationResourcePickerWidget } from "./integration-resource-picker-widget.js";
 import { MultiSelectStringArrayComboboxField } from "./multi-select-string-array-combobox-field.js";
 import { SingleSelectStringComboboxField } from "./single-select-string-combobox-field.js";
 
 type JsonObject = Record<string, unknown>;
-type IntegrationFieldLayout = "horizontal" | "vertical";
+type SchemaFormFieldLayout = "horizontal" | "vertical";
+
+/**
+ * Global layout mode for shared schema-driven forms.
+ *
+ * Contract:
+ * - `vertical` is the default and stacks labels above controls.
+ * - `horizontal` renders rows using the shared `Field` horizontal layout.
+ * - individual fields may opt out of the horizontal row treatment by setting
+ *   `ui:options.layout` to `"stacked"` in their uiSchema.
+ */
+export type SchemaFormLayout = "vertical" | "horizontal";
+export type SchemaFormLabelTone = "default" | "detail";
+export type SchemaFormContext = {
+  /**
+   * Form-wide default layout for RJSF surfaces using the shared schema form
+   * theme. This is intentionally a small API that mirrors the patterns we use
+   * in hand-built forms:
+   * - set the form to `horizontal` when the editor is primarily row-based
+   * - leave it `vertical` for dialog-style or stacked forms
+   * - use field-level `ui:options.layout = "stacked"` for large fields that
+   *   should remain vertical inside an otherwise horizontal form
+   */
+  layout?: SchemaFormLayout;
+  /**
+   * Optional label presentation for compact read/write surfaces that should
+   * visually match summary metadata labels.
+   */
+  labelTone?: SchemaFormLabelTone;
+  /**
+   * Optional column count for vertical object layouts. Use this to render
+   * compact side-by-side field groups while keeping each field internally
+   * vertical.
+   */
+  columns?: 1 | 2;
+};
 
 function resolveSelectWidgetOptions(input: {
-  options: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>["options"];
-  formContext: IntegrationFormContext | undefined;
+  options: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>["options"];
+  formContext: SchemaFormContext | undefined;
 }): {
   fitContent: boolean;
 } {
@@ -63,13 +101,13 @@ function resolveSelectWidgetOptions(input: {
   };
 }
 
-export const IntegrationHorizontalFieldGroupClassName = "gap-6 flex flex-col";
-const IntegrationVerticalFieldGroupClassName = "gap-6 flex flex-col";
-export const IntegrationSelectContentClassName =
+export const SchemaFormHorizontalFieldGroupClassName = "gap-6 flex flex-col";
+const SchemaFormVerticalFieldGroupClassName = "gap-6 flex flex-col";
+export const SchemaFormSelectContentClassName =
   "w-max min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))]";
 
 function resolveCommaSeparatedOptions(
-  options: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>["options"],
+  options: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>["options"],
 ): {
   delimiter: string;
   placeholder: string | undefined;
@@ -84,7 +122,7 @@ function resolveCommaSeparatedOptions(
 }
 
 function resolveMultiSelectStringComboboxOptions(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): readonly { label: string; value: string }[] {
   const itemsSchema = isRecord(props.schema.items) ? props.schema.items : null;
   if (itemsSchema === null) {
@@ -134,7 +172,7 @@ function resolveMultiSelectStringComboboxOptions(
 }
 
 function resolveSingleSelectStringComboboxOptions(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): readonly { label: string; value: string }[] {
   if (Array.isArray(props.schema.oneOf)) {
     return props.schema.oneOf.flatMap((option) => {
@@ -179,21 +217,21 @@ function resolveSingleSelectStringComboboxOptions(
 }
 
 function forwardWidgetBlur<TValue>(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
   value: TValue,
 ): void {
   props.onBlur(props.id, value);
 }
 
 function forwardWidgetFocus<TValue>(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
   value: TValue,
 ): void {
   props.onFocus(props.id, value);
 }
 
 function CommaSeparatedStringArrayWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const { delimiter, placeholder } = resolveCommaSeparatedOptions(props.options);
   const value = Array.isArray(props.value)
@@ -247,7 +285,7 @@ function CommaSeparatedStringArrayWidget(
 }
 
 function MultiSelectStringArrayComboboxWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const selectedValues = Array.isArray(props.value)
     ? props.value.filter((entry): entry is string => typeof entry === "string")
@@ -281,7 +319,7 @@ function MultiSelectStringArrayComboboxWidget(
 }
 
 function SingleSelectStringComboboxWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const options = resolveSingleSelectStringComboboxOptions(props);
   const selectedValue = typeof props.value === "string" ? props.value : "";
@@ -332,7 +370,7 @@ function resolveTextInputValue(value: unknown): string {
 }
 
 function resolveCheckboxOptionLabel(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
   option: { label: string; value: unknown },
 ): string {
   if (option.label !== String(option.value)) {
@@ -365,7 +403,7 @@ function resolveCheckboxOptionLabel(
 }
 
 function TextWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const value = resolveTextInputValue(props.value);
 
@@ -394,7 +432,7 @@ function TextWidget(
 }
 
 function EmailWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const value = resolveTextInputValue(props.value);
 
@@ -423,7 +461,7 @@ function EmailWidget(
 }
 
 function URLWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const value = resolveTextInputValue(props.value);
 
@@ -452,7 +490,7 @@ function URLWidget(
 }
 
 function PasswordWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const value = resolveTextInputValue(props.value);
 
@@ -481,7 +519,7 @@ function PasswordWidget(
 }
 
 function SelectWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const enumOptions = props.options.enumOptions ?? [];
   const selectedValue = typeof props.value === "string" ? props.value : undefined;
@@ -519,7 +557,7 @@ function SelectWidget(
       <SelectContent
         align={fitContent ? "end" : "center"}
         alignItemWithTrigger={!fitContent}
-        className={IntegrationSelectContentClassName}
+        className={SchemaFormSelectContentClassName}
       >
         {enumOptions.map((option) => {
           const optionValue = String(option.value);
@@ -535,7 +573,7 @@ function SelectWidget(
 }
 
 function CheckboxesWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const {
     autofocus = false,
@@ -612,7 +650,7 @@ function CheckboxesWidget(
 }
 
 function resolveTextareaWidgetOptions(
-  options: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>["options"],
+  options: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>["options"],
 ): {
   placeholder: string | undefined;
   rows: number | undefined;
@@ -627,7 +665,7 @@ function resolveTextareaWidgetOptions(
 }
 
 function TextareaWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const { placeholder, rows } = resolveTextareaWidgetOptions(props.options);
   const value = typeof props.value === "string" ? props.value : "";
@@ -656,12 +694,29 @@ function TextareaWidget(
   );
 }
 
-function resolveFormLayout(input: IntegrationFormContext | undefined): "vertical" | "horizontal" {
+function resolveFormLayout(input: SchemaFormContext | undefined): "vertical" | "horizontal" {
   return input?.layout === "horizontal" ? "horizontal" : "vertical";
 }
 
-function IntegrationDescriptionFieldTemplate(
-  props: DescriptionFieldProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+function resolveFormColumns(input: SchemaFormContext | undefined): 1 | 2 {
+  return input?.columns === 2 ? 2 : 1;
+}
+
+function resolveLabelTone(input: SchemaFormContext | undefined): "default" | "detail" {
+  return input?.labelTone === "detail" ? "detail" : "default";
+}
+
+function resolveUiWidget(uiSchema: unknown): string | undefined {
+  if (!isRecord(uiSchema)) {
+    return undefined;
+  }
+
+  const widget = uiSchema["ui:widget"];
+  return typeof widget === "string" ? widget : undefined;
+}
+
+function SchemaFormDescriptionFieldTemplate(
+  props: DescriptionFieldProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element | null {
   if (
     (typeof props.description === "string" && props.description.length === 0) ||
@@ -670,21 +725,21 @@ function IntegrationDescriptionFieldTemplate(
     return null;
   }
 
-  return <FieldDescription id={props.id}>{props.description}</FieldDescription>;
+  return null;
 }
 
-function IntegrationFieldHelpTemplate(
-  props: FieldHelpProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+function SchemaFormFieldHelpTemplate(
+  props: FieldHelpProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element | null {
   if ((typeof props.help === "string" && props.help.length === 0) || props.help === undefined) {
     return null;
   }
 
-  return <FieldDescription>{props.help}</FieldDescription>;
+  return <p className="text-muted-foreground text-sm">{props.help}</p>;
 }
 
-function IntegrationFieldErrorTemplate(
-  props: FieldErrorProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+function SchemaFormFieldErrorTemplate(
+  props: FieldErrorProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element | null {
   const stringErrors = (props.errors ?? []).filter(
     (message): message is string => typeof message === "string",
@@ -697,8 +752,8 @@ function IntegrationFieldErrorTemplate(
 }
 
 function resolveFieldLayout(
-  props: FieldTemplateProps<JsonObject, RJSFSchema, IntegrationFormContext>,
-): IntegrationFieldLayout {
+  props: FieldTemplateProps<JsonObject, RJSFSchema, SchemaFormContext>,
+): SchemaFormFieldLayout {
   const formLayout = resolveFormLayout(props.registry.formContext);
   if (formLayout === "vertical") {
     return "vertical";
@@ -720,12 +775,12 @@ function resolveFieldLayout(
   return options.layout === "stacked" ? "vertical" : "horizontal";
 }
 
-function isObjectSchema(schema: RJSFSchema): boolean {
-  if (schema.type === "object") {
+function isObjectSchema(schema: unknown): boolean {
+  if (isRecord(schema) && schema.type === "object") {
     return true;
   }
 
-  return isRecord(schema.properties);
+  return isRecord(schema) && isRecord(schema.properties);
 }
 
 function resolveSchemaProperties(schema: unknown): Record<string, unknown> {
@@ -768,8 +823,83 @@ function hasRenderableSchemaContent(input: { schema: unknown; uiSchema: unknown 
   );
 }
 
-function IntegrationFieldTemplate(
-  props: FieldTemplateProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+function isFlattenableObjectWrapper(input: {
+  schema: unknown;
+  uiSchema: unknown;
+  isRootObject: boolean;
+}): boolean {
+  if (input.isRootObject || !isObjectSchema(input.schema)) {
+    return false;
+  }
+
+  const schemaRecord = isRecord(input.schema) ? input.schema : {};
+  const title =
+    typeof schemaRecord.title === "string" && schemaRecord.title.length > 0
+      ? schemaRecord.title
+      : "";
+  const description =
+    typeof schemaRecord.description === "string" && schemaRecord.description.length > 0
+      ? schemaRecord.description
+      : undefined;
+  const propertySchemas = resolveSchemaProperties(input.schema);
+  const propertyNames = Object.keys(propertySchemas);
+
+  if (title.length > 0 || description !== undefined || propertyNames.length === 0) {
+    return false;
+  }
+
+  return propertyNames.some((propertyName) =>
+    hasRenderableSchemaContent({
+      schema: propertySchemas[propertyName],
+      uiSchema: resolveObjectPropertyUiSchema(input.uiSchema, propertyName),
+    }),
+  );
+}
+
+function shouldSpanFullWidth(input: {
+  layout: SchemaFormFieldLayout;
+  formContext: SchemaFormContext | undefined;
+  schema: unknown;
+  uiSchema: unknown;
+}): boolean {
+  if (input.layout !== "vertical" || resolveFormColumns(input.formContext) !== 2) {
+    return false;
+  }
+
+  const widget = resolveUiWidget(input.uiSchema);
+  if (
+    widget === "textarea" ||
+    widget === "TextareaWidget" ||
+    widget === "integration-resource-picker"
+  ) {
+    return true;
+  }
+
+  return isRecord(input.schema) && input.schema.type === "array";
+}
+
+function SchemaFormDescriptionTooltip(input: { description: string }): React.JSX.Element {
+  return (
+    <Tooltip delay={0}>
+      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+        <button
+          aria-label="Field description"
+          className="text-muted-foreground hover:text-foreground inline-flex cursor-help items-center justify-center rounded-sm"
+          tabIndex={0}
+          type="button"
+        >
+          <InfoIcon aria-hidden className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 text-left" side="top">
+        {input.description}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SchemaFormFieldTemplate(
+  props: FieldTemplateProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   if (props.hidden) {
     return props.children;
@@ -783,10 +913,22 @@ function IntegrationFieldTemplate(
 
   const layout = resolveFieldLayout(props);
   const hasErrors = (props.rawErrors ?? []).length > 0;
+  const labelTone = resolveLabelTone(props.registry.formContext);
+  const useDetailLabel = labelTone === "detail" && layout === "vertical";
+  const useFullWidth = shouldSpanFullWidth({
+    layout,
+    formContext: props.registry.formContext,
+    schema: props.schema,
+    uiSchema: props.uiSchema,
+  });
 
   return (
     <Field
-      className={cn(props.classNames, layout === "horizontal" ? "gap-2" : undefined)}
+      className={cn(
+        props.classNames,
+        layout === "horizontal" ? "gap-2" : undefined,
+        useFullWidth ? "md:col-span-2" : undefined,
+      )}
       contentWidth={layout === "horizontal" ? "fill" : undefined}
       data-invalid={hasErrors || undefined}
       orientation={layout}
@@ -794,8 +936,16 @@ function IntegrationFieldTemplate(
     >
       {props.displayLabel && props.label.length > 0 ? (
         <FieldHeader>
-          <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
-          {props.description}
+          <div className="flex items-center gap-1.5">
+            {useDetailLabel ? (
+              <DetailLabel as="p">{props.label}</DetailLabel>
+            ) : (
+              <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
+            )}
+            {typeof props.rawDescription === "string" && props.rawDescription.length > 0 ? (
+              <SchemaFormDescriptionTooltip description={props.rawDescription} />
+            ) : null}
+          </div>
         </FieldHeader>
       ) : null}
       <FieldContent>
@@ -807,10 +957,11 @@ function IntegrationFieldTemplate(
   );
 }
 
-function IntegrationObjectFieldTemplate(
-  props: ObjectFieldTemplateProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+function SchemaFormObjectFieldTemplate(
+  props: ObjectFieldTemplateProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const layout = resolveFormLayout(props.registry.formContext);
+  const columns = resolveFormColumns(props.registry.formContext);
   const visibleProperties = props.properties.filter((property) => !property.hidden);
   const hiddenProperties = props.properties.filter((property) => property.hidden);
   const schemaProperties = resolveSchemaProperties(props.schema);
@@ -835,6 +986,14 @@ function IntegrationObjectFieldTemplate(
         uiSchema: resolveObjectPropertyUiSchema(props.uiSchema, property.name),
       }),
   );
+  const isRootObject = props.fieldPathId.path.length === 0;
+  const shouldFlattenWrapper =
+    props.optionalDataControl === undefined &&
+    isFlattenableObjectWrapper({
+      isRootObject,
+      schema: props.schema,
+      uiSchema: props.uiSchema,
+    });
 
   if (
     visibleRenderableProperties.length === 0 &&
@@ -845,23 +1004,67 @@ function IntegrationObjectFieldTemplate(
     return <>{hiddenProperties.map((property) => property.content)}</>;
   }
 
+  if (shouldFlattenWrapper) {
+    return (
+      <>
+        {visibleRenderableProperties.map((property) => property.content)}
+        {hiddenOnlyVisibleProperties.map((property) => property.content)}
+        {hiddenProperties.map((property) => property.content)}
+      </>
+    );
+  }
+
   return (
     <>
       <div
         className={cn(
           props.className,
-          IntegrationVerticalFieldGroupClassName,
-          layout === "horizontal" ? IntegrationHorizontalFieldGroupClassName : undefined,
+          SchemaFormVerticalFieldGroupClassName,
+          layout === "horizontal"
+            ? SchemaFormHorizontalFieldGroupClassName
+            : columns === 2
+              ? "grid gap-x-6 gap-y-4 md:grid-cols-2"
+              : undefined,
         )}
       >
         {title.length > 0 || description !== undefined ? (
-          <FieldHeader>
-            {title.length > 0 ? <FieldTitle>{title}</FieldTitle> : null}
-            {description !== undefined ? <FieldDescription>{description}</FieldDescription> : null}
+          <FieldHeader className={columns === 2 ? "md:col-span-2" : undefined}>
+            <div className="flex items-center gap-1.5">
+              {title.length > 0 ? <FieldTitle>{title}</FieldTitle> : null}
+              {description !== undefined ? (
+                <SchemaFormDescriptionTooltip description={description} />
+              ) : null}
+            </div>
           </FieldHeader>
         ) : null}
         {visibleRenderableProperties.map((property) => (
-          <div key={property.name}>{property.content}</div>
+          <div
+            className={(() => {
+              const propertySchema = schemaProperties[property.name];
+              const propertyUiSchema = resolveObjectPropertyUiSchema(props.uiSchema, property.name);
+              if (
+                isFlattenableObjectWrapper({
+                  isRootObject: false,
+                  schema: propertySchema,
+                  uiSchema: propertyUiSchema,
+                })
+              ) {
+                return "contents";
+              }
+
+              return shouldSpanFullWidth({
+                layout,
+                formContext: props.registry.formContext,
+                schema: propertySchema,
+                uiSchema: propertyUiSchema,
+              })
+                ? "md:col-span-2"
+                : undefined;
+            })()}
+            key={property.name}
+          >
+            {property.content}
+          </div>
         ))}
         {props.optionalDataControl}
       </div>
@@ -871,15 +1074,15 @@ function IntegrationObjectFieldTemplate(
   );
 }
 
-export const IntegrationFormTemplates = {
-  DescriptionFieldTemplate: IntegrationDescriptionFieldTemplate,
-  FieldErrorTemplate: IntegrationFieldErrorTemplate,
-  FieldHelpTemplate: IntegrationFieldHelpTemplate,
-  FieldTemplate: IntegrationFieldTemplate,
-  ObjectFieldTemplate: IntegrationObjectFieldTemplate,
+export const SchemaFormTemplates = {
+  DescriptionFieldTemplate: SchemaFormDescriptionFieldTemplate,
+  FieldErrorTemplate: SchemaFormFieldErrorTemplate,
+  FieldHelpTemplate: SchemaFormFieldHelpTemplate,
+  FieldTemplate: SchemaFormFieldTemplate,
+  ObjectFieldTemplate: SchemaFormObjectFieldTemplate,
 };
 
-export const IntegrationFormWidgets = {
+export const SchemaFormWidgets = {
   TextWidget,
   EmailWidget,
   URLWidget,
@@ -889,30 +1092,26 @@ export const IntegrationFormWidgets = {
   TextareaWidget,
   checkboxes: CheckboxesWidget,
   "comma-separated-string-array": CommaSeparatedStringArrayWidget,
-  "integration-resource-string-array": IntegrationResourceStringArrayWidget,
+  "integration-resource-picker": IntegrationResourcePickerWidget,
   "multi-select-string-array-combobox": MultiSelectStringArrayComboboxWidget,
   "single-select-string-combobox": SingleSelectStringComboboxWidget,
 };
 
 function HiddenSubmitButton(
-  _props: SubmitButtonProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+  _props: SubmitButtonProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): null {
   return null;
 }
 
-const IntegrationTheme = {
-  templates: IntegrationFormTemplates,
-  widgets: IntegrationFormWidgets,
+const SchemaFormTheme = {
+  templates: SchemaFormTemplates,
+  widgets: SchemaFormWidgets,
 };
 
-export const IntegrationFormWithoutSubmit = withTheme<
-  JsonObject,
-  RJSFSchema,
-  IntegrationFormContext
->({
-  ...IntegrationTheme,
+export const SchemaFormWithoutSubmit = withTheme<JsonObject, RJSFSchema, SchemaFormContext>({
+  ...SchemaFormTheme,
   templates: {
-    ...IntegrationFormTemplates,
+    ...SchemaFormTemplates,
     ButtonTemplates: {
       SubmitButton: HiddenSubmitButton,
     },

@@ -11,9 +11,9 @@ import {
   refreshIntegrationConnectionResources,
 } from "../integrations/integrations-service.js";
 import { formatDateTime } from "../shared/date-formatters.js";
-import type { IntegrationFormContext } from "./integration-form-context.js";
-import { buildIntegrationResourceWidgetViewModel } from "./integration-resource-string-array-widget-view-model.js";
-import { IntegrationResourceStringArrayWidgetView } from "./integration-resource-string-array-widget-view.js";
+import { buildIntegrationResourcePickerViewModel } from "./integration-resource-picker-view-model.js";
+import { IntegrationResourcePickerView } from "./integration-resource-picker-view.js";
+import type { SchemaFormContext } from "./schema-form.js";
 
 type JsonObject = Record<string, unknown>;
 const SearchDebounceMs = 300;
@@ -27,7 +27,7 @@ const IntegrationResourceSummaryOptionSchema = z
   })
   .strict();
 
-const IntegrationResourceStringArrayWidgetOptionsSchema = z
+const IntegrationResourcePickerWidgetOptionsSchema = z
   .object({
     connectionId: z.string().min(1),
     kind: z.string().min(1),
@@ -39,14 +39,14 @@ const IntegrationResourceStringArrayWidgetOptionsSchema = z
   })
   .loose();
 
-type IntegrationResourceStringArrayWidgetOptions = z.infer<
-  typeof IntegrationResourceStringArrayWidgetOptionsSchema
+type IntegrationResourcePickerWidgetOptions = z.infer<
+  typeof IntegrationResourcePickerWidgetOptionsSchema
 >;
 
 function resolveWidgetOptions(
-  options: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>["options"],
-): IntegrationResourceStringArrayWidgetOptions {
-  const parsedOptions = IntegrationResourceStringArrayWidgetOptionsSchema.safeParse(options);
+  options: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>["options"],
+): IntegrationResourcePickerWidgetOptions {
+  const parsedOptions = IntegrationResourcePickerWidgetOptionsSchema.safeParse(options);
   if (!parsedOptions.success) {
     throw new Error("Integration resource widget received invalid options.");
   }
@@ -83,8 +83,8 @@ function formatSyncMetadata(input: {
   return `Last synced ${input.lastSyncedAt}`;
 }
 
-export function IntegrationResourceStringArrayWidget(
-  props: WidgetProps<JsonObject, RJSFSchema, IntegrationFormContext>,
+export function IntegrationResourcePickerWidget(
+  props: WidgetProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
   const options = resolveWidgetOptions(props.options);
   const queryClient = useQueryClient();
@@ -140,13 +140,6 @@ export function IntegrationResourceStringArrayWidget(
     resourceQuery.data === undefined || debouncedSearch.length > 0
       ? []
       : selectedHandles.filter((handle) => !availableHandles.has(handle));
-
-  function toggleHandle(handle: string): void {
-    const nextSelection = selectedHandles.includes(handle)
-      ? selectedHandles.filter((selectedHandle) => selectedHandle !== handle)
-      : [...selectedHandles, handle];
-    props.onChange(nextSelection);
-  }
 
   function toggleAll(): void {
     const visibleHandleSet = new Set(visibleItems.map((item) => item.handle));
@@ -208,7 +201,7 @@ export function IntegrationResourceStringArrayWidget(
         fallbackMessage: "Could not load resources for this connection.",
       });
   const availableCount = resourceQuery.data?.items.length ?? options.resourceSummary?.count;
-  const widgetViewModel = buildIntegrationResourceWidgetViewModel({
+  const widgetViewModel = buildIntegrationResourcePickerViewModel({
     title: options.title,
     availableCount,
     refreshLabel,
@@ -236,7 +229,7 @@ export function IntegrationResourceStringArrayWidget(
   });
 
   return (
-    <IntegrationResourceStringArrayWidgetView
+    <IntegrationResourcePickerView
       emptyMessage={widgetViewModel.emptyMessage}
       id={props.id}
       isRefreshing={refreshMutation.isPending}
@@ -264,9 +257,9 @@ export function IntegrationResourceStringArrayWidget(
         props.onFocus(props.id, selectedHandles);
       }}
       onRefresh={triggerRefresh}
+      onSelectionChange={props.onChange}
       onSearchChange={setSearch}
       onToggleAll={toggleAll}
-      onToggleHandle={toggleHandle}
       refreshErrorMessage={refreshErrorMessage}
       refreshLabel={refreshLabel}
       refreshTooltip={widgetViewModel.refreshTooltip}

@@ -4,7 +4,7 @@ import {
 } from "@mistle/integrations-definitions";
 import { QueryClient } from "@tanstack/react-query";
 
-import { createGithubRepositoryResources } from "../forms/integration-resource-string-array-widget-story-support.js";
+import { createGithubRepositoryResources } from "../forms/integration-resource-picker-story-support.js";
 import type { IntegrationConnectionResources } from "../integrations/integrations-service.js";
 import type {
   IntegrationConnectionSummary,
@@ -41,6 +41,7 @@ export function seedStoryIntegrationResources(input: {
 export const StoryOpenAiTarget: IntegrationTargetSummary = {
   targetKey: "target-openai",
   displayName: "OpenAI",
+  logoKey: "openai",
   familyId: "openai",
   variantId: "openai-default",
   config: {
@@ -66,6 +67,7 @@ export const StoryOpenAiConnection: IntegrationConnectionSummary = {
 export const StoryGithubTarget: IntegrationTargetSummary = {
   targetKey: "target-github",
   displayName: "GitHub",
+  logoKey: "github",
   familyId: "github",
   variantId: "github-cloud",
   config: {

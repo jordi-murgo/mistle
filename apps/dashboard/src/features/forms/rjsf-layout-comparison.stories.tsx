@@ -21,26 +21,25 @@ import { useState } from "react";
 import type React from "react";
 
 import { withDashboardCenteredStory } from "../../storybook/decorators.js";
-import type { IntegrationFormContext } from "./integration-form-context.js";
-import { IntegrationFormWithoutSubmit } from "./integration-form-theme.js";
 import {
   createGithubRepositoryResources,
   RepositoryItems,
-} from "./integration-resource-string-array-widget-story-support.js";
-import type { IntegrationResourceListViewState } from "./integration-resource-string-array-widget-view-model.js";
-import { IntegrationResourceStringArrayWidgetView } from "./integration-resource-string-array-widget-view.js";
+} from "./integration-resource-picker-story-support.js";
+import type { IntegrationResourceListViewState } from "./integration-resource-picker-view-model.js";
+import { IntegrationResourcePickerView } from "./integration-resource-picker-view.js";
+import { SchemaFormWithoutSubmit, type SchemaFormContext } from "./schema-form.js";
 
 type JsonObject = Record<string, unknown>;
 
 function RjsfExampleForm(input: {
-  formContext: IntegrationFormContext;
+  formContext: SchemaFormContext;
   formData: JsonObject;
   initialQueryData?: ReadonlyArray<{
     queryKey: readonly unknown[];
     data: unknown;
   }>;
   schema: RJSFSchema;
-  uiSchema: UiSchema<JsonObject, RJSFSchema, IntegrationFormContext>;
+  uiSchema: UiSchema<JsonObject, RJSFSchema, SchemaFormContext>;
 }): React.JSX.Element {
   const [queryClient] = useState(() => {
     const client = new QueryClient({
@@ -60,7 +59,7 @@ function RjsfExampleForm(input: {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <IntegrationFormWithoutSubmit
+      <SchemaFormWithoutSubmit
         formContext={input.formContext}
         formData={formData}
         noHtml5Validate
@@ -206,7 +205,7 @@ function ManualCheckboxGroup(): React.JSX.Element {
 
 function ManualResourcePicker(): React.JSX.Element {
   return (
-    <IntegrationResourceStringArrayWidgetView
+    <IntegrationResourcePickerView
       emptyMessage="No repositories available for this connection."
       id="manual-repositories"
       isRefreshing={false}
@@ -215,9 +214,9 @@ function ManualResourcePicker(): React.JSX.Element {
       onBlur={() => {}}
       onFocus={() => {}}
       onRefresh={() => {}}
+      onSelectionChange={() => {}}
       onSearchChange={() => {}}
       onToggleAll={() => {}}
-      onToggleHandle={() => {}}
       refreshErrorMessage={null}
       refreshLabel="Refresh repositories"
       refreshTooltip="Refresh repositories\nLast synced Mar 9, 2026, 12:00 PM"
@@ -522,7 +521,7 @@ function RjsfResourcePicker(): React.JSX.Element {
       }}
       uiSchema={{
         repositories: {
-          "ui:widget": "integration-resource-string-array",
+          "ui:widget": "integration-resource-picker",
           "ui:options": {
             connectionId: "storybook-github",
             kind: "repository",
@@ -616,7 +615,7 @@ function RjsfLayoutComparisonStory(input: { caseItem?: ComparisonCase }): React.
 }
 
 const meta = {
-  title: "Dashboard/Forms/RjsfLayoutComparison",
+  title: "Dashboard/Forms/Form Layout Comparison",
   component: RjsfLayoutComparisonStory,
   decorators: [withDashboardCenteredStory],
   parameters: {
