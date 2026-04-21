@@ -1,6 +1,10 @@
 import { OpenAiReasoningEffortLabelByValue } from "@mistle/integrations-definitions/openai";
 import {
   Button,
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+  Kbd,
   Select,
   SelectContent,
   SelectItem,
@@ -25,6 +29,27 @@ const ReasoningEffortLabels: Readonly<Record<string, string>> = OpenAiReasoningE
 
 function formatReasoningEffortLabel(value: string): string {
   return ReasoningEffortLabels[value] ?? value;
+}
+
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  const platform = navigator.platform || navigator.userAgent;
+  return /Mac|iPhone|iPad|iPod/i.test(platform);
+}
+
+function resolveShortcutDisplayLabel(shortcut: string): string {
+  if (shortcut === "enter") {
+    return "Enter";
+  }
+
+  if (shortcut === "mod-enter") {
+    return isApplePlatform() ? "⌘Enter" : "Ctrl+Enter";
+  }
+
+  return shortcut;
 }
 
 export type ChatComposerStatusMessage = {
@@ -55,11 +80,17 @@ export type ChatComposerViewModel = {
   submitLabel: string;
   submitDisabled: boolean;
   submitDisabledReason: string | null;
+  keyboardShortcuts?: readonly {
+    action: string;
+    shortcut: string;
+  }[];
+  secondarySubmitDisabled?: boolean;
   canUploadAttachments: boolean;
   isUploadingAttachments: boolean;
   configControlsDisabled: boolean;
   onComposerTextChange: (value: string) => void;
   onSubmit: () => void;
+  onSecondarySubmit?: () => void;
   onModelChange: (value: string) => void;
   onReasoningEffortChange: (value: string) => void;
   onPendingImageFilesAdded: (files: readonly File[]) => void;
@@ -78,11 +109,14 @@ export function ChatComposer({
   submitMode,
   submitLabel,
   submitDisabled,
+  keyboardShortcuts,
+  secondarySubmitDisabled = true,
   canUploadAttachments,
   isUploadingAttachments,
   configControlsDisabled,
   onComposerTextChange,
   onSubmit,
+  onSecondarySubmit,
   onModelChange,
   onReasoningEffortChange,
   onPendingImageFilesAdded,
@@ -197,6 +231,15 @@ export function ChatComposer({
           }
 
           event.preventDefault();
+          if ((event.metaKey || event.ctrlKey) && onSecondarySubmit !== undefined) {
+            if (secondarySubmitDisabled) {
+              return;
+            }
+
+            onSecondarySubmit();
+            return;
+          }
+
           if (submitDisabled) {
             return;
           }
@@ -290,21 +333,60 @@ export function ChatComposer({
           </Select>
         </div>
 
-        <Button
-          aria-label={submitLabel}
-          className={[
-            "shrink-0 rounded-full bg-transparent text-primary hover:bg-transparent",
-            isSubmitPending ? "disabled:opacity-100" : null,
-          ].join(" ")}
-          disabled={submitDisabled}
-          onClick={onSubmit}
-          size="icon-fill"
-          title={submitLabel}
-          type="button"
-          variant="ghost"
-        >
-          {composerActionIcon}
-        </Button>
+        {keyboardShortcuts === undefined || keyboardShortcuts.length === 0 ? (
+          <Button
+            aria-label={submitLabel}
+            className={[
+              "shrink-0 rounded-full bg-transparent text-primary hover:bg-transparent",
+              isSubmitPending ? "disabled:opacity-100" : null,
+            ].join(" ")}
+            disabled={submitDisabled}
+            onClick={onSubmit}
+            size="icon-fill"
+            type="button"
+            variant="ghost"
+          >
+            {composerActionIcon}
+          </Button>
+        ) : (
+          <HoverCard>
+            <HoverCardTrigger closeDelay={0} delay={0}>
+              <Button
+                aria-label={submitLabel}
+                className={[
+                  "shrink-0 rounded-full bg-transparent text-primary hover:bg-transparent",
+                  isSubmitPending ? "disabled:opacity-100" : null,
+                ].join(" ")}
+                disabled={submitDisabled}
+                onClick={onSubmit}
+                size="icon-fill"
+                type="button"
+                variant="ghost"
+              >
+                {composerActionIcon}
+              </Button>
+            </HoverCardTrigger>
+            <HoverCardContent
+              align="end"
+              alignOffset={0}
+              className="w-fit min-w-0 p-3"
+              side="top"
+              sideOffset={12}
+            >
+              <div className="space-y-1.5">
+                {keyboardShortcuts.map((shortcutHint) => (
+                  <div
+                    className="flex items-center justify-between gap-3 text-sm"
+                    key={`${shortcutHint.action}:${shortcutHint.shortcut}`}
+                  >
+                    <span>{shortcutHint.action}</span>
+                    <Kbd>{resolveShortcutDisplayLabel(shortcutHint.shortcut)}</Kbd>
+                  </div>
+                ))}
+              </div>
+            </HoverCardContent>
+          </HoverCard>
+        )}
       </div>
     </div>
   );

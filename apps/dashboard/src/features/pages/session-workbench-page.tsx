@@ -409,6 +409,7 @@ function SessionWorkbenchPageContent(input: {
           pendingTurnId: conversationPane.chatState.pendingTurnId,
           scrollBehavior: "follow-streaming-at-bottom",
           chatEntries: conversationPane.chatState.entries,
+          onUserMessageAction: conversationPane.dismissUserMessageAction,
           isRespondingToServerRequest:
             conversationPane.serverRequestsState.isRespondingToServerRequest,
           onRespondToServerRequest: conversationPane.serverRequestsState.respondToServerRequest,
@@ -478,6 +479,7 @@ type PrimaryPanelConversationContent = Pick<
   | "pendingTurnId"
   | "scrollBehavior"
   | "chatEntries"
+  | "onUserMessageAction"
   | "isRespondingToServerRequest"
   | "onRespondToServerRequest"
   | "scrollContainerRef"
@@ -536,11 +538,14 @@ function createEmptyComposerViewModel(): ChatComposerViewModel {
     submitLabel: "Send",
     submitDisabled: true,
     submitDisabledReason: null,
+    keyboardShortcuts: [],
+    secondarySubmitDisabled: true,
     canUploadAttachments: false,
     isUploadingAttachments: false,
     configControlsDisabled: true,
     onComposerTextChange: function onComposerTextChange() {},
     onSubmit: function onSubmit() {},
+    onSecondarySubmit: function onSecondarySubmit() {},
     onModelChange: function onModelChange() {},
     onReasoningEffortChange: function onReasoningEffortChange() {},
     onPendingImageFilesAdded: function onPendingImageFilesAdded() {},

@@ -2,6 +2,11 @@ export type ChatUserEntry = {
   id: string;
   turnId: string;
   kind: "user-message";
+  label?: string;
+  labelAction?: {
+    ariaLabel: string;
+    actionId: string;
+  };
   text: string;
   attachments?: readonly {
     kind: "image";
