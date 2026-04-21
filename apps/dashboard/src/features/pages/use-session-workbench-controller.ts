@@ -2,6 +2,7 @@ import type {
   CodexJsonRpcClient,
   AgentStreamClient,
 } from "@mistle/integrations-definitions/agent-runtimes/codex/client";
+import type { SandboxSessionTransport } from "@mistle/sandbox-session-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 
@@ -40,6 +41,10 @@ import { useSessionWorkbenchLifecycleState } from "./use-session-workbench-lifec
 import { useSessionWorkbenchTransport } from "./use-session-workbench-transport.js";
 
 type SessionWorkbenchState = {
+  ensureTransportConnected: (input: { sandboxInstanceId: string }) => Promise<{
+    sandboxInstanceId: string;
+    transport: SandboxSessionTransport;
+  }>;
   connectionReadiness: {
     canConnect: boolean;
     reason:
@@ -52,9 +57,9 @@ type SessionWorkbenchState = {
       | "stopped"
       | "unknown";
   };
+  handleTerminalWorkspaceReset: () => void;
   stoppedSessionMessage: string | null;
   workbenchStatus: SessionWorkbenchStatus;
-  ptyState: ReturnType<typeof useSandboxPtyState>;
   sandboxLifecycleStatus: ReturnType<
     typeof useSessionWorkbenchLifecycleState
   >["sandboxLifecycleStatus"];
@@ -153,9 +158,6 @@ export function useSessionWorkbenchController(input: {
     rpcClientRef,
     sessionEventUnsubscribersRef,
   });
-  const ptyState = useSandboxPtyState({
-    ensureTransportConnected: transportManager.ensureTransportConnected,
-  });
   const cliPtyState = useSandboxPtyState({
     ensureTransportConnected: transportManager.ensureTransportConnected,
   });
@@ -184,7 +186,6 @@ export function useSessionWorkbenchController(input: {
     sandboxInstanceId: input.sandboxInstanceId,
     mainPanelTransitionState: handoff.transitionState,
     lifecycle,
-    ptyState,
     queryClient,
   });
   const sandboxStatus = workbenchLifecycleState.sandboxStatusQuery.data;
@@ -257,10 +258,11 @@ export function useSessionWorkbenchController(input: {
 
   return {
     workbench: {
+      ensureTransportConnected: transportManager.ensureTransportConnected,
       connectionReadiness: workbenchLifecycleState.connectionReadiness,
+      handleTerminalWorkspaceReset: workbenchLifecycleState.handleTerminalWorkspaceReset,
       stoppedSessionMessage: workbenchLifecycleState.stoppedSessionMessage,
       workbenchStatus: workbenchLifecycleState.workbenchStatus,
-      ptyState,
       cliPtyState,
       sandboxLifecycleStatus: workbenchLifecycleState.sandboxLifecycleStatus,
       sandboxStatusQuery: workbenchLifecycleState.sandboxStatusQuery,

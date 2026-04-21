@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useRef } from "react";
 
 import type { useCodexSessionState } from "../session-agents/codex/session-state/index.js";
-import type { useSandboxPtyState } from "../sessions/use-sandbox-pty-state.js";
 import type { MainPanelTransitionState } from "./session-main-panel-handoff-state.js";
 import type { WorkbenchSandboxLifecycleStatus } from "./session-workbench-state.js";
 
@@ -265,13 +264,11 @@ export function useSessionWorkbenchCodexRecovery(input: {
   isStartingSession: boolean;
   isWaitingForAutomationThread: boolean;
   mainPanelTransitionState: MainPanelTransitionState;
-  markRecoveryBoundary: () => void;
-  ptyResetInfo: ReturnType<typeof useSandboxPtyState>["lifecycle"]["resetInfo"];
+  requestRecoveryStatusRefresh: () => void;
   recoverSession: ReturnType<typeof useCodexSessionState>["lifecycle"]["recoverSession"];
   recoverableDisconnect: ReturnType<
     typeof useCodexSessionState
   >["lifecycle"]["recoverableDisconnect"];
-  refetchSandboxStatus: () => Promise<unknown>;
   sandboxInstanceId: string | null;
   sandboxStatus: WorkbenchSandboxLifecycleStatus;
   sessionConnectionState: ReturnType<
@@ -319,18 +316,8 @@ export function useSessionWorkbenchCodexRecovery(input: {
     }
 
     lastRecoverableDisconnectIdRef.current = input.recoverableDisconnect.id;
-    input.markRecoveryBoundary();
-    void input.refetchSandboxStatus().catch(() => {});
-  }, [input.markRecoveryBoundary, input.recoverableDisconnect, input.refetchSandboxStatus]);
-
-  useEffect(() => {
-    if (input.ptyResetInfo === null) {
-      return;
-    }
-
-    input.markRecoveryBoundary();
-    void input.refetchSandboxStatus().catch(() => {});
-  }, [input.markRecoveryBoundary, input.ptyResetInfo, input.refetchSandboxStatus]);
+    input.requestRecoveryStatusRefresh();
+  }, [input.recoverableDisconnect, input.requestRecoveryStatusRefresh]);
 
   useEffect(() => {
     if (input.sessionConnectionState !== "connected") {

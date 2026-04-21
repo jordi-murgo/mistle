@@ -70,14 +70,12 @@ describe("useSessionWorkbenchController", () => {
       canConnect: false,
       reason: "missing-session",
     });
+    expect(typeof result.current.workbench.handleTerminalWorkspaceReset).toBe("function");
     expect(result.current.workbench.stoppedSessionMessage).toBeNull();
     expect(result.current.workbench.workbenchStatus).toEqual({
       kind: "not_connected",
       alert: null,
     });
-    expect(result.current.workbench.ptyState.lifecycle.connectedSandboxInstanceId).toBeNull();
-    expect(result.current.workbench.ptyState.lifecycle.state).toBe("idle");
-    expect(result.current.workbench.ptyState.output.chunks).toEqual([]);
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(false);
     expect(result.current.workbench.terminalPanelState.panelSize).toBe(DEFAULT_TERMINAL_PANEL_SIZE);
     expect(result.current.workbench.diffPanelState.isVisible).toBe(false);
@@ -353,22 +351,38 @@ describe("useSessionWorkbenchController", () => {
   it("requires a post-reset sandbox status read before recovery can trust cached status", () => {
     expect(
       hasFreshSandboxStatusReadSinceRecoveryBoundary({
-        recoveryBoundaryDataUpdatedAtMs: 1_000,
-        currentDataUpdatedAtMs: 1_000,
+        recoveryBoundaryEpoch: 1,
+        latestCompletedRecoveryRefreshEpoch: 0,
       }),
     ).toBe(false);
 
     expect(
       hasFreshSandboxStatusReadSinceRecoveryBoundary({
-        recoveryBoundaryDataUpdatedAtMs: 1_000,
-        currentDataUpdatedAtMs: 1_001,
+        recoveryBoundaryEpoch: 1,
+        latestCompletedRecoveryRefreshEpoch: 1,
       }),
     ).toBe(true);
 
     expect(
       hasFreshSandboxStatusReadSinceRecoveryBoundary({
-        recoveryBoundaryDataUpdatedAtMs: null,
-        currentDataUpdatedAtMs: 1_000,
+        recoveryBoundaryEpoch: null,
+        latestCompletedRecoveryRefreshEpoch: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not trust a refresh that completed before the latest reset boundary", () => {
+    expect(
+      hasFreshSandboxStatusReadSinceRecoveryBoundary({
+        recoveryBoundaryEpoch: 2,
+        latestCompletedRecoveryRefreshEpoch: 1,
+      }),
+    ).toBe(false);
+
+    expect(
+      hasFreshSandboxStatusReadSinceRecoveryBoundary({
+        recoveryBoundaryEpoch: 2,
+        latestCompletedRecoveryRefreshEpoch: 2,
       }),
     ).toBe(true);
   });

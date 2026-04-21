@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { TerminalRecoveryState } from "./session-terminal-panel.js";
 import {
   buildTerminalPtyOpenInput,
   reduceTerminalRecoveryState,
-  resolveTerminalRecoveryMessage,
   shouldAttemptTerminalReconnect,
   shouldAutoOpenTerminal,
   shouldHandleTerminalExit,
-} from "./session-terminal-panel.js";
+  shouldObserveTerminalReset,
+} from "./session-terminal-runtime.js";
 
 const ResetInfo = {
   code: "bootstrap_disconnected",
@@ -40,6 +39,21 @@ describe("buildTerminalPtyOpenInput", () => {
     ).toEqual({
       cols: 120,
       ptySessionId: "terminal",
+      rows: 20,
+      sandboxInstanceId: "sandbox_123",
+    });
+  });
+
+  it("uses a custom PTY session id when one is provided", () => {
+    expect(
+      buildTerminalPtyOpenInput({
+        cwd: null,
+        ptySessionId: "terminal-2",
+        sandboxInstanceId: "sandbox_123",
+      }),
+    ).toEqual({
+      cols: 120,
+      ptySessionId: "terminal-2",
       rows: 20,
       sandboxInstanceId: "sandbox_123",
     });
@@ -125,6 +139,48 @@ describe("shouldHandleTerminalExit", () => {
   });
 });
 
+describe("shouldObserveTerminalReset", () => {
+  it("does not observe resets while the terminal is hidden", () => {
+    expect(
+      shouldObserveTerminalReset({
+        isTerminalVisible: false,
+        lastHandledReset: null,
+        nextReset: ResetInfo,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not observe an absent reset", () => {
+    expect(
+      shouldObserveTerminalReset({
+        isTerminalVisible: true,
+        lastHandledReset: null,
+        nextReset: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not observe the same reset twice", () => {
+    expect(
+      shouldObserveTerminalReset({
+        isTerminalVisible: true,
+        lastHandledReset: ResetInfo,
+        nextReset: ResetInfo,
+      }),
+    ).toBe(false);
+  });
+
+  it("observes a fresh visible reset", () => {
+    expect(
+      shouldObserveTerminalReset({
+        isTerminalVisible: true,
+        lastHandledReset: null,
+        nextReset: ResetInfo,
+      }),
+    ).toBe(true);
+  });
+});
+
 describe("reduceTerminalRecoveryState", () => {
   it("starts a fresh recovery cycle when a reset is seen", () => {
     expect(
@@ -141,8 +197,7 @@ describe("reduceTerminalRecoveryState", () => {
       kind: "recovering",
       attemptCount: 0,
       command: "none",
-      errorMessage: null,
-      resetInfo: ResetInfo,
+      failure: null,
     });
   });
 
@@ -153,8 +208,7 @@ describe("reduceTerminalRecoveryState", () => {
           kind: "recovering",
           attemptCount: 0,
           command: "none",
-          errorMessage: null,
-          resetInfo: ResetInfo,
+          failure: null,
         },
         {
           type: "sync_observed",
@@ -167,8 +221,7 @@ describe("reduceTerminalRecoveryState", () => {
       kind: "recovering",
       attemptCount: 0,
       command: "none",
-      errorMessage: "Terminal disconnected and the sandbox stopped.",
-      resetInfo: ResetInfo,
+      failure: "sandbox_stopped",
     });
   });
 
@@ -178,8 +231,7 @@ describe("reduceTerminalRecoveryState", () => {
         kind: "recovering",
         attemptCount: 0,
         command: "none",
-        errorMessage: null,
-        resetInfo: ResetInfo,
+        failure: null,
       },
       {
         type: "sync_observed",
@@ -199,8 +251,7 @@ describe("reduceTerminalRecoveryState", () => {
           kind: "recovering",
           attemptCount: 0,
           command: "reopen",
-          errorMessage: null,
-          resetInfo: ResetInfo,
+          failure: null,
         },
         {
           type: "reopen_requested",
@@ -210,157 +261,7 @@ describe("reduceTerminalRecoveryState", () => {
       kind: "recovering",
       attemptCount: 1,
       command: "none",
-      errorMessage: null,
-      resetInfo: ResetInfo,
+      failure: null,
     });
-  });
-
-  it("clears recovery once the PTY is open again", () => {
-    expect(
-      reduceTerminalRecoveryState(
-        {
-          kind: "recovering",
-          attemptCount: 1,
-          command: "none",
-          errorMessage: null,
-          resetInfo: ResetInfo,
-        },
-        {
-          type: "sync_observed",
-          isReconnectAttemptInFlight: false,
-          lifecycleState: "open",
-          sandboxStatus: "running",
-        },
-      ),
-    ).toEqual({
-      kind: "idle",
-    });
-  });
-
-  it("records an explicit terminal failure when the sandbox fails", () => {
-    expect(
-      reduceTerminalRecoveryState(
-        {
-          kind: "recovering",
-          attemptCount: 0,
-          command: "none",
-          errorMessage: null,
-          resetInfo: ResetInfo,
-        },
-        {
-          type: "sync_observed",
-          isReconnectAttemptInFlight: false,
-          lifecycleState: "closed",
-          sandboxStatus: "failed",
-        },
-      ),
-    ).toEqual({
-      kind: "recovering",
-      attemptCount: 0,
-      command: "none",
-      errorMessage: "Terminal disconnected and the sandbox failed.",
-      resetInfo: ResetInfo,
-    });
-  });
-
-  it("fails recovery after the reconnect attempt budget is exhausted", () => {
-    expect(
-      reduceTerminalRecoveryState(
-        {
-          kind: "recovering",
-          attemptCount: 3,
-          command: "none",
-          errorMessage: null,
-          resetInfo: ResetInfo,
-        },
-        {
-          type: "sync_observed",
-          isReconnectAttemptInFlight: false,
-          lifecycleState: "closed",
-          sandboxStatus: "running",
-        },
-      ),
-    ).toEqual({
-      kind: "recovering",
-      attemptCount: 3,
-      command: "none",
-      errorMessage: "Could not reconnect terminal after 3 attempts.",
-      resetInfo: ResetInfo,
-    });
-  });
-
-  it("records terminal reopen failures without issuing another command", () => {
-    expect(
-      reduceTerminalRecoveryState(
-        {
-          kind: "recovering",
-          attemptCount: 1,
-          command: "none",
-          errorMessage: null,
-          resetInfo: ResetInfo,
-        },
-        {
-          type: "reopen_failed",
-          message: "Could not reopen sandbox terminal.",
-        },
-      ),
-    ).toEqual({
-      kind: "recovering",
-      attemptCount: 1,
-      command: "none",
-      errorMessage: "Could not reopen sandbox terminal.",
-      resetInfo: ResetInfo,
-    });
-  });
-});
-
-describe("resolveTerminalRecoveryMessage", () => {
-  function createRecoveringState(
-    overrides: Partial<Extract<TerminalRecoveryState, { kind: "recovering" }>> = {},
-  ): TerminalRecoveryState {
-    return {
-      kind: "recovering",
-      attemptCount: 0,
-      command: "none",
-      errorMessage: null,
-      resetInfo: ResetInfo,
-      ...overrides,
-    };
-  }
-
-  it("explains that stopped sandboxes cannot reconnect the terminal", () => {
-    expect(
-      resolveTerminalRecoveryMessage({
-        recovery: createRecoveringState(),
-        sandboxStatus: "stopped",
-      }),
-    ).toBe(
-      "Terminal disconnected: Sandbox bootstrap tunnel disconnected. The sandbox stopped and the terminal cannot reconnect.",
-    );
-  });
-
-  it("reports reconnect attempts while the sandbox is running", () => {
-    expect(
-      resolveTerminalRecoveryMessage({
-        recovery: createRecoveringState({
-          attemptCount: 2,
-        }),
-        sandboxStatus: "running",
-      }),
-    ).toBe(
-      "Terminal disconnected: Sandbox bootstrap tunnel disconnected. Reconnecting terminal (attempt 2 of 3).",
-    );
-  });
-
-  it("prefers explicit recovery failures over generic reconnect messaging", () => {
-    expect(
-      resolveTerminalRecoveryMessage({
-        recovery: createRecoveringState({
-          attemptCount: 3,
-          errorMessage: "Could not reconnect terminal after 3 attempts.",
-        }),
-        sandboxStatus: "running",
-      }),
-    ).toBe("Could not reconnect terminal after 3 attempts.");
   });
 });

@@ -17,14 +17,25 @@ import {
   createStorySessionBottomPanel,
   createStorySessionMainContent,
   SessionWorkbenchStoryChrome,
+  StoryTerminalSurfaceBody,
   StorySandboxInstanceId,
 } from "./session-story-support.js";
-import { SessionTerminalPanel } from "./session-terminal-panel.js";
+import { SessionTerminalWorkspaceView } from "./session-terminal-workspace.js";
 import { SessionWorkbenchPageView } from "./session-workbench-page-view.js";
 
 type SessionWorkbenchPageViewStoryArgs = React.ComponentProps<typeof SessionWorkbenchPageView> & {
   headerStatusUi: SandboxStatusBadgeUi;
 };
+
+function buildPageViewTerminalOutput(cwd: string | null): string {
+  return [
+    "root@sandbox:~# pwd",
+    cwd ?? "/root",
+    "root@sandbox:~# ls",
+    "apps  packages  README.md",
+    "",
+  ].join("\n");
+}
 
 const meta = {
   title: "Dashboard/Sessions/SessionWorkbench/PageView",
@@ -170,23 +181,16 @@ export const CliSplitWithTerminal: Story = {
     mainContentLayout: { scroll: "contained", width: "full" },
     primaryBottomPanel: null,
     bottomPanel: (
-      <SessionTerminalPanel
+      <SessionTerminalWorkspaceView
         cwd={null}
-        isConnectionReady={true}
         isVisible={true}
-        onDisconnectTerminal={noop}
-        onHide={noop}
-        ptyState={createStoryWorkbenchCliPtyState(
-          [
-            "root@sandbox:~# pwd",
-            "/root",
-            "root@sandbox:~# ls",
-            "apps  packages  README.md",
-            "",
-          ].join("\n"),
+        onWorkspaceEmpty={noop}
+        renderTerminalPanel={(panelInput) => (
+          <StoryTerminalSurfaceBody
+            initialOutput={buildPageViewTerminalOutput(panelInput.cwd)}
+            isVisible={panelInput.isPanelVisible}
+          />
         )}
-        sandboxInstanceId={StorySandboxInstanceId}
-        sandboxStatus="running"
       />
     ),
     bottomPanelSize: 32,
