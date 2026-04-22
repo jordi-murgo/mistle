@@ -504,6 +504,7 @@ export interface paths {
               [key: string]: unknown;
             } | null;
             target: {
+              primaryRepositoryId?: string | null;
               sandboxProfileId: string;
               sandboxProfileVersion?: number;
             };
@@ -535,6 +536,7 @@ export interface paths {
               } | null;
               target: {
                 id: string;
+                primaryRepositoryId: string | null;
                 sandboxProfileId: string;
                 sandboxProfileVersion: number;
               };
@@ -555,7 +557,8 @@ export interface paths {
                     | "INVALID_WEBHOOK_SOURCE_REFERENCE"
                     | "WEBHOOK_SOURCE_TARGET_NOT_WEBHOOK_CAPABLE"
                     | "INVALID_SANDBOX_PROFILE_REFERENCE"
-                    | "INVALID_SANDBOX_PROFILE_TRIGGER_REFERENCE";
+                    | "INVALID_SANDBOX_PROFILE_TRIGGER_REFERENCE"
+                    | "INVALID_PRIMARY_REPOSITORY";
                   message: string;
                 }
               | {
@@ -641,6 +644,7 @@ export interface paths {
               } | null;
               target: {
                 id: string;
+                primaryRepositoryId: string | null;
                 sandboxProfileId: string;
                 sandboxProfileVersion: number;
               };
@@ -806,6 +810,7 @@ export interface paths {
               [key: string]: unknown;
             } | null;
             target?: {
+              primaryRepositoryId?: string | null;
               sandboxProfileId?: string;
               sandboxProfileVersion?: number;
             };
@@ -837,6 +842,7 @@ export interface paths {
               } | null;
               target: {
                 id: string;
+                primaryRepositoryId: string | null;
                 sandboxProfileId: string;
                 sandboxProfileVersion: number;
               };
@@ -857,7 +863,8 @@ export interface paths {
                     | "INVALID_WEBHOOK_SOURCE_REFERENCE"
                     | "WEBHOOK_SOURCE_TARGET_NOT_WEBHOOK_CAPABLE"
                     | "INVALID_SANDBOX_PROFILE_REFERENCE"
-                    | "INVALID_SANDBOX_PROFILE_TRIGGER_REFERENCE";
+                    | "INVALID_SANDBOX_PROFILE_TRIGGER_REFERENCE"
+                    | "INVALID_PRIMARY_REPOSITORY";
                   message: string;
                 }
               | {
@@ -6689,6 +6696,124 @@ export interface paths {
             "application/json": {
               /** @enum {string} */
               code: "PROFILE_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal server error. */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "text/plain": string;
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/sandbox/profiles/{profileId}/versions/{version}/automation-config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          profileId: string;
+          version: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Get automation editor configuration for the specified sandbox profile version. */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              bindings: {
+                config: {
+                  [key: string]: unknown;
+                };
+                connectionId: string;
+                createdAt: string;
+                id: string;
+                /** @enum {string} */
+                kind: "agent" | "git" | "connector";
+                sandboxProfileId: string;
+                sandboxProfileVersion: number;
+                updatedAt: string;
+              }[];
+              repositoryOptions: {
+                id: string;
+                label: string;
+                path: string;
+              }[];
+            };
+          };
+        };
+        /** @description Invalid request. */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "VALIDATION_ERROR";
+              message: string;
+            };
+          };
+        };
+        /** @description Authentication is required. */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Active organization is required. */
+        403: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "FORBIDDEN";
+              message: string;
+            };
+          };
+        };
+        /** @description Sandbox profile or profile version was not found. */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "PROFILE_NOT_FOUND" | "PROFILE_VERSION_NOT_FOUND";
               message: string;
             };
           };
