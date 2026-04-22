@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type React from "react";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { ProfileSettingsPageView } from "./profile-settings-page-view.js";
 
@@ -31,7 +31,46 @@ const baseProps = {
   saving: false,
 } satisfies React.ComponentProps<typeof ProfileSettingsPageView>;
 
+type LinkedAccountCard = NonNullable<
+  React.ComponentProps<typeof ProfileSettingsPageView>["linkedAccountCards"]
+>[number];
+
+function createGitHubLinkedCard(overrides: Partial<LinkedAccountCard> = {}): LinkedAccountCard {
+  return {
+    providerFamily: "github",
+    displayName: "GitHub",
+    logoKey: "github",
+    statusLabel: "Linked",
+    statusTone: "active",
+    accountLabel: "@mistle-user",
+    helperMessage: null,
+    emailPreference: null,
+    commitSigning: null,
+    primaryActionLabel: null,
+    secondaryActionLabel: "Unlink",
+    ...overrides,
+  };
+}
+
+function createGitHubSigningNotConfiguredCard(
+  overrides: Partial<LinkedAccountCard> = {},
+): LinkedAccountCard {
+  return createGitHubLinkedCard({
+    commitSigning: {
+      statusLabel: "Add private key",
+      keySummaryLabel: null,
+      uploadActionLabel: "Upload private key",
+      removeActionLabel: null,
+    },
+    ...overrides,
+  });
+}
+
 describe("ProfileSettingsPageView", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("shows edit and remove actions when a profile image is available", () => {
     render(<ProfileSettingsPageView {...baseProps} imageUrl="https://example.com/avatar.webp" />);
 
@@ -140,7 +179,6 @@ describe("ProfileSettingsPageView", () => {
             statusLabel: "Not linked",
             statusTone: "warning",
             accountLabel: "No linked account yet",
-            linkedAtLabel: null,
             helperMessage: null,
             emailPreference: null,
             commitSigning: null,
@@ -157,20 +195,12 @@ describe("ProfileSettingsPageView", () => {
     expect(screen.queryByRole("button", { name: "Unlink" })).toBeNull();
   });
 
-  it("renders linked GitHub account details with relink and unlink actions", () => {
+  it("renders linked GitHub account details with only the unlink action", () => {
     render(
       <ProfileSettingsPageView
         {...baseProps}
         linkedAccountCards={[
-          {
-            providerFamily: "github",
-            displayName: "GitHub",
-            logoKey: "github",
-            statusLabel: "Linked",
-            statusTone: "active",
-            accountLabel: "@mistle-user",
-            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
-            helperMessage: null,
+          createGitHubSigningNotConfiguredCard({
             emailPreference: {
               selectedEmail: "mistle-user@example.com",
               options: [
@@ -183,27 +213,33 @@ describe("ProfileSettingsPageView", () => {
                   label: "engineering@example.com",
                 },
               ],
-              helperText: "Used for sandbox Git identity and commit signing.",
             },
-            commitSigning: {
-              statusLabel: "Not configured",
-              keySummaryLabel: null,
-              helperLabel: "SSH private key",
-              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
-              uploadActionLabel: "Upload private key",
-              removeActionLabel: null,
-            },
-            primaryActionLabel: "Relink",
-            secondaryActionLabel: "Unlink",
-          },
+          }),
         ]}
       />,
     );
 
     expect(screen.getByText("@mistle-user")).toBeTruthy();
-    expect(screen.getByText("Linked Apr 19, 2026, 6:15 PM")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Relink" })).toBeTruthy();
+    expect(screen.queryByText("Linked Apr 19, 2026, 6:15 PM")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Relink" })).toBeNull();
     expect(screen.getByRole("button", { name: "Unlink" })).toBeTruthy();
+  });
+
+  it("hides commit email when GitHub metadata is unavailable", () => {
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[
+          createGitHubSigningNotConfiguredCard({
+            emailPreference: null,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText("Commit email")).toBeNull();
+    expect(screen.queryByText("None")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
   });
 
   it("renders a callback notice when a linked-account result is present", () => {
@@ -211,15 +247,15 @@ describe("ProfileSettingsPageView", () => {
       <ProfileSettingsPageView
         {...baseProps}
         linkedAccountCallbackNotice={{
-          title: "GitHub linked",
-          message: "Your GitHub account is now linked to Mistle.",
-          variant: "default",
+          title: "GitHub linked successfully",
+          message: "Your GitHub account is now linked on Mistle.",
+          variant: "success",
         }}
       />,
     );
 
-    expect(screen.getByText("GitHub linked")).toBeTruthy();
-    expect(screen.getByText("Your GitHub account is now linked to Mistle.")).toBeTruthy();
+    expect(screen.getByText("GitHub linked successfully")).toBeTruthy();
+    expect(screen.getByText("Your GitHub account is now linked on Mistle.")).toBeTruthy();
   });
 
   it("renders an empty state when no linked account providers are available", () => {
@@ -250,18 +286,15 @@ describe("ProfileSettingsPageView", () => {
             statusLabel: "Linked",
             statusTone: "active",
             accountLabel: "@mistle-user",
-            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
             helperMessage: null,
             emailPreference: null,
             commitSigning: {
-              statusLabel: "Not configured",
+              statusLabel: "Add private key",
               keySummaryLabel: null,
-              helperLabel: "SSH private key",
-              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
               uploadActionLabel: "Upload private key",
               removeActionLabel: null,
             },
-            primaryActionLabel: "Relink",
+            primaryActionLabel: null,
             secondaryActionLabel: "Unlink",
           },
           {
@@ -271,7 +304,6 @@ describe("ProfileSettingsPageView", () => {
             statusLabel: "Not linked",
             statusTone: "warning",
             accountLabel: "No linked account yet",
-            linkedAtLabel: null,
             helperMessage: null,
             emailPreference: null,
             commitSigning: null,
@@ -284,7 +316,7 @@ describe("ProfileSettingsPageView", () => {
 
     expect(screen.getByText("GitHub")).toBeTruthy();
     expect(screen.getByText("Slack")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Relink" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Unlink" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Link account" })).toBeTruthy();
   });
 
@@ -303,8 +335,7 @@ describe("ProfileSettingsPageView", () => {
             statusLabel: "Relink required",
             statusTone: "warning",
             accountLabel: "@mistle-user",
-            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
-            helperMessage: "GitHub needs to be linked again before Mistle can act as you.",
+            helperMessage: null,
             emailPreference: null,
             commitSigning: null,
             primaryActionLabel: "Relink",
@@ -329,6 +360,37 @@ describe("ProfileSettingsPageView", () => {
     });
   });
 
+  it("renders account-specific helper messages inside the linked account card", () => {
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[
+          {
+            providerFamily: "github",
+            displayName: "GitHub",
+            logoKey: "github",
+            statusLabel: "Disabled",
+            statusTone: "disabled",
+            accountLabel: "@mistle-user",
+            helperMessage:
+              "Your organization has disabled GitHub identity linking. You can still unlink this account.",
+            emailPreference: null,
+            commitSigning: null,
+            primaryActionLabel: null,
+            secondaryActionLabel: "Unlink",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("GitHub")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your organization has disabled GitHub identity linking. You can still unlink this account.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("renders GitHub commit email and signing controls when available", () => {
     render(
       <ProfileSettingsPageView
@@ -341,7 +403,6 @@ describe("ProfileSettingsPageView", () => {
             statusLabel: "Linked",
             statusTone: "active",
             accountLabel: "@mistle-user",
-            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
             helperMessage: null,
             emailPreference: {
               selectedEmail: "mistle-user@example.com",
@@ -355,17 +416,14 @@ describe("ProfileSettingsPageView", () => {
                   label: "engineering@example.com",
                 },
               ],
-              helperText: "Used for sandbox Git identity and commit signing.",
             },
             commitSigning: {
-              statusLabel: "Configured",
+              statusLabel: "Private key added",
               keySummaryLabel: "SHA256:abc123",
-              helperLabel: "SSH private key",
-              helperCommand: null,
               uploadActionLabel: "Replace private key",
               removeActionLabel: "Remove key",
             },
-            primaryActionLabel: "Relink",
+            primaryActionLabel: null,
             secondaryActionLabel: "Unlink",
           },
         ]}
@@ -375,19 +433,18 @@ describe("ProfileSettingsPageView", () => {
     expect(screen.getByText("Commit email")).toBeTruthy();
     expect(screen.getByText("Commit signing")).toBeTruthy();
     expect(screen.getByRole("combobox")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Replace private key" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Remove key" })).toBeTruthy();
-    expect(screen.getByText("SSH private key")).toBeTruthy();
-    expect(screen.getByText("Used for sandbox Git identity and commit signing.")).toBeTruthy();
+    expect(screen.getByText("Private key added")).toBeTruthy();
+    expect(screen.queryByText("SSH private key")).toBeNull();
+    expect(screen.queryByText("Used for sandbox Git identity and commit signing.")).toBeNull();
   });
 
-  it("uploads a pasted GitHub commit signing key through the provided handler", async () => {
-    const uploadedFiles: File[] = [];
-
+  it("disables the GitHub commit email field while linked-account actions are pending", () => {
     render(
       <ProfileSettingsPageView
         {...baseProps}
+        linkedAccountActionPending={true}
         linkedAccountCards={[
           {
             providerFamily: "github",
@@ -396,28 +453,45 @@ describe("ProfileSettingsPageView", () => {
             statusLabel: "Linked",
             statusTone: "active",
             accountLabel: "@mistle-user",
-            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
             helperMessage: null,
-            emailPreference: null,
-            commitSigning: {
-              statusLabel: "Not configured",
-              keySummaryLabel: null,
-              helperLabel: "SSH private key",
-              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
-              uploadActionLabel: "Upload private key",
-              removeActionLabel: null,
+            emailPreference: {
+              selectedEmail: "mistle-user@example.com",
+              options: [
+                {
+                  value: "mistle-user@example.com",
+                  label: "mistle-user@example.com (Primary)",
+                },
+                {
+                  value: "engineering@example.com",
+                  label: "engineering@example.com",
+                },
+              ],
             },
-            primaryActionLabel: "Relink",
+            commitSigning: null,
+            primaryActionLabel: null,
             secondaryActionLabel: "Unlink",
           },
         ]}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Commit email" })).toHaveProperty("disabled", true);
+  });
+
+  it("uploads a pasted GitHub commit signing key through the provided handler", async () => {
+    const uploadedFiles: File[] = [];
+
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[createGitHubSigningNotConfiguredCard()]}
         onUploadLinkedAccountCommitSigningKey={async (_providerFamily, file) => {
           uploadedFiles.push(file);
         }}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Upload private key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add private key" }));
 
     fireEvent.change(screen.getByPlaceholderText("Paste your SSH private key"), {
       target: {
@@ -439,36 +513,14 @@ describe("ProfileSettingsPageView", () => {
     render(
       <ProfileSettingsPageView
         {...baseProps}
-        linkedAccountCards={[
-          {
-            providerFamily: "github",
-            displayName: "GitHub",
-            logoKey: "github",
-            statusLabel: "Linked",
-            statusTone: "active",
-            accountLabel: "@mistle-user",
-            linkedAtLabel: "Linked Apr 19, 2026, 6:15 PM",
-            helperMessage: null,
-            emailPreference: null,
-            commitSigning: {
-              statusLabel: "Not configured",
-              keySummaryLabel: null,
-              helperLabel: "SSH private key",
-              helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
-              uploadActionLabel: "Upload private key",
-              removeActionLabel: null,
-            },
-            primaryActionLabel: "Relink",
-            secondaryActionLabel: "Unlink",
-          },
-        ]}
+        linkedAccountCards={[createGitHubSigningNotConfiguredCard()]}
         onUploadLinkedAccountCommitSigningKey={async (_providerFamily, file) => {
           uploadedFiles.push(file);
         }}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Upload private key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add private key" }));
 
     const uploadInput = screen.getByLabelText("Choose GitHub commit signing private key file", {
       selector: "input",
@@ -490,5 +542,58 @@ describe("ProfileSettingsPageView", () => {
     await waitFor(() => {
       expect(uploadedFiles).toEqual([uploadFile]);
     });
+  });
+
+  it("shows a dialog error when a pasted GitHub commit signing key upload fails", async () => {
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[createGitHubSigningNotConfiguredCard()]}
+        onUploadLinkedAccountCommitSigningKey={async () => {
+          throw new Error("Invalid private key.");
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add private key" }));
+    fireEvent.change(screen.getByPlaceholderText("Paste your SSH private key"), {
+      target: {
+        value: "-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid\n-----END OPENSSH PRIVATE KEY-----\n",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload private key" }));
+
+    expect(await screen.findByText("Invalid private key.")).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("shows a dialog error when a file-based GitHub commit signing key upload fails", async () => {
+    render(
+      <ProfileSettingsPageView
+        {...baseProps}
+        linkedAccountCards={[createGitHubSigningNotConfiguredCard()]}
+        onUploadLinkedAccountCommitSigningKey={async () => {
+          throw new Error("Upload failed.");
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add private key" }));
+
+    const uploadInput = screen.getByLabelText("Choose GitHub commit signing private key file", {
+      selector: "input",
+    });
+    const uploadFile = new File(["bad"], "bad-key", {
+      type: "application/octet-stream",
+    });
+
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [uploadFile],
+      },
+    });
+
+    expect(await screen.findByText("Upload failed.")).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });

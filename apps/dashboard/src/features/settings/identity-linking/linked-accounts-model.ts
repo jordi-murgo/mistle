@@ -1,4 +1,3 @@
-import { formatDateTime } from "../../shared/date-formatters.js";
 import type { LinkedAccount } from "./linked-accounts-service.js";
 
 export type LinkedAccountStatusTone = "active" | "warning" | "disabled";
@@ -6,7 +5,7 @@ export type LinkedAccountStatusTone = "active" | "warning" | "disabled";
 export type LinkedAccountCallbackNotice = {
   title: string;
   message: string;
-  variant: "default" | "alert";
+  variant: "success" | "alert";
 };
 
 export type LinkedAccountEmailOptionViewModel = {
@@ -17,14 +16,11 @@ export type LinkedAccountEmailOptionViewModel = {
 export type LinkedAccountEmailPreferenceViewModel = {
   selectedEmail: string;
   options: readonly LinkedAccountEmailOptionViewModel[];
-  helperText: string;
 };
 
 export type LinkedAccountCommitSigningViewModel = {
   statusLabel: string;
   keySummaryLabel: string | null;
-  helperLabel: string | null;
-  helperCommand: string | null;
   uploadActionLabel: string;
   removeActionLabel: string | null;
 };
@@ -36,7 +32,6 @@ export type LinkedAccountCardViewModel = {
   statusLabel: string;
   statusTone: LinkedAccountStatusTone;
   accountLabel: string;
-  linkedAtLabel: string | null;
   helperMessage: string | null;
   emailPreference: LinkedAccountEmailPreferenceViewModel | null;
   commitSigning: LinkedAccountCommitSigningViewModel | null;
@@ -91,10 +86,6 @@ export function resolveLinkedAccountCardViewModel(
       statusLabel: "Disabled",
       statusTone: "disabled",
       accountLabel: resolveLinkedAccountLabel(linkedAccount),
-      linkedAtLabel:
-        linkedAccount.principal === null
-          ? null
-          : `Linked ${formatDateTime(linkedAccount.principal.linkedAt)}`,
       helperMessage:
         linkedAccount.principal === null
           ? `Your organization has disabled ${providerDisplayName} identity linking.`
@@ -114,7 +105,6 @@ export function resolveLinkedAccountCardViewModel(
       statusLabel: "Not linked",
       statusTone: "warning",
       accountLabel: "No linked account yet",
-      linkedAtLabel: null,
       helperMessage: null,
       emailPreference: null,
       commitSigning: null,
@@ -131,8 +121,7 @@ export function resolveLinkedAccountCardViewModel(
       statusLabel: "Relink required",
       statusTone: "warning",
       accountLabel: resolveLinkedAccountLabel(linkedAccount),
-      linkedAtLabel: `Linked ${formatDateTime(linkedAccount.principal.linkedAt)}`,
-      helperMessage: `${providerDisplayName} needs to be linked again before Mistle can act as you.`,
+      helperMessage: null,
       emailPreference: null,
       commitSigning: null,
       primaryActionLabel: "Relink",
@@ -147,14 +136,10 @@ export function resolveLinkedAccountCardViewModel(
     statusLabel: "Linked",
     statusTone: "active",
     accountLabel: resolveLinkedAccountLabel(linkedAccount),
-    linkedAtLabel: `Linked ${formatDateTime(linkedAccount.principal.linkedAt)}`,
-    helperMessage:
-      linkedAccount.providerFamily === "github" && emailPreference === null
-        ? "GitHub has not provided selectable commit emails for this link."
-        : null,
+    helperMessage: null,
     emailPreference,
     commitSigning,
-    primaryActionLabel: "Relink",
+    primaryActionLabel: null,
     secondaryActionLabel: "Unlink",
   };
 }
@@ -173,20 +158,16 @@ function resolveLinkedAccountCommitSigningViewModel(
 
   if (linkedAccount.commitSigning === null) {
     return {
-      statusLabel: "Not configured",
+      statusLabel: "Add private key",
       keySummaryLabel: null,
-      helperLabel: "SSH private key",
-      helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
       uploadActionLabel: "Upload private key",
       removeActionLabel: null,
     };
   }
 
   return {
-    statusLabel: "Configured",
+    statusLabel: "Private key added",
     keySummaryLabel: linkedAccount.commitSigning.publicKeyFingerprint,
-    helperLabel: "SSH private key",
-    helperCommand: null,
     uploadActionLabel: "Replace private key",
     removeActionLabel: "Remove key",
   };
@@ -297,7 +278,6 @@ function resolveLinkedAccountEmailPreferenceViewModel(
   return {
     selectedEmail: preferredEmail,
     options,
-    helperText: "Used for sandbox Git identity and commit signing.",
   };
 }
 
@@ -313,9 +293,9 @@ export function resolveLinkedAccountCallbackNotice(input: {
 
   if (input.result === "success") {
     return {
-      title: `${providerDisplayName} linked`,
-      message: `Your ${providerDisplayName} account is now linked to Mistle.`,
-      variant: "default",
+      title: `${providerDisplayName} linked successfully`,
+      message: `Your ${providerDisplayName} account is now linked on Mistle.`,
+      variant: "success",
     };
   }
 

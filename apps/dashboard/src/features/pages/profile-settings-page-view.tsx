@@ -12,22 +12,21 @@ import {
   FieldLabel,
   Input,
   Notice,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Spinner,
   Textarea,
 } from "@mistle/ui";
+import { PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
 import type { SyntheticEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
+import { AutoSaveSelectField } from "../forms/auto-save-select-field.js";
 import { AutoSaveTextField } from "../forms/auto-save-text-field.js";
 import { resolveIntegrationLogoPath } from "../integrations/logo.js";
 import type {
   LinkedAccountCallbackNotice,
   LinkedAccountCardViewModel,
 } from "../settings/identity-linking/linked-accounts-model.js";
+import { getErrorMessage } from "../shared/auto-save-behavior.js";
 import { FormPageSection, FormPageStack } from "../shared/form-page.js";
 import { SettingsImageField } from "../shared/settings-image-field.js";
 
@@ -58,94 +57,172 @@ export type ProfileSettingsPageViewProps = {
   saving: boolean;
 };
 
+export type ProfileSettingsUserSectionProps = Pick<
+  ProfileSettingsPageViewProps,
+  | "displayName"
+  | "email"
+  | "imageUrl"
+  | "onDeleteProfileImage"
+  | "onSaveChanges"
+  | "onUploadProfileImage"
+  | "profileImageBusy"
+  | "profileImageErrorMessage"
+  | "saving"
+>;
+
+export type ProfileSettingsLinkedAccountsSectionProps = Pick<
+  ProfileSettingsPageViewProps,
+  | "linkedAccountActionPending"
+  | "linkedAccountCallbackNotice"
+  | "linkedAccountCards"
+  | "linkedAccountErrorMessage"
+  | "linkedAccountsEmptyStateMessage"
+  | "linkedAccountsLoading"
+  | "linkedAccountsLoadErrorMessage"
+  | "onDeleteLinkedAccountCommitSigningKey"
+  | "onLinkLinkedAccount"
+  | "onUnlinkLinkedAccount"
+  | "onUpdateLinkedAccountPreferredEmail"
+  | "onUploadLinkedAccountCommitSigningKey"
+>;
+
 export function ProfileSettingsPageView(props: ProfileSettingsPageViewProps): React.JSX.Element {
   return (
     <FormPageStack>
-      <FormPageSection>
-        <div className="flex flex-col gap-4 p-4">
-          <SettingsImageField
-            alt={`${props.displayName} profile image`}
-            busy={props.profileImageBusy}
-            errorMessage={props.profileImageErrorMessage}
-            fallbackInitial="U"
-            imageUrl={props.imageUrl}
-            imageName="profile image"
-            label="Avatar"
-            name={props.displayName}
-            onDelete={props.onDeleteProfileImage}
-            onUpload={props.onUploadProfileImage}
-          />
-          <AutoSaveTextField
-            disabled={props.saving}
-            id="display-name"
-            label="Display name"
-            onSave={props.onSaveChanges}
-            validate={() => null}
-            value={props.displayName}
-          />
-          <Field contentWidth="fill" orientation="horizontal">
-            <FieldHeader>
-              <FieldLabel>Email</FieldLabel>
-            </FieldHeader>
-            <FieldContent>
-              <Input disabled readOnly value={props.email} />
-            </FieldContent>
-          </Field>
-        </div>
-      </FormPageSection>
+      <ProfileSettingsUserSection {...props} />
       {shouldRenderLinkedAccountsSection(props) ? (
-        <FormPageSection>
-          <div className="flex flex-col gap-4 p-4">
-            <div className="flex flex-col gap-1">
-              <h2 className="text-base font-semibold">Linked Accounts</h2>
-              <p className="text-sm text-muted-foreground">
-                Link external accounts so Mistle can attribute work to you.
-              </p>
-            </div>
-
-            {props.linkedAccountCallbackNotice === null ? null : (
-              <Notice
-                title={props.linkedAccountCallbackNotice.title}
-                variant={props.linkedAccountCallbackNotice.variant}
-              >
-                {props.linkedAccountCallbackNotice.message}
-              </Notice>
-            )}
-
-            {props.linkedAccountsLoading ? (
-              <div className="text-sm text-muted-foreground">Loading linked accounts…</div>
-            ) : props.linkedAccountsLoadErrorMessage !== null ? (
-              <Notice variant="alert">
-                {props.linkedAccountsLoadErrorMessage} Please try again later.
-              </Notice>
-            ) : props.linkedAccountsEmptyStateMessage !== null ? (
-              <Notice>{props.linkedAccountsEmptyStateMessage}</Notice>
-            ) : props.linkedAccountCards.length === 0 ? null : (
-              props.linkedAccountCards.map((linkedAccountCard) => (
-                <LinkedAccountCard
-                  key={linkedAccountCard.providerFamily}
-                  linkedAccountActionPending={props.linkedAccountActionPending}
-                  linkedAccountCard={linkedAccountCard}
-                  onDeleteLinkedAccountCommitSigningKey={
-                    props.onDeleteLinkedAccountCommitSigningKey
-                  }
-                  onLinkLinkedAccount={props.onLinkLinkedAccount}
-                  onUnlinkLinkedAccount={props.onUnlinkLinkedAccount}
-                  onUpdateLinkedAccountPreferredEmail={props.onUpdateLinkedAccountPreferredEmail}
-                  onUploadLinkedAccountCommitSigningKey={
-                    props.onUploadLinkedAccountCommitSigningKey
-                  }
-                />
-              ))
-            )}
-
-            {props.linkedAccountErrorMessage === null ? null : (
-              <Notice variant="alert">{props.linkedAccountErrorMessage}</Notice>
-            )}
-          </div>
-        </FormPageSection>
+        <ProfileSettingsLinkedAccountsSection {...props} />
       ) : null}
     </FormPageStack>
+  );
+}
+
+export function ProfileSettingsUserSection(
+  props: ProfileSettingsUserSectionProps,
+): React.JSX.Element {
+  return (
+    <FormPageSection>
+      <div className="flex flex-col gap-4 p-4">
+        <SettingsImageField
+          alt={`${props.displayName} profile image`}
+          busy={props.profileImageBusy}
+          errorMessage={props.profileImageErrorMessage}
+          fallbackInitial="U"
+          imageUrl={props.imageUrl}
+          imageName="profile image"
+          label="Avatar"
+          name={props.displayName}
+          onDelete={props.onDeleteProfileImage}
+          onUpload={props.onUploadProfileImage}
+        />
+        <AutoSaveTextField
+          disabled={props.saving}
+          id="display-name"
+          label="Display name"
+          onSave={props.onSaveChanges}
+          validate={() => null}
+          value={props.displayName}
+        />
+        <Field contentWidth="fill" orientation="horizontal">
+          <FieldHeader>
+            <FieldLabel>Email</FieldLabel>
+          </FieldHeader>
+          <FieldContent>
+            <Input disabled readOnly value={props.email} />
+          </FieldContent>
+        </Field>
+      </div>
+    </FormPageSection>
+  );
+}
+
+export function ProfileSettingsLinkedAccountsSection(
+  props: ProfileSettingsLinkedAccountsSectionProps,
+): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold">Linked Accounts</h2>
+        <p className="text-sm text-muted-foreground">
+          Link accounts to enable Mistle to attribute actions it takes on your behalf to you.
+        </p>
+      </div>
+
+      <LinkedAccountsFeedbackStack
+        linkedAccountCallbackNotice={props.linkedAccountCallbackNotice}
+        linkedAccountErrorMessage={props.linkedAccountErrorMessage}
+        linkedAccountsEmptyStateMessage={props.linkedAccountsEmptyStateMessage}
+        linkedAccountsLoading={props.linkedAccountsLoading}
+        linkedAccountsLoadErrorMessage={props.linkedAccountsLoadErrorMessage}
+      />
+
+      {props.linkedAccountsLoading ||
+      props.linkedAccountsLoadErrorMessage !== null ||
+      props.linkedAccountsEmptyStateMessage !== null ||
+      props.linkedAccountCards.length === 0
+        ? null
+        : props.linkedAccountCards.map((linkedAccountCard) => (
+            <LinkedAccountCard
+              key={linkedAccountCard.providerFamily}
+              linkedAccountActionPending={props.linkedAccountActionPending}
+              linkedAccountCard={linkedAccountCard}
+              onDeleteLinkedAccountCommitSigningKey={props.onDeleteLinkedAccountCommitSigningKey}
+              onLinkLinkedAccount={props.onLinkLinkedAccount}
+              onUnlinkLinkedAccount={props.onUnlinkLinkedAccount}
+              onUpdateLinkedAccountPreferredEmail={props.onUpdateLinkedAccountPreferredEmail}
+              onUploadLinkedAccountCommitSigningKey={props.onUploadLinkedAccountCommitSigningKey}
+            />
+          ))}
+    </div>
+  );
+}
+
+function LinkedAccountsFeedbackStack(
+  props: Pick<
+    ProfileSettingsLinkedAccountsSectionProps,
+    | "linkedAccountCallbackNotice"
+    | "linkedAccountErrorMessage"
+    | "linkedAccountsEmptyStateMessage"
+    | "linkedAccountsLoading"
+    | "linkedAccountsLoadErrorMessage"
+  >,
+): React.JSX.Element | null {
+  const hasFeedback =
+    props.linkedAccountCallbackNotice !== null ||
+    props.linkedAccountsLoading ||
+    props.linkedAccountsLoadErrorMessage !== null ||
+    props.linkedAccountsEmptyStateMessage !== null ||
+    props.linkedAccountErrorMessage !== null;
+
+  if (!hasFeedback) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {props.linkedAccountCallbackNotice === null ? null : (
+        <Notice
+          title={props.linkedAccountCallbackNotice.title}
+          variant={props.linkedAccountCallbackNotice.variant}
+        >
+          {props.linkedAccountCallbackNotice.message}
+        </Notice>
+      )}
+
+      {props.linkedAccountsLoading ? (
+        <div className="text-sm text-muted-foreground">Loading linked accounts…</div>
+      ) : props.linkedAccountsLoadErrorMessage !== null ? (
+        <Notice variant="alert">
+          {props.linkedAccountsLoadErrorMessage} Please try again later.
+        </Notice>
+      ) : props.linkedAccountsEmptyStateMessage !== null ? (
+        <Notice>{props.linkedAccountsEmptyStateMessage}</Notice>
+      ) : null}
+
+      {props.linkedAccountErrorMessage === null ? null : (
+        <Notice variant="alert">{props.linkedAccountErrorMessage}</Notice>
+      )}
+    </div>
   );
 }
 
@@ -166,14 +243,9 @@ function LinkedAccountCard(input: {
   const commitSigningUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [isCommitSigningDialogOpen, setIsCommitSigningDialogOpen] = useState(false);
   const [pastedCommitSigningKey, setPastedCommitSigningKey] = useState("");
-  const [selectedEmail, setSelectedEmail] = useState(emailPreference?.selectedEmail ?? "");
-  const selectedOptionLabel = emailPreference?.options.find(
-    (option) => option.value === selectedEmail,
-  )?.label;
-
-  useEffect(() => {
-    setSelectedEmail(emailPreference?.selectedEmail ?? "");
-  }, [emailPreference?.selectedEmail, input.linkedAccountCard.providerFamily]);
+  const [commitSigningDialogErrorMessage, setCommitSigningDialogErrorMessage] = useState<
+    string | null
+  >(null);
 
   function closeCommitSigningDialog(): void {
     if (input.linkedAccountActionPending) {
@@ -182,12 +254,26 @@ function LinkedAccountCard(input: {
 
     setIsCommitSigningDialogOpen(false);
     setPastedCommitSigningKey("");
+    setCommitSigningDialogErrorMessage(null);
+  }
+
+  function openCommitSigningDialog(): void {
+    setCommitSigningDialogErrorMessage(null);
+    setIsCommitSigningDialogOpen(true);
   }
 
   async function uploadCommitSigningKeyFile(file: File): Promise<void> {
-    await input.onUploadLinkedAccountCommitSigningKey(input.linkedAccountCard.providerFamily, file);
-    setIsCommitSigningDialogOpen(false);
-    setPastedCommitSigningKey("");
+    try {
+      await input.onUploadLinkedAccountCommitSigningKey(
+        input.linkedAccountCard.providerFamily,
+        file,
+      );
+      setIsCommitSigningDialogOpen(false);
+      setPastedCommitSigningKey("");
+      setCommitSigningDialogErrorMessage(null);
+    } catch (error) {
+      setCommitSigningDialogErrorMessage(getErrorMessage(error));
+    }
   }
 
   async function handleCommitSigningDialogSubmit(
@@ -200,13 +286,11 @@ function LinkedAccountCard(input: {
       return;
     }
 
-    try {
-      await uploadCommitSigningKeyFile(
-        new File([normalizedPrivateKey], "my-signing-key", {
-          type: "text/plain",
-        }),
-      );
-    } catch {}
+    await uploadCommitSigningKeyFile(
+      new File([normalizedPrivateKey], "my-signing-key", {
+        type: "text/plain",
+      }),
+    );
   }
 
   return (
@@ -226,29 +310,28 @@ function LinkedAccountCard(input: {
               </LinkedAccountStatusBadge>
             </div>
             <p className="text-sm">{input.linkedAccountCard.accountLabel}</p>
-            {input.linkedAccountCard.linkedAtLabel === null ? null : (
-              <p className="text-xs text-muted-foreground">
-                {input.linkedAccountCard.linkedAtLabel}
-              </p>
-            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {input.linkedAccountCard.primaryActionLabel === null ? null : (
             <Button
+              aria-label={input.linkedAccountCard.primaryActionLabel}
               disabled={input.linkedAccountActionPending}
               onClick={() => {
                 void input.onLinkLinkedAccount(input.linkedAccountCard.providerFamily);
               }}
               type="button"
             >
-              {input.linkedAccountActionPending
-                ? "Working..."
-                : input.linkedAccountCard.primaryActionLabel}
+              {input.linkedAccountActionPending ? (
+                <Spinner aria-hidden className="size-4" />
+              ) : (
+                input.linkedAccountCard.primaryActionLabel
+              )}
             </Button>
           )}
           {input.linkedAccountCard.secondaryActionLabel === null ? null : (
             <Button
+              aria-label={input.linkedAccountCard.secondaryActionLabel}
               disabled={input.linkedAccountActionPending}
               onClick={() => {
                 void input.onUnlinkLinkedAccount(input.linkedAccountCard.providerFamily);
@@ -256,9 +339,11 @@ function LinkedAccountCard(input: {
               type="button"
               variant="outline"
             >
-              {input.linkedAccountActionPending
-                ? "Working..."
-                : input.linkedAccountCard.secondaryActionLabel}
+              {input.linkedAccountActionPending ? (
+                <Spinner aria-hidden className="size-4" />
+              ) : (
+                input.linkedAccountCard.secondaryActionLabel
+              )}
             </Button>
           )}
         </div>
@@ -266,56 +351,21 @@ function LinkedAccountCard(input: {
 
       {emailPreference === null ? null : (
         <div className="mt-4">
-          <Field contentWidth="fill" orientation="horizontal">
-            <FieldHeader>
-              <FieldLabel>Commit email</FieldLabel>
-            </FieldHeader>
-            <FieldContent>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Select
-                  onValueChange={(nextValue) => {
-                    setSelectedEmail(nextValue ?? "");
-                  }}
-                  value={selectedEmail}
-                >
-                  <SelectTrigger
-                    className="w-full"
-                    id={`linked-account-preferred-email-${input.linkedAccountCard.providerFamily}`}
-                    style={{ width: "100%", maxWidth: "32rem" }}
-                  >
-                    <SelectValue placeholder="Select commit email">
-                      {selectedOptionLabel}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {emailPreference.options.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  disabled={
-                    input.linkedAccountActionPending ||
-                    selectedEmail.length === 0 ||
-                    selectedEmail === emailPreference.selectedEmail
-                  }
-                  onClick={() => {
-                    void input.onUpdateLinkedAccountPreferredEmail(
-                      input.linkedAccountCard.providerFamily,
-                      selectedEmail,
-                    );
-                  }}
-                  type="button"
-                  variant="outline"
-                >
-                  {input.linkedAccountActionPending ? "Working..." : "Save"}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">{emailPreference.helperText}</p>
-            </FieldContent>
-          </Field>
+          <AutoSaveSelectField
+            disabled={input.linkedAccountActionPending}
+            id={`linked-account-preferred-email-${input.linkedAccountCard.providerFamily}`}
+            label="Commit email"
+            noneLabel="None"
+            onSave={async (nextValue) => {
+              await input.onUpdateLinkedAccountPreferredEmail(
+                input.linkedAccountCard.providerFamily,
+                nextValue,
+              );
+            }}
+            options={emailPreference.options}
+            showErrorMessage={false}
+            value={emailPreference.selectedEmail}
+          />
         </div>
       )}
 
@@ -326,23 +376,7 @@ function LinkedAccountCard(input: {
               <FieldLabel>Commit signing</FieldLabel>
             </FieldHeader>
             <FieldContent>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm">{commitSigning.statusLabel}</p>
-                  {commitSigning.keySummaryLabel === null ? null : (
-                    <p className="truncate text-xs text-muted-foreground">
-                      {commitSigning.keySummaryLabel}
-                    </p>
-                  )}
-                  {commitSigning.helperLabel === null ? null : (
-                    <p className="text-xs text-muted-foreground">{commitSigning.helperLabel}</p>
-                  )}
-                  {commitSigning.helperCommand === null ? null : (
-                    <code className="mt-1 inline-block max-w-full overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs select-all">
-                      {commitSigning.helperCommand}
-                    </code>
-                  )}
-                </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
                 <div className="flex flex-wrap gap-2">
                   <input
                     aria-label={`Upload ${input.linkedAccountCard.displayName} commit signing private key`}
@@ -355,39 +389,76 @@ function LinkedAccountCard(input: {
                         return;
                       }
 
-                      void input.onUploadLinkedAccountCommitSigningKey(
-                        input.linkedAccountCard.providerFamily,
-                        selectedFile,
-                      );
+                      void uploadCommitSigningKeyFile(selectedFile);
                     }}
                     type="file"
                   />
-                  <Button
-                    disabled={input.linkedAccountActionPending}
-                    onClick={() => {
-                      setIsCommitSigningDialogOpen(true);
-                    }}
-                    type="button"
-                    variant="outline"
-                  >
-                    {input.linkedAccountActionPending
-                      ? "Working..."
-                      : commitSigning.uploadActionLabel}
-                  </Button>
+                  {commitSigning.removeActionLabel === null &&
+                  commitSigning.keySummaryLabel === null ? (
+                    <Button
+                      disabled={input.linkedAccountActionPending}
+                      onClick={() => {
+                        openCommitSigningDialog();
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {input.linkedAccountActionPending ? (
+                        <Spinner aria-hidden className="size-4" />
+                      ) : (
+                        <>
+                          <span>{commitSigning.statusLabel}</span>
+                          <PencilSimpleIcon aria-hidden className="size-4" />
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <>
+                      <div className="min-w-0 text-left sm:text-right">
+                        <p className="text-sm">{commitSigning.statusLabel}</p>
+                        {commitSigning.keySummaryLabel === null ? null : (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {commitSigning.keySummaryLabel}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        aria-label={commitSigning.uploadActionLabel}
+                        disabled={input.linkedAccountActionPending}
+                        onClick={() => {
+                          openCommitSigningDialog();
+                        }}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {input.linkedAccountActionPending ? (
+                          <Spinner aria-hidden className="size-4" />
+                        ) : (
+                          <PencilSimpleIcon aria-hidden className="size-4" />
+                        )}
+                      </Button>
+                    </>
+                  )}
                   {commitSigning.removeActionLabel === null ? null : (
                     <Button
+                      aria-label={commitSigning.removeActionLabel}
                       disabled={input.linkedAccountActionPending}
                       onClick={() => {
                         void input.onDeleteLinkedAccountCommitSigningKey(
                           input.linkedAccountCard.providerFamily,
                         );
                       }}
+                      size="icon-sm"
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                     >
-                      {input.linkedAccountActionPending
-                        ? "Working..."
-                        : commitSigning.removeActionLabel}
+                      {input.linkedAccountActionPending ? (
+                        <Spinner aria-hidden className="size-4" />
+                      ) : (
+                        <TrashIcon aria-hidden className="size-4" />
+                      )}
                     </Button>
                   )}
                 </div>
@@ -396,13 +467,6 @@ function LinkedAccountCard(input: {
           </Field>
         </div>
       )}
-
-      {input.linkedAccountCard.helperMessage === null ? null : (
-        <p className="mt-3 text-sm text-muted-foreground">
-          {input.linkedAccountCard.helperMessage}
-        </p>
-      )}
-
       {commitSigning === null ? null : (
         <Dialog
           isBusy={input.linkedAccountActionPending}
@@ -432,6 +496,7 @@ function LinkedAccountCard(input: {
                 <Textarea
                   className="field-sizing-fixed min-w-0 max-w-full font-mono text-xs"
                   onChange={(event) => {
+                    setCommitSigningDialogErrorMessage(null);
                     setPastedCommitSigningKey(event.currentTarget.value);
                   }}
                   placeholder="Paste your SSH private key"
@@ -439,6 +504,9 @@ function LinkedAccountCard(input: {
                   value={pastedCommitSigningKey}
                   wrap="soft"
                 />
+                {commitSigningDialogErrorMessage === null ? null : (
+                  <Notice variant="alert">{commitSigningDialogErrorMessage}</Notice>
+                )}
                 <div className="flex flex-col gap-2">
                   <p className="text-xs text-muted-foreground">Or choose a private key file</p>
                   <input
@@ -452,7 +520,8 @@ function LinkedAccountCard(input: {
                         return;
                       }
 
-                      void uploadCommitSigningKeyFile(selectedFile).catch(() => undefined);
+                      setCommitSigningDialogErrorMessage(null);
+                      void uploadCommitSigningKeyFile(selectedFile);
                     }}
                     type="file"
                   />
@@ -490,6 +559,12 @@ function LinkedAccountCard(input: {
             </DialogContent>
           ) : null}
         </Dialog>
+      )}
+
+      {input.linkedAccountCard.helperMessage === null ? null : (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {input.linkedAccountCard.helperMessage}
+        </p>
       )}
     </div>
   );

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDateTime } from "../../shared/date-formatters.js";
 import {
   clearLinkedAccountCallbackSearchParams,
   findLinkedAccount,
@@ -104,18 +103,15 @@ describe("linked-accounts-model", () => {
       statusLabel: "Linked",
       statusTone: "active",
       accountLabel: "@mistle-user",
-      linkedAtLabel: `Linked ${formatDateTime("2026-04-19T10:15:00.000Z")}`,
-      helperMessage: "GitHub has not provided selectable commit emails for this link.",
+      helperMessage: null,
       emailPreference: null,
       commitSigning: {
-        statusLabel: "Not configured",
+        statusLabel: "Add private key",
         keySummaryLabel: null,
-        helperLabel: "SSH private key",
-        helperCommand: "ssh-keygen -t ed25519 -f ~/.ssh/my-signing-key",
         uploadActionLabel: "Upload private key",
         removeActionLabel: null,
       },
-      primaryActionLabel: "Relink",
+      primaryActionLabel: null,
       secondaryActionLabel: "Unlink",
     });
   });
@@ -133,7 +129,6 @@ describe("linked-accounts-model", () => {
       statusLabel: "Not linked",
       statusTone: "warning",
       accountLabel: "No linked account yet",
-      linkedAtLabel: null,
       helperMessage: null,
       emailPreference: null,
       commitSigning: null,
@@ -158,7 +153,7 @@ describe("linked-accounts-model", () => {
     expect(resolveLinkedAccountCardViewModel(linkedAccount)).toMatchObject({
       statusLabel: "Relink required",
       statusTone: "warning",
-      helperMessage: "GitHub needs to be linked again before Mistle can act as you.",
+      helperMessage: null,
       emailPreference: null,
       commitSigning: null,
       primaryActionLabel: "Relink",
@@ -178,7 +173,6 @@ describe("linked-accounts-model", () => {
       statusLabel: "Disabled",
       statusTone: "disabled",
       accountLabel: "@mistle-user",
-      linkedAtLabel: `Linked ${formatDateTime("2026-04-19T10:15:00.000Z")}`,
       helperMessage:
         "Your organization has disabled GitHub identity linking. You can still unlink this account.",
       emailPreference: null,
@@ -201,13 +195,30 @@ describe("linked-accounts-model", () => {
       ),
     ).toMatchObject({
       commitSigning: {
-        statusLabel: "Configured",
+        statusLabel: "Private key added",
         keySummaryLabel: "SHA256:abc123",
-        helperLabel: "SSH private key",
-        helperCommand: null,
         uploadActionLabel: "Replace private key",
         removeActionLabel: "Remove key",
       },
+    });
+  });
+
+  it("does not render a commit email state when GitHub metadata is missing", () => {
+    expect(
+      resolveLinkedAccountCardViewModel(
+        createGitHubLinkedAccount({
+          principal: {
+            id: "uep_github",
+            status: "active",
+            providerSubjectId: "12345",
+            profile: null,
+            linkedAt: "2026-04-19T10:15:00.000Z",
+            updatedAt: "2026-04-19T10:15:00.000Z",
+          },
+        }),
+      ),
+    ).toMatchObject({
+      emailPreference: null,
     });
   });
 
@@ -241,9 +252,9 @@ describe("linked-accounts-model", () => {
         code: null,
       }),
     ).toEqual({
-      title: "GitHub linked",
-      message: "Your GitHub account is now linked to Mistle.",
-      variant: "default",
+      title: "GitHub linked successfully",
+      message: "Your GitHub account is now linked on Mistle.",
+      variant: "success",
     });
   });
 
@@ -269,9 +280,9 @@ describe("linked-accounts-model", () => {
         code: null,
       }),
     ).toEqual({
-      title: "Slack linked",
-      message: "Your Slack account is now linked to Mistle.",
-      variant: "default",
+      title: "Slack linked successfully",
+      message: "Your Slack account is now linked on Mistle.",
+      variant: "success",
     });
   });
 
@@ -338,7 +349,6 @@ describe("linked-accounts-model", () => {
             label: "engineering@example.com",
           },
         ],
-        helperText: "Used for sandbox Git identity and commit signing.",
       },
     });
   });
