@@ -33,6 +33,11 @@ import {
 import { resolveUserDisplayName } from "../shared/user-display-name.js";
 import { useRequiredOrganizationId, useRequiredSession } from "../shell/require-auth.js";
 import { SESSION_QUERY_KEY } from "../shell/session-query-key.js";
+import {
+  decrementPendingLinkedAccountProviderFamilyCount,
+  incrementPendingLinkedAccountProviderFamilyCount,
+  resolvePendingLinkedAccountProviderFamilies,
+} from "./pending-linked-account-provider-families.js";
 import { ProfileSettingsPageView } from "./profile-settings-page-view.js";
 
 const PROFILE_IMAGE_QUERY_KEY: readonly ["settings", "profile-image"] = [
@@ -52,6 +57,8 @@ export function ProfileSettingsPage(): React.JSX.Element {
   const [linkedAccountOperationErrorMessage, setLinkedAccountOperationErrorMessage] = useState<
     string | null
   >(null);
+  const [pendingLinkedAccountProviderFamilyCounts, setPendingLinkedAccountProviderFamilyCounts] =
+    useState<Record<string, number>>({});
   const [callbackNotice, setCallbackNotice] = useState<LinkedAccountCallbackNotice | null>(null);
   const { title, description } = resolvePageFrameText(pageMeta, "Profile");
   const profileImageQuery = useQuery({
@@ -251,6 +258,26 @@ export function ProfileSettingsPage(): React.JSX.Element {
     linkedAccountCards.length === 0
       ? "Your organization has not enabled any linked account providers right now."
       : null;
+  const pendingLinkedAccountProviderFamilies = resolvePendingLinkedAccountProviderFamilies(
+    pendingLinkedAccountProviderFamilyCounts,
+  );
+
+  async function runLinkedAccountAction<T>(
+    providerFamily: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    setPendingLinkedAccountProviderFamilyCounts((currentCounts) =>
+      incrementPendingLinkedAccountProviderFamilyCount(currentCounts, providerFamily),
+    );
+
+    try {
+      return await action();
+    } finally {
+      setPendingLinkedAccountProviderFamilyCounts((currentCounts) =>
+        decrementPendingLinkedAccountProviderFamilyCount(currentCounts, providerFamily),
+      );
+    }
+  }
 
   return (
     <FormPageFrame description={description} title={title}>
@@ -272,33 +299,37 @@ export function ProfileSettingsPage(): React.JSX.Element {
           await deleteProfileImageMutation.mutateAsync();
         }}
         onLinkLinkedAccount={async (providerFamily) => {
-          await startLinkedAccountAuthorizationMutation.mutateAsync(providerFamily);
+          await runLinkedAccountAction(providerFamily, async () =>
+            startLinkedAccountAuthorizationMutation.mutateAsync(providerFamily),
+          );
         }}
-        onDeleteLinkedAccountCommitSigningKey={async () => {
-          await deleteGitHubLinkedAccountSigningKeyMutation.mutateAsync();
+        onDeleteLinkedAccountCommitSigningKey={async (providerFamily) => {
+          await runLinkedAccountAction(providerFamily, async () =>
+            deleteGitHubLinkedAccountSigningKeyMutation.mutateAsync(),
+          );
         }}
         onSaveChanges={async (displayNameDraft) => {
           await saveMutation.mutateAsync(displayNameDraft.trim());
         }}
         onUnlinkLinkedAccount={async (providerFamily) => {
-          await unlinkLinkedAccountMutation.mutateAsync(providerFamily);
+          await runLinkedAccountAction(providerFamily, async () =>
+            unlinkLinkedAccountMutation.mutateAsync(providerFamily),
+          );
         }}
-        onUpdateLinkedAccountPreferredEmail={async (_providerFamily, preferredEmail) => {
-          await updateGitHubLinkedAccountPreferredEmailMutation.mutateAsync(preferredEmail);
+        onUpdateLinkedAccountPreferredEmail={async (providerFamily, preferredEmail) => {
+          await runLinkedAccountAction(providerFamily, async () =>
+            updateGitHubLinkedAccountPreferredEmailMutation.mutateAsync(preferredEmail),
+          );
         }}
-        onUploadLinkedAccountCommitSigningKey={async (_providerFamily, file) => {
-          await uploadGitHubLinkedAccountSigningKeyMutation.mutateAsync(file);
+        onUploadLinkedAccountCommitSigningKey={async (providerFamily, file) => {
+          await runLinkedAccountAction(providerFamily, async () =>
+            uploadGitHubLinkedAccountSigningKeyMutation.mutateAsync(file),
+          );
         }}
         onUploadProfileImage={async (file) => {
           await uploadProfileImageMutation.mutateAsync(file);
         }}
-        linkedAccountActionPending={
-          startLinkedAccountAuthorizationMutation.isPending ||
-          unlinkLinkedAccountMutation.isPending ||
-          updateGitHubLinkedAccountPreferredEmailMutation.isPending ||
-          uploadGitHubLinkedAccountSigningKeyMutation.isPending ||
-          deleteGitHubLinkedAccountSigningKeyMutation.isPending
-        }
+        pendingLinkedAccountProviderFamilies={pendingLinkedAccountProviderFamilies}
         saving={saveMutation.isPending}
       />
     </FormPageFrame>
