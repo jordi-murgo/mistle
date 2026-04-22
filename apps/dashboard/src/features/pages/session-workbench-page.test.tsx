@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, type RenderResult, render, screen } from "@testing-library/react";
+import { act, type RenderResult, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { createTestQueryClient } from "../../test-support/query-client.js";
 import { sandboxInstanceStatusQueryKey } from "../sessions/sessions-query-keys.js";
@@ -61,6 +61,18 @@ function renderSessionWorkbenchPage(input?: {
 }
 
 describe("SessionWorkbenchPage", () => {
+  beforeAll(() => {
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      value: class ResizeObserver {
+        disconnect(): void {}
+        observe(): void {}
+        unobserve(): void {}
+      },
+      writable: true,
+    });
+  });
+
   it("shows the initial loading startup state before sandbox status is trusted", () => {
     renderSessionWorkbenchPage();
 
@@ -75,11 +87,18 @@ describe("SessionWorkbenchPage", () => {
   });
 
   it("registers the processes header action on the session workbench", async () => {
-    renderSessionWorkbenchPage({
+    const view = renderSessionWorkbenchPage({
       seededStatus: "running",
     });
+    const headerActionsHost = view.container.querySelector('[data-testid="header-actions-host"]');
 
-    expect(await screen.findByRole("button", { name: "Open processes" })).toBeTruthy();
+    expect(headerActionsHost).not.toBeNull();
+
+    expect(
+      await within(headerActionsHost as HTMLElement).findByRole("button", {
+        name: "Open processes",
+      }),
+    ).toBeTruthy();
   });
 
   it("shows a running header status indicator for running sessions", async () => {
@@ -97,8 +116,13 @@ describe("SessionWorkbenchPage", () => {
         status: "running" as const,
       });
     });
+    const headerActionsHost = view.container.querySelector('[data-testid="header-actions-host"]');
 
-    const status = await screen.findByRole("status", { name: "Running" });
+    expect(headerActionsHost).not.toBeNull();
+
+    const status = await within(headerActionsHost as HTMLElement).findByRole("status", {
+      name: "Running",
+    });
     expect(status.className).toContain("bg-emerald-600");
     expect(status.className).toContain("border-emerald-700");
   });

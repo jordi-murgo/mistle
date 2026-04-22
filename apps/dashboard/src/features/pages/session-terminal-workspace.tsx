@@ -488,6 +488,17 @@ export const SessionTerminalWorkspaceView = forwardRef<
     };
   }, [onWorkspaceEmpty, readyApi]);
 
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!isVisible || api === null || api.totalPanels > 0) {
+      return;
+    }
+
+    createTerminal({
+      ...(api.activeGroup === undefined ? {} : { referenceGroup: api.activeGroup }),
+    });
+  }, [createTerminal, isVisible]);
+
   const contextValue = useMemo<SessionTerminalWorkspaceContextValue>(
     () => ({
       createTerminal,
@@ -507,7 +518,7 @@ export const SessionTerminalWorkspaceView = forwardRef<
               apiRef.current = event.api;
               setReadyApi(event.api);
 
-              if (shouldEnsureWorkspaceRef.current || (isVisible && event.api.totalPanels === 0)) {
+              if (shouldEnsureWorkspaceRef.current && event.api.totalPanels === 0) {
                 shouldEnsureWorkspaceRef.current = false;
                 createTerminal({
                   ...(event.api.activeGroup === undefined

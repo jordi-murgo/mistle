@@ -6,7 +6,7 @@ import type {
   ChatComposerStatusMessage,
   ChatComposerViewModel,
 } from "../chat/components/chat-composer.js";
-import { noop, noopRespondToServerRequest } from "../chat/components/chat-story-support.js";
+import { noopRespondToServerRequest } from "../chat/components/chat-story-support.js";
 import {
   SessionComposerFixtureProps,
   CodexFixtureSessionEntriesWithExploringGroup,
@@ -148,16 +148,12 @@ export function createStorySessionBottomPanel(
 export function renderSessionWorkbenchStory(input: {
   alert?: SessionWorkbenchAlert | null;
   bottomPanel?: React.ReactNode;
-  bottomPanelSize?: number;
   isSecondaryPanelVisible?: boolean;
   isBottomPanelVisible?: boolean;
   mainContentLayout?: React.ComponentProps<typeof SessionWorkbenchPageView>["mainContentLayout"];
   mainContent: React.ReactNode;
-  onBottomPanelResize?: (size: number) => void;
-  onSecondaryPanelResize?: (size: number) => void;
   primaryBottomPanel: React.ReactNode;
   secondaryPanel?: React.ReactNode;
-  secondaryPanelSize?: number;
   sandboxInstanceId?: string | null;
 }): React.JSX.Element {
   const mainContentLayoutProps =
@@ -167,15 +163,11 @@ export function renderSessionWorkbenchStory(input: {
     <SessionWorkbenchPageView
       alert={input.alert ?? null}
       bottomPanel={input.bottomPanel ?? <></>}
-      bottomPanelSize={input.bottomPanelSize ?? 32}
       isBottomPanelVisible={input.isBottomPanelVisible ?? false}
       isSecondaryPanelVisible={input.isSecondaryPanelVisible ?? false}
       mainContent={input.mainContent}
-      onBottomPanelResize={input.onBottomPanelResize ?? noop}
-      onSecondaryPanelResize={input.onSecondaryPanelResize ?? noop}
       primaryBottomPanel={input.primaryBottomPanel}
       secondaryPanel={input.secondaryPanel ?? <></>}
-      secondaryPanelSize={input.secondaryPanelSize ?? 38}
       sandboxInstanceId={input.sandboxInstanceId ?? StorySandboxInstanceId}
       {...mainContentLayoutProps}
     />
@@ -236,17 +228,13 @@ export function SessionWorkbenchStoryChrome(input: {
 export function renderSessionWorkbenchContentStory(input: {
   alert?: SessionWorkbenchAlert | null;
   bottomPanel?: React.ReactNode;
-  bottomPanelSize?: number;
   headerStatusUi?: SandboxStatusBadgeUi;
   isBottomPanelVisible?: boolean;
   isSecondaryPanelVisible?: boolean;
   mainContent: React.ReactNode;
   mainContentLayout?: React.ComponentProps<typeof SessionWorkbenchPageView>["mainContentLayout"];
-  onBottomPanelResize?: (size: number) => void;
-  onSecondaryPanelResize?: (size: number) => void;
   primaryBottomPanel: React.ReactNode;
   secondaryPanel?: React.ReactNode;
-  secondaryPanelSize?: number;
   sandboxInstanceId?: string | null;
 }): React.JSX.Element {
   return renderSessionWorkbenchStoryWithChrome({

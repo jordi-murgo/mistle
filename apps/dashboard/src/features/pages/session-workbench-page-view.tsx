@@ -1,4 +1,26 @@
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup, Notice } from "@mistle/ui";
+import {
+  type PanelImperativeHandle,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  Notice,
+  useDefaultLayout,
+} from "@mistle/ui";
+import { useLayoutEffect, useRef } from "react";
+
+import {
+  getBestEffortBrowserStorage,
+  readBrowserStorageItem,
+  writeBrowserStorageItem,
+} from "../shared/browser-storage.js";
+import { MIN_TERMINAL_PANEL_SIZE } from "./use-session-terminal-workbench-state.js";
+
+const BottomPanelGroupIdPrefix = "dashboard:session-workbench:bottom";
+const MainPanelGroupIdPrefix = "dashboard:session-workbench:main";
+const MainWorkspacePanelId = "session-workbench-main-workspace-panel";
+const BottomPanelId = "session-workbench-bottom-panel";
+const PrimaryPanelId = "session-workbench-primary-panel";
+const SecondaryPanelId = "session-workbench-secondary-panel";
 
 type SessionWorkbenchAlert = {
   title: string;
@@ -19,12 +41,8 @@ type SessionWorkbenchPageViewProps = {
   mainContent: React.ReactNode;
   primaryBottomPanel: React.ReactNode;
   bottomPanel: React.ReactNode;
-  bottomPanelSize: number;
-  onBottomPanelResize: (size: number) => void;
   isBottomPanelVisible: boolean;
   secondaryPanel: React.ReactNode;
-  secondaryPanelSize: number;
-  onSecondaryPanelResize: (size: number) => void;
   isSecondaryPanelVisible: boolean;
 };
 
@@ -43,14 +61,64 @@ export function SessionWorkbenchPageView({
   mainContent,
   primaryBottomPanel,
   bottomPanel,
-  bottomPanelSize,
-  onBottomPanelResize,
   isBottomPanelVisible,
   secondaryPanel,
-  secondaryPanelSize,
-  onSecondaryPanelResize,
   isSecondaryPanelVisible,
 }: SessionWorkbenchPageViewProps): React.JSX.Element {
+  const bottomPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const hasAppliedBottomPanelVisibilityRef = useRef(false);
+  const previousBottomPanelVisibilityRef = useRef<boolean | null>(null);
+  const sandboxInstanceKey = sandboxInstanceId ?? "missing-session";
+  const layoutStorage = {
+    getItem(key: string): string | null {
+      return readBrowserStorageItem({
+        key,
+        storage: getBestEffortBrowserStorage("local"),
+      });
+    },
+    setItem(key: string, value: string): void {
+      writeBrowserStorageItem({
+        key,
+        value,
+        storage: getBestEffortBrowserStorage("local"),
+      });
+    },
+  } satisfies Pick<Storage, "getItem" | "setItem">;
+  const bottomPanelLayoutPersistence = useDefaultLayout({
+    id: `${BottomPanelGroupIdPrefix}:${sandboxInstanceKey}`,
+    storage: layoutStorage,
+  });
+  const mainPanelLayoutPersistence = useDefaultLayout({
+    id: `${MainPanelGroupIdPrefix}:${sandboxInstanceKey}`,
+    panelIds: isSecondaryPanelVisible ? [PrimaryPanelId, SecondaryPanelId] : [PrimaryPanelId],
+    storage: layoutStorage,
+  });
+
+  useLayoutEffect(() => {
+    const bottomPanel = bottomPanelRef.current;
+    if (bottomPanel === null) {
+      return;
+    }
+
+    const wasBottomPanelVisible = previousBottomPanelVisibilityRef.current;
+    previousBottomPanelVisibilityRef.current = isBottomPanelVisible;
+
+    if (
+      hasAppliedBottomPanelVisibilityRef.current &&
+      wasBottomPanelVisible === isBottomPanelVisible
+    ) {
+      return;
+    }
+    hasAppliedBottomPanelVisibilityRef.current = true;
+
+    if (!isBottomPanelVisible) {
+      bottomPanel.collapse();
+      return;
+    }
+
+    bottomPanel.expand();
+  }, [isBottomPanelVisible]);
+
   if (sandboxInstanceId === null) {
     return (
       <Notice title="Session id is missing" variant="alert">
@@ -95,26 +163,42 @@ export function SessionWorkbenchPageView({
       )}
     </div>
   );
-  const workspaceWithBottomPanel = isBottomPanelVisible ? (
-    <ResizablePanelGroup className="min-h-0 h-full" orientation="vertical">
-      <ResizablePanel defaultSize={100 - bottomPanelSize} minSize={25}>
+  const workspaceWithBottomPanel = (
+    <ResizablePanelGroup
+      className="min-h-0 h-full"
+      defaultLayout={bottomPanelLayoutPersistence.defaultLayout}
+      onLayoutChanged={(layout) => {
+        if (!isBottomPanelVisible) {
+          return;
+        }
+
+        bottomPanelLayoutPersistence.onLayoutChanged(layout);
+      }}
+      orientation="vertical"
+      resizeTargetMinimumSize={{ coarse: 36, fine: 18 }}
+    >
+      <ResizablePanel id={MainWorkspacePanelId} minSize="40%">
         {mainWorkspace}
       </ResizablePanel>
-      <ResizableHandle />
+      <ResizableHandle
+        className={
+          isBottomPanelVisible
+            ? "relative -my-1 shrink-0 bg-transparent aria-orientation-horizontal:!h-3 aria-orientation-horizontal:cursor-row-resize after:absolute after:inset-x-0 after:top-1/2 after:-translate-y-1/2 after:bg-stone-300/90 hover:after:bg-stone-400/90 aria-orientation-horizontal:after:h-px"
+            : "hidden"
+        }
+      />
       <ResizablePanel
-        defaultSize={bottomPanelSize}
-        minSize={15}
-        onResize={(panelSize) => {
-          onBottomPanelResize(panelSize.asPercentage);
-        }}
+        collapsedSize={0}
+        collapsible
+        id={BottomPanelId}
+        minSize={`${String(MIN_TERMINAL_PANEL_SIZE)}px`}
+        panelRef={bottomPanelRef}
       >
         <div className="bg-background/98 h-full min-h-0 overflow-hidden backdrop-blur-sm">
           <div className="h-full w-full">{bottomPanel}</div>
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
-  ) : (
-    mainWorkspace
   );
 
   return (
@@ -127,31 +211,28 @@ export function SessionWorkbenchPageView({
         </div>
       )}
 
-      {isSecondaryPanelVisible ? (
-        <ResizablePanelGroup
-          className="min-h-0 flex-1"
-          key={sandboxInstanceId}
-          orientation="horizontal"
-        >
-          <ResizablePanel defaultSize={100 - secondaryPanelSize} minSize={25}>
-            {workspaceWithBottomPanel}
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel
-            defaultSize={secondaryPanelSize}
-            minSize={20}
-            onResize={(panelSize) => {
-              onSecondaryPanelResize(panelSize.asPercentage);
-            }}
-          >
-            <div className="bg-background/98 h-full min-h-0 overflow-hidden backdrop-blur-sm">
-              <div className="h-full w-full">{secondaryPanel}</div>
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      ) : (
-        workspaceWithBottomPanel
-      )}
+      <ResizablePanelGroup
+        className="min-h-0 flex-1"
+        defaultLayout={mainPanelLayoutPersistence.defaultLayout}
+        id="session-workbench-main-group"
+        key={sandboxInstanceId}
+        onLayoutChanged={mainPanelLayoutPersistence.onLayoutChanged}
+        orientation="horizontal"
+      >
+        <ResizablePanel id={PrimaryPanelId} minSize="25%">
+          {workspaceWithBottomPanel}
+        </ResizablePanel>
+        {!isSecondaryPanelVisible ? null : (
+          <>
+            <ResizableHandle id="session-workbench-secondary-handle" />
+            <ResizablePanel id={SecondaryPanelId} minSize="20%">
+              <div className="bg-background/98 h-full min-h-0 overflow-hidden backdrop-blur-sm">
+                <div className="h-full w-full">{secondaryPanel}</div>
+              </div>
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
     </div>
   );
 }

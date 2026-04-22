@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import { createTestQueryClient } from "../../test-support/query-client.js";
 import { sandboxInstanceStatusQueryKey } from "../sessions/sessions-query-keys.js";
 import { resolveInitialSessionConnectInput } from "./session-initial-connect-policy.js";
-import { DEFAULT_TERMINAL_PANEL_SIZE } from "./use-session-terminal-workbench-state.js";
 import {
   hasAutomationSessionPreparationTimedOut,
   hasFreshSandboxStatusRead,
@@ -77,9 +76,7 @@ describe("useSessionWorkbenchController", () => {
       alert: null,
     });
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(false);
-    expect(result.current.workbench.terminalPanelState.panelSize).toBe(DEFAULT_TERMINAL_PANEL_SIZE);
     expect(result.current.workbench.diffPanelState.isVisible).toBe(false);
-    expect(result.current.workbench.diffPanelState.panelSize).toBe(42);
     expect(result.current.workbench.diffPanelState.patch).toBe("");
     expect(result.current.workbench.portAccessState.processes).toEqual([]);
     expect(result.current.workbench.portAccessState.isPanelOpen).toBe(false);
@@ -405,7 +402,7 @@ describe("useSessionWorkbenchController", () => {
     ).toBe("error");
   });
 
-  it("persists terminal panel visibility and size per sandbox instance", () => {
+  it("persists terminal panel visibility per sandbox instance", () => {
     const hasStorageApi =
       typeof window.localStorage === "object" &&
       window.localStorage !== null &&
@@ -431,28 +428,64 @@ describe("useSessionWorkbenchController", () => {
 
     act(() => {
       result.current.workbench.terminalPanelState.openPanel();
-      result.current.workbench.terminalPanelState.setPanelSize(52);
     });
 
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(true);
-    expect(result.current.workbench.terminalPanelState.panelSize).toBe(52);
 
     rerender({
       sandboxInstanceId: sandboxInstanceIdTwo,
     });
 
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(false);
-    expect(result.current.workbench.terminalPanelState.panelSize).toBe(DEFAULT_TERMINAL_PANEL_SIZE);
 
     rerender({
       sandboxInstanceId: sandboxInstanceIdOne,
     });
 
     const expectedVisibility = hasStorageApi;
-    const expectedPanelSize = hasStorageApi ? 52 : DEFAULT_TERMINAL_PANEL_SIZE;
 
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(expectedVisibility);
-    expect(result.current.workbench.terminalPanelState.panelSize).toBe(expectedPanelSize);
+  });
+
+  it("persists diff panel visibility per sandbox instance", () => {
+    const hasStorageApi =
+      typeof window.localStorage === "object" &&
+      window.localStorage !== null &&
+      typeof window.localStorage.getItem === "function" &&
+      typeof window.localStorage.removeItem === "function";
+    const sandboxInstanceIdOne = `sbi-diff-one-${Date.now()}`;
+    const sandboxInstanceIdTwo = `sbi-diff-two-${Date.now()}`;
+
+    if (hasStorageApi) {
+      window.localStorage.removeItem(`dashboard:session-diff-workbench:${sandboxInstanceIdOne}`);
+      window.localStorage.removeItem(`dashboard:session-diff-workbench:${sandboxInstanceIdTwo}`);
+    }
+
+    const queryClient = createControllerQueryClient();
+    const { result, rerender } = renderSessionWorkbenchController({
+      queryClient,
+      sandboxInstanceId: sandboxInstanceIdOne,
+    });
+
+    act(() => {
+      result.current.workbench.diffPanelState.openPanel();
+    });
+
+    expect(result.current.workbench.diffPanelState.isVisible).toBe(true);
+
+    rerender({
+      sandboxInstanceId: sandboxInstanceIdTwo,
+    });
+
+    expect(result.current.workbench.diffPanelState.isVisible).toBe(false);
+
+    rerender({
+      sandboxInstanceId: sandboxInstanceIdOne,
+    });
+
+    const expectedVisibility = hasStorageApi;
+
+    expect(result.current.workbench.diffPanelState.isVisible).toBe(expectedVisibility);
   });
 
   it("waits for automation-backed sessions whose persisted thread id is still pending", () => {

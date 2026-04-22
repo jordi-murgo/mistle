@@ -446,7 +446,6 @@ function SessionConversationWorkbenchHarness(input: {
     <SessionWorkbenchPageView
       alert={null}
       bottomPanel={<></>}
-      bottomPanelSize={32}
       isBottomPanelVisible={false}
       isSecondaryPanelVisible={true}
       mainContent={
@@ -473,8 +472,6 @@ function SessionConversationWorkbenchHarness(input: {
         />
       }
       mainContentScrollContainerRef={scrollContainerRef}
-      onBottomPanelResize={() => {}}
-      onSecondaryPanelResize={() => {}}
       primaryBottomPanel={
         <div className="space-y-3">
           {hasRunningTurn && queuedPrompts.length > 0 ? (
@@ -643,7 +640,6 @@ function SessionConversationWorkbenchHarness(input: {
           )}
         </div>
       }
-      secondaryPanelSize={28}
     />
   );
 }
@@ -659,16 +655,12 @@ const meta = {
     sandboxInstanceId: null,
     alert: null,
     bottomPanel: <></>,
-    bottomPanelSize: 28,
     isBottomPanelVisible: true,
     isSecondaryPanelVisible: false,
     mainContent: <></>,
-    onBottomPanelResize: () => {},
-    onSecondaryPanelResize: () => {},
     scrollBehavior: "follow-streaming-at-bottom",
     primaryBottomPanel: <></>,
     secondaryPanel: <></>,
-    secondaryPanelSize: 28,
   },
   argTypes: {
     scrollBehavior: SessionConversationScrollBehaviorArgType,
