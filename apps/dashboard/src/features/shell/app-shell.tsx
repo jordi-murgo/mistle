@@ -11,6 +11,7 @@ import { useOrganizationLogoQuery } from "../organizations/organization-logo-que
 import { resolveSettingsBackDestination, SETTINGS_DEFAULT_PATH } from "../settings/model.js";
 import {
   getBestEffortBrowserStorage,
+  removeBrowserStorageItem,
   readBrowserStorageItem,
   writeBrowserStorageItem,
 } from "../shared/browser-storage.js";
@@ -22,9 +23,11 @@ import { resolveAppShellFrame } from "./app-shell-frame.js";
 import { AppShellHeaderActionsContext } from "./app-shell-header-actions.js";
 import { resolveAppShellRouteState } from "./app-shell-route-state.js";
 import {
+  isExistingSandboxSessionPath,
   resolveLocationHref,
   resolveSidebarModeDisableNavigationTarget,
   resolveSidebarModeEnableNavigationTarget,
+  resolveSessionsSidebarModeEnabled,
 } from "./app-shell-sessions-sidebar-mode.js";
 import { AppShellView } from "./app-shell-view.js";
 import {
@@ -46,16 +49,21 @@ export function AppShell(): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const previousNonSettingsPathRef = useRef<string>("/");
+  const previousSessionDetailUrlRef = useRef<string | null>(null);
   const previousSessionsSidebarToggleUrlRef = useRef<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isSwitchingOrganization, setIsSwitchingOrganization] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [switchOrganizationError, setSwitchOrganizationError] = useState<string | null>(null);
   const [headerActions, setHeaderActions] = useState<React.ReactNode | null>(null);
-  const [showSessionsSidebar, setShowSessionsSidebar] = useState(() =>
+  const [sessionsSidebarPreferenceEnabled, setSessionsSidebarPreferenceEnabled] = useState(() =>
     readSessionsSidebarEnabledPreference(),
   );
   const routeState = resolveAppShellRouteState(location.pathname);
+  const showSessionsSidebar = resolveSessionsSidebarModeEnabled({
+    pathname: location.pathname,
+    persistedEnabled: sessionsSidebarPreferenceEnabled,
+  });
 
   useEffect(() => {
     if (!routeState.inSettings) {
@@ -64,8 +72,8 @@ export function AppShell(): React.JSX.Element {
   }, [location.pathname, routeState.inSettings]);
 
   useEffect(() => {
-    persistSessionsSidebarEnabledPreference(showSessionsSidebar);
-  }, [showSessionsSidebar]);
+    persistSessionsSidebarEnabledPreference(sessionsSidebarPreferenceEnabled);
+  }, [sessionsSidebarPreferenceEnabled]);
 
   useEffect(() => {
     const currentLocationHref = resolveLocationHref({
@@ -75,11 +83,12 @@ export function AppShell(): React.JSX.Element {
     });
 
     if (
-      showSessionsSidebar &&
+      sessionsSidebarPreferenceEnabled &&
       !routeState.inSessions &&
       previousSessionsSidebarToggleUrlRef.current !== null &&
       previousSessionsSidebarToggleUrlRef.current !== currentLocationHref
     ) {
+      previousSessionDetailUrlRef.current = null;
       previousSessionsSidebarToggleUrlRef.current = null;
     }
   }, [
@@ -87,7 +96,7 @@ export function AppShell(): React.JSX.Element {
     location.pathname,
     location.search,
     routeState.inSessions,
-    showSessionsSidebar,
+    sessionsSidebarPreferenceEnabled,
   ]);
 
   const organizationOptionsQuery = useQuery({
@@ -158,9 +167,13 @@ export function AppShell(): React.JSX.Element {
       hash: location.hash,
     });
 
-    setShowSessionsSidebar(nextChecked);
+    setSessionsSidebarPreferenceEnabled(nextChecked);
 
     if (!nextChecked) {
+      if (isExistingSandboxSessionPath(location.pathname)) {
+        previousSessionDetailUrlRef.current = currentLocationHref;
+      }
+
       const navigationTarget = resolveSidebarModeDisableNavigationTarget({
         currentLocationHref,
         currentPathname: location.pathname,
@@ -178,7 +191,10 @@ export function AppShell(): React.JSX.Element {
 
     previousSessionsSidebarToggleUrlRef.current = currentLocationHref;
 
-    const navigationTarget = resolveSidebarModeEnableNavigationTarget(location.pathname);
+    const navigationTarget = resolveSidebarModeEnableNavigationTarget({
+      lastInteractedSessionHref: previousSessionDetailUrlRef.current,
+      pathname: location.pathname,
+    });
 
     if (navigationTarget === null) {
       return;
@@ -258,9 +274,17 @@ function readSessionsSidebarEnabledPreference(): boolean {
 
 function persistSessionsSidebarEnabledPreference(enabled: boolean): void {
   const storage = getBestEffortBrowserStorage("local");
+  if (!enabled) {
+    removeBrowserStorageItem({
+      key: SESSIONS_SIDEBAR_MODE_STORAGE_KEY,
+      storage,
+    });
+    return;
+  }
+
   writeBrowserStorageItem({
     key: SESSIONS_SIDEBAR_MODE_STORAGE_KEY,
-    value: enabled ? "true" : "false",
+    value: "true",
     storage,
   });
 }
