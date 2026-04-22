@@ -96,6 +96,19 @@ function HeaderActionsHost(input: { children: ReactNode }): React.JSX.Element {
   );
 }
 
+async function selectPrimaryRepositoryOption(optionName: string): Promise<void> {
+  const repositoryCombobox = await screen.findByRole("combobox", {
+    name: "Primary repository",
+  });
+  fireEvent.click(repositoryCombobox);
+  const repositoryListbox = await screen.findByRole("listbox");
+  const repositoryOption = within(repositoryListbox).getByRole("option", {
+    name: optionName,
+  });
+  fireEvent.mouseMove(repositoryOption);
+  fireEvent.click(repositoryOption);
+}
+
 async function startGitBranchTunnelServer(): Promise<{
   close: () => Promise<void>;
   emitTurnCompleted: (turnId: string) => void;
@@ -266,9 +279,9 @@ async function startGitBranchTunnelServer(): Promise<{
             result: {
               data: [
                 {
-                  id: "mdl_gpt54",
-                  model: "gpt-5.4",
-                  displayName: "GPT-5.4",
+                  id: "mdl_gpt53",
+                  model: "gpt-5.3-codex",
+                  displayName: "GPT-5.3 Codex",
                   hidden: false,
                   isDefault: true,
                   inputModalities: ["text", "image"],
@@ -287,16 +300,23 @@ async function startGitBranchTunnelServer(): Promise<{
             },
           });
           return;
-        case "thread/start":
+        case "thread/start": {
+          const requestParameters =
+            request.params !== undefined &&
+            request.params !== null &&
+            typeof request.params === "object"
+              ? (request.params as { cwd?: string })
+              : {};
           sendAgentJson({
             id: requestId,
             result: {
               thread: {
-                id: "thread_started_1",
+                id: `thread_started_${requestParameters.cwd ?? "default"}`,
               },
             },
           });
           return;
+        }
         default:
           sendAgentJson({
             id: requestId,
@@ -522,24 +542,17 @@ describe("SessionWorkbenchPage git branch label", () => {
       await waitFor(() => {
         expect(screen.getByText("main")).toBeTruthy();
       });
-      const repositoryCombobox = await screen.findByRole("combobox", {
-        name: "Primary repository",
-      });
-
-      fireEvent.focus(repositoryCombobox);
-      let repositoryListbox = await screen.findByRole("listbox");
-      fireEvent.click(within(repositoryListbox).getByRole("option", { name: "company-os" }));
+      await selectPrimaryRepositoryOption("mistlehq/company-os");
       await waitFor(() => {
         expect(screen.getByText("company-main")).toBeTruthy();
       });
 
       tunnelServer.setCurrentBranchForCwd("/root/mistlehq/mistle", "feature/returned-repo");
+      await selectPrimaryRepositoryOption("mistlehq/mistle");
 
-      fireEvent.focus(repositoryCombobox);
-      repositoryListbox = await screen.findByRole("listbox");
-      fireEvent.click(within(repositoryListbox).getByRole("option", { name: "mistle" }));
-
-      expect(screen.queryByText("main")).toBeNull();
+      await waitFor(() => {
+        expect(screen.queryByText("main")).toBeNull();
+      });
 
       await waitFor(() => {
         expect(screen.getByText("feature/returned-repo")).toBeTruthy();
