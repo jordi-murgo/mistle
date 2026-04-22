@@ -81,6 +81,38 @@ const ThreadReadUserMessageItemSchema = z.object({
   ),
 });
 
+type ClientSteerAnchor =
+  | {
+      kind: "turn-start";
+    }
+  | {
+      kind: "after-item";
+      itemId: string;
+    }
+  | {
+      kind: "after-assistant-text";
+      itemId: string;
+      text: string;
+    };
+
+type ClientSteerEntry = {
+  entry: ChatUserEntry;
+  requestState: "accepted" | "queued" | "sending";
+  anchor: ClientSteerAnchor;
+};
+
+type TurnStartSteerEntry = ClientSteerEntry & {
+  anchor: Extract<ClientSteerAnchor, { kind: "turn-start" }>;
+};
+
+type AfterItemSteerEntry = ClientSteerEntry & {
+  anchor: Extract<ClientSteerAnchor, { kind: "after-item" }>;
+};
+
+type AfterAssistantTextSteerEntry = ClientSteerEntry & {
+  anchor: Extract<ClientSteerAnchor, { kind: "after-assistant-text" }>;
+};
+
 type CodexRawTurnState = {
   id: string;
   status: string | null;
@@ -88,15 +120,7 @@ type CodexRawTurnState = {
   completedErrorMessage: string | null;
   planSnapshot: CodexTurnPlanSnapshot | null;
   userEntry: ChatUserEntry | null;
-  clientUserEntries: readonly {
-    entry: ChatUserEntry;
-    insertAfterItemCount: number;
-    requestState: "accepted" | "queued" | "sending";
-    splitAssistantMessage?: {
-      itemId: string;
-      text: string;
-    };
-  }[];
+  clientSteerEntries: readonly ClientSteerEntry[];
   itemOrder: readonly string[];
   rawItemsById: Readonly<Record<string, unknown>>;
 };
@@ -185,7 +209,7 @@ function createTurnState(turnId: string): CodexRawTurnState {
     completedErrorMessage: null,
     planSnapshot: null,
     userEntry: null,
-    clientUserEntries: [],
+    clientSteerEntries: [],
     itemOrder: [],
     rawItemsById: {},
   };
@@ -221,18 +245,19 @@ function isTerminalTurnStatus(status: string | null): boolean {
   );
 }
 
-function buildNormalizedItems(turn: CodexRawTurnState): readonly NormalizedCodexThreadItem[] {
-  return turn.itemOrder.flatMap((itemId) => {
-    const rawItem = turn.rawItemsById[itemId];
-    if (rawItem === undefined) {
-      return [];
-    }
+function buildNormalizedItemsForRawItem(
+  turn: CodexRawTurnState,
+  rawItemId: string,
+): readonly NormalizedCodexThreadItem[] {
+  const rawItem = turn.rawItemsById[rawItemId];
+  if (rawItem === undefined) {
+    return [];
+  }
 
-    return normalizeCodexThreadItem({
-      turnId: turn.id,
-      item: rawItem,
-    }).filter((item) => item.kind !== "user-message");
-  });
+  return normalizeCodexThreadItem({
+    turnId: turn.id,
+    item: rawItem,
+  }).filter((item) => item.kind !== "user-message");
 }
 
 function buildRenderedAssistantItemSegment(input: {
@@ -708,6 +733,290 @@ function mapTimelineEntryToChatEntries(entry: CodexTimelineEntry): readonly Chat
   return [];
 }
 
+function projectItemsToEntries(input: {
+  turnId: string;
+  items: readonly NormalizedCodexThreadItem[];
+}): readonly ChatEntry[] {
+  return mapRenderedItemsToEntries(input);
+}
+
+function isTurnStartSteerEntry(steerEntry: ClientSteerEntry): steerEntry is TurnStartSteerEntry {
+  return steerEntry.anchor.kind === "turn-start";
+}
+
+function isAfterItemSteerEntry(steerEntry: ClientSteerEntry): steerEntry is AfterItemSteerEntry {
+  return steerEntry.anchor.kind === "after-item";
+}
+
+function isAfterAssistantTextSteerEntry(
+  steerEntry: ClientSteerEntry,
+): steerEntry is AfterAssistantTextSteerEntry {
+  return steerEntry.anchor.kind === "after-assistant-text";
+}
+
+function appendProjectedItems(
+  entries: ChatEntry[],
+  input: {
+    turnId: string;
+    items: readonly NormalizedCodexThreadItem[];
+  },
+): void {
+  entries.push(...projectItemsToEntries(input));
+}
+
+function appendAssistantItemEntries(input: {
+  entries: ChatEntry[];
+  turnId: string;
+  assistantItem: Extract<NormalizedCodexThreadItem, { kind: "assistant-message" }>;
+  siblingItems: readonly NormalizedCodexThreadItem[];
+  steerEntriesAfterAssistantText: readonly AfterAssistantTextSteerEntry[];
+  steerEntriesAfterWholeRawItem: readonly AfterItemSteerEntry[];
+  steerOrderIndexByEntryId: ReadonlyMap<string, number>;
+}): void {
+  const {
+    entries,
+    turnId,
+    assistantItem,
+    siblingItems,
+    steerEntriesAfterAssistantText,
+    steerEntriesAfterWholeRawItem,
+    steerOrderIndexByEntryId,
+  } = input;
+  let nextWholeRawItemSteerIndex = 0;
+
+  function flushWholeRawItemSteersBefore(entryId: string): void {
+    const entryOrderIndex = steerOrderIndexByEntryId.get(entryId);
+    if (entryOrderIndex === undefined) {
+      throw new Error(`Missing steer order index for entry '${entryId}'.`);
+    }
+
+    while (nextWholeRawItemSteerIndex < steerEntriesAfterWholeRawItem.length) {
+      const wholeRawItemSteerEntry = steerEntriesAfterWholeRawItem[nextWholeRawItemSteerIndex];
+      if (wholeRawItemSteerEntry === undefined) {
+        break;
+      }
+
+      const wholeRawItemOrderIndex = steerOrderIndexByEntryId.get(wholeRawItemSteerEntry.entry.id);
+      if (wholeRawItemOrderIndex === undefined) {
+        throw new Error(
+          `Missing steer order index for entry '${wholeRawItemSteerEntry.entry.id}'.`,
+        );
+      }
+
+      if (wholeRawItemOrderIndex >= entryOrderIndex) {
+        break;
+      }
+
+      entries.push(wholeRawItemSteerEntry.entry);
+      nextWholeRawItemSteerIndex += 1;
+    }
+  }
+
+  function flushRemainingWholeRawItemSteers(): void {
+    while (nextWholeRawItemSteerIndex < steerEntriesAfterWholeRawItem.length) {
+      const wholeRawItemSteerEntry = steerEntriesAfterWholeRawItem[nextWholeRawItemSteerIndex];
+      if (wholeRawItemSteerEntry === undefined) {
+        break;
+      }
+
+      entries.push(wholeRawItemSteerEntry.entry);
+      nextWholeRawItemSteerIndex += 1;
+    }
+  }
+
+  const canSplitAssistantItem = steerEntriesAfterAssistantText.every((steerEntry) =>
+    assistantItem.text.startsWith(steerEntry.anchor.text),
+  );
+
+  if (!canSplitAssistantItem) {
+    appendProjectedItems(entries, {
+      turnId,
+      items: [assistantItem],
+    });
+    appendProjectedItems(entries, {
+      turnId,
+      items: siblingItems,
+    });
+
+    for (const steerEntry of steerEntriesAfterAssistantText) {
+      flushWholeRawItemSteersBefore(steerEntry.entry.id);
+      entries.push(steerEntry.entry);
+    }
+    flushRemainingWholeRawItemSteers();
+    return;
+  }
+
+  let consumedTextLength = 0;
+  for (const steerEntry of steerEntriesAfterAssistantText) {
+    const anchoredText = steerEntry.anchor.text;
+    const nextSegmentText = anchoredText.slice(consumedTextLength);
+    if (nextSegmentText.length > 0) {
+      appendProjectedItems(entries, {
+        turnId,
+        items: [
+          buildRenderedAssistantItemSegment({
+            item: assistantItem,
+            startOffset: consumedTextLength,
+            text: nextSegmentText,
+          }),
+        ],
+      });
+    }
+
+    flushWholeRawItemSteersBefore(steerEntry.entry.id);
+    entries.push(steerEntry.entry);
+    consumedTextLength = anchoredText.length;
+  }
+
+  const trailingAssistantText = assistantItem.text.slice(consumedTextLength);
+  if (trailingAssistantText.length > 0) {
+    appendProjectedItems(entries, {
+      turnId,
+      items: [
+        buildRenderedAssistantItemSegment({
+          item: assistantItem,
+          startOffset: consumedTextLength,
+          text: trailingAssistantText,
+        }),
+      ],
+    });
+  }
+
+  appendProjectedItems(entries, {
+    turnId,
+    items: siblingItems,
+  });
+  flushRemainingWholeRawItemSteers();
+}
+
+function buildTurnEntries(turn: CodexRawTurnState): readonly ChatEntry[] {
+  const entries: ChatEntry[] = [];
+  const steerOrderIndexByEntryId = new Map(
+    turn.clientSteerEntries.map((steerEntry, index) => [steerEntry.entry.id, index]),
+  );
+  const steerEntriesAtTurnStart: TurnStartSteerEntry[] = [];
+  const steerEntriesAfterRawItemId = new Map<string, AfterItemSteerEntry[]>();
+  const steerEntriesAfterAssistantText = new Map<string, AfterAssistantTextSteerEntry[]>();
+
+  for (const steerEntry of turn.clientSteerEntries) {
+    if (isTurnStartSteerEntry(steerEntry)) {
+      steerEntriesAtTurnStart.push(steerEntry);
+      continue;
+    }
+
+    if (isAfterItemSteerEntry(steerEntry)) {
+      const anchoredEntries = steerEntriesAfterRawItemId.get(steerEntry.anchor.itemId) ?? [];
+      anchoredEntries.push(steerEntry);
+      steerEntriesAfterRawItemId.set(steerEntry.anchor.itemId, anchoredEntries);
+      continue;
+    }
+
+    if (isAfterAssistantTextSteerEntry(steerEntry)) {
+      const anchoredEntries = steerEntriesAfterAssistantText.get(steerEntry.anchor.itemId) ?? [];
+      anchoredEntries.push(steerEntry);
+      steerEntriesAfterAssistantText.set(steerEntry.anchor.itemId, anchoredEntries);
+    }
+  }
+
+  if (turn.userEntry !== null) {
+    entries.push(turn.userEntry);
+  }
+
+  entries.push(...steerEntriesAtTurnStart.map((steerEntry) => steerEntry.entry));
+
+  let bufferedItems: NormalizedCodexThreadItem[] = [];
+
+  function flushBufferedItems(): void {
+    if (bufferedItems.length === 0) {
+      return;
+    }
+
+    appendProjectedItems(entries, {
+      turnId: turn.id,
+      items: bufferedItems,
+    });
+    bufferedItems = [];
+  }
+
+  for (const rawItemId of turn.itemOrder) {
+    const normalizedItemsForRawItem = buildNormalizedItemsForRawItem(turn, rawItemId);
+    const assistantItem = normalizedItemsForRawItem.find(
+      (item): item is Extract<NormalizedCodexThreadItem, { kind: "assistant-message" }> =>
+        item.kind === "assistant-message",
+    );
+    const steerEntriesAfterAssistantSegments =
+      assistantItem === undefined ? [] : (steerEntriesAfterAssistantText.get(rawItemId) ?? []);
+    const steerEntriesAfterWholeRawItem = steerEntriesAfterRawItemId.get(rawItemId) ?? [];
+
+    if (assistantItem !== undefined && steerEntriesAfterAssistantSegments.length > 0) {
+      flushBufferedItems();
+      const siblingItems = normalizedItemsForRawItem.filter(
+        (item) => item.id !== assistantItem.id && item.kind !== "assistant-message",
+      );
+      appendAssistantItemEntries({
+        entries,
+        turnId: turn.id,
+        assistantItem,
+        siblingItems,
+        steerEntriesAfterAssistantText: steerEntriesAfterAssistantSegments,
+        steerEntriesAfterWholeRawItem,
+        steerOrderIndexByEntryId,
+      });
+      continue;
+    }
+
+    bufferedItems.push(...normalizedItemsForRawItem);
+    if (steerEntriesAfterWholeRawItem.length > 0) {
+      flushBufferedItems();
+      entries.push(...steerEntriesAfterWholeRawItem.map((steerEntry) => steerEntry.entry));
+    }
+  }
+
+  flushBufferedItems();
+
+  for (const steerEntry of turn.clientSteerEntries) {
+    if (isTurnStartSteerEntry(steerEntry)) {
+      continue;
+    }
+
+    if (isAfterItemSteerEntry(steerEntry)) {
+      if (turn.rawItemsById[steerEntry.anchor.itemId] !== undefined) {
+        continue;
+      }
+
+      throw new Error(
+        `Missing steer anchor item '${steerEntry.anchor.itemId}' in turn '${turn.id}'.`,
+      );
+    }
+
+    if (!isAfterAssistantTextSteerEntry(steerEntry)) {
+      throw new Error(`Unsupported steer anchor kind in turn '${turn.id}'.`);
+    }
+
+    if (turn.rawItemsById[steerEntry.anchor.itemId] !== undefined) {
+      continue;
+    }
+
+    throw new Error(
+      `Missing assistant steer anchor item '${steerEntry.anchor.itemId}' in turn '${turn.id}'.`,
+    );
+  }
+
+  if (turn.planSnapshot !== null) {
+    entries.push(
+      buildPlanEntry({
+        id: `${turn.id}:plan-snapshot`,
+        turnId: turn.id,
+        text: null,
+        status: turn.status === "inProgress" ? "streaming" : "completed",
+        planSnapshot: turn.planSnapshot,
+      }),
+    );
+  }
+
+  return entries;
+}
+
 function buildEntries(input: {
   turnOrder: readonly string[];
   turnsById: Readonly<Record<string, CodexRawTurnState>>;
@@ -720,112 +1029,7 @@ function buildEntries(input: {
       continue;
     }
 
-    if (turn.userEntry !== null) {
-      entries.push(turn.userEntry);
-    }
-
-    const normalizedItems = buildNormalizedItems(turn);
-    const normalizedItemIndexById = new Map(normalizedItems.map((item, index) => [item.id, index]));
-    const consumedAssistantTextByItemId = new Map<string, string>();
-    let lastRenderedItemCount = 0;
-
-    for (const clientUserEntry of turn.clientUserEntries) {
-      const splitAssistantMessage = clientUserEntry.splitAssistantMessage;
-      if (splitAssistantMessage !== undefined) {
-        const splitItemIndex = normalizedItemIndexById.get(splitAssistantMessage.itemId);
-        if (splitItemIndex !== undefined) {
-          entries.push(
-            ...mapRenderedItemsToEntries({
-              turnId,
-              items: normalizedItems.slice(lastRenderedItemCount, splitItemIndex),
-            }),
-          );
-          lastRenderedItemCount = splitItemIndex;
-
-          const splitItem = normalizedItems[splitItemIndex];
-          if (splitItem?.kind === "assistant-message") {
-            const alreadyRenderedText =
-              consumedAssistantTextByItemId.get(splitAssistantMessage.itemId) ?? "";
-            if (
-              splitAssistantMessage.text.startsWith(alreadyRenderedText) &&
-              splitAssistantMessage.text.length > alreadyRenderedText.length
-            ) {
-              entries.push(
-                ...mapRenderedItemsToEntries({
-                  turnId,
-                  items: [
-                    buildRenderedAssistantItemSegment({
-                      item: splitItem,
-                      startOffset: alreadyRenderedText.length,
-                      text: splitAssistantMessage.text.slice(alreadyRenderedText.length),
-                    }),
-                  ],
-                }),
-              );
-            }
-
-            consumedAssistantTextByItemId.set(
-              splitAssistantMessage.itemId,
-              splitAssistantMessage.text,
-            );
-          }
-        }
-      } else {
-        entries.push(
-          ...mapRenderedItemsToEntries({
-            turnId,
-            items: normalizedItems.slice(
-              lastRenderedItemCount,
-              clientUserEntry.insertAfterItemCount,
-            ),
-          }),
-        );
-        lastRenderedItemCount = clientUserEntry.insertAfterItemCount;
-      }
-
-      entries.push(clientUserEntry.entry);
-    }
-
-    const trailingItems = normalizedItems
-      .slice(lastRenderedItemCount)
-      .reduce<NormalizedCodexThreadItem[]>((items, item) => {
-        if (item.kind !== "assistant-message") {
-          items.push(item);
-          return items;
-        }
-
-        const consumedText = consumedAssistantTextByItemId.get(item.id);
-        if (consumedText === undefined || !item.text.startsWith(consumedText)) {
-          items.push(item);
-          return items;
-        }
-
-        const remainingText = item.text.slice(consumedText.length);
-        if (remainingText.length > 0) {
-          items.push(
-            buildRenderedAssistantItemSegment({
-              item,
-              startOffset: consumedText.length,
-              text: remainingText,
-            }),
-          );
-        }
-
-        return items;
-      }, []);
-    entries.push(...mapRenderedItemsToEntries({ turnId, items: trailingItems }));
-
-    if (turn.planSnapshot !== null) {
-      entries.push(
-        buildPlanEntry({
-          id: `${turn.id}:plan-snapshot`,
-          turnId: turn.id,
-          text: null,
-          status: turn.status === "inProgress" ? "streaming" : "completed",
-          planSnapshot: turn.planSnapshot,
-        }),
-      );
-    }
+    entries.push(...buildTurnEntries(turn));
   }
 
   return entries;
@@ -893,31 +1097,31 @@ function clearEntryAction(entry: ChatUserEntry): ChatUserEntry {
   return nextEntry;
 }
 
-function getCurrentAssistantMessageSplit(
-  turn: CodexRawTurnState,
-): { itemId: string; text: string } | undefined {
-  const lastItemId = turn.itemOrder.at(-1);
-  if (lastItemId === undefined) {
-    return undefined;
+function getCurrentTurnSteerAnchor(turn: CodexRawTurnState): ClientSteerAnchor {
+  const lastRawItemId = turn.itemOrder.at(-1);
+  if (lastRawItemId === undefined) {
+    return {
+      kind: "turn-start",
+    };
   }
 
-  const lastRawItem = turn.rawItemsById[lastItemId];
-  if (lastRawItem === undefined) {
-    return undefined;
-  }
+  const normalizedItemsForLastRawItem = buildNormalizedItemsForRawItem(turn, lastRawItemId);
+  const assistantItem = normalizedItemsForLastRawItem.find(
+    (item): item is Extract<NormalizedCodexThreadItem, { kind: "assistant-message" }> =>
+      item.kind === "assistant-message",
+  );
 
-  const [normalizedItem] = normalizeCodexThreadItem({
-    turnId: turn.id,
-    item: lastRawItem,
-  }).filter((item) => item.kind === "assistant-message");
-
-  if (normalizedItem?.kind !== "assistant-message" || normalizedItem.text.length === 0) {
-    return undefined;
+  if (assistantItem !== undefined && assistantItem.text.length > 0) {
+    return {
+      kind: "after-assistant-text",
+      itemId: lastRawItemId,
+      text: assistantItem.text,
+    };
   }
 
   return {
-    itemId: normalizedItem.id,
-    text: normalizedItem.text,
+    kind: "after-item",
+    itemId: lastRawItemId,
   };
 }
 
@@ -1107,7 +1311,7 @@ function reconcileHydratedTurns(
       completedErrorMessage: existingTurn?.completedErrorMessage ?? null,
       planSnapshot: existingTurn?.planSnapshot ?? null,
       userEntry: serverUserEntry ?? existingTurn?.userEntry ?? null,
-      clientUserEntries: existingTurn?.clientUserEntries ?? [],
+      clientSteerEntries: existingTurn?.clientSteerEntries ?? [],
       itemOrder: nextItemOrder,
       rawItemsById: nextRawItemsById,
     };
@@ -1167,7 +1371,7 @@ export function reduceCodexChatState(
             action.prompt,
             buildChatUserAttachments(action.attachments),
           ),
-          clientUserEntries: [],
+          clientSteerEntries: [],
           itemOrder: [],
           rawItemsById: {},
         },
@@ -1216,7 +1420,7 @@ export function reduceCodexChatState(
               id: `user:${action.turnId}`,
               turnId: action.turnId,
             },
-      clientUserEntries: [...pendingTurn.clientUserEntries, ...existingTurn.clientUserEntries],
+      clientSteerEntries: [...pendingTurn.clientSteerEntries, ...existingTurn.clientSteerEntries],
       itemOrder: [...pendingTurn.itemOrder, ...existingTurn.itemOrder].filter(
         (itemId, index, itemOrder) => itemOrder.indexOf(itemId) === index,
       ),
@@ -1242,7 +1446,6 @@ export function reduceCodexChatState(
   if (action.type === "steer_turn_requested") {
     const ensured = ensureTurn(state.turnsById, state.turnOrder, action.turnId);
     const turn = ensured.turnsById[action.turnId] ?? createTurnState(action.turnId);
-    const splitAssistantMessage = getCurrentAssistantMessageSplit(turn);
 
     return buildState({
       pendingTurnId: state.pendingTurnId,
@@ -1251,8 +1454,8 @@ export function reduceCodexChatState(
         ...ensured.turnsById,
         [action.turnId]: {
           ...turn,
-          clientUserEntries: [
-            ...turn.clientUserEntries,
+          clientSteerEntries: [
+            ...turn.clientSteerEntries,
             {
               entry: buildUserEntry(
                 action.turnId,
@@ -1267,9 +1470,8 @@ export function reduceCodexChatState(
                   },
                 },
               ),
-              insertAfterItemCount: turn.itemOrder.length,
               requestState: "queued",
-              ...(splitAssistantMessage === undefined ? {} : { splitAssistantMessage }),
+              anchor: getCurrentTurnSteerAnchor(turn),
             },
           ],
         },
@@ -1290,12 +1492,12 @@ export function reduceCodexChatState(
         ...state.turnsById,
         [action.turnId]: {
           ...turn,
-          clientUserEntries: turn.clientUserEntries.map((clientUserEntry) =>
-            clientUserEntry.entry.id !== action.entryId
-              ? clientUserEntry
+          clientSteerEntries: turn.clientSteerEntries.map((steerEntry) =>
+            steerEntry.entry.id !== action.entryId
+              ? steerEntry
               : {
-                  ...clientUserEntry,
-                  entry: clearEntryAction(clientUserEntry.entry),
+                  ...steerEntry,
+                  entry: clearEntryAction(steerEntry.entry),
                   requestState: "sending",
                 },
           ),
@@ -1317,12 +1519,12 @@ export function reduceCodexChatState(
         ...state.turnsById,
         [action.turnId]: {
           ...turn,
-          clientUserEntries: turn.clientUserEntries.map((clientUserEntry) =>
-            clientUserEntry.entry.id !== action.entryId
-              ? clientUserEntry
+          clientSteerEntries: turn.clientSteerEntries.map((steerEntry) =>
+            steerEntry.entry.id !== action.entryId
+              ? steerEntry
               : {
-                  ...clientUserEntry,
-                  entry: clearEntrySteerPresentation(clientUserEntry.entry),
+                  ...steerEntry,
+                  entry: clearEntrySteerPresentation(steerEntry.entry),
                   requestState: "accepted",
                 },
           ),
@@ -1344,8 +1546,8 @@ export function reduceCodexChatState(
         ...state.turnsById,
         [action.turnId]: {
           ...turn,
-          clientUserEntries: turn.clientUserEntries.filter(
-            (clientUserEntry) => clientUserEntry.entry.id !== action.entryId,
+          clientSteerEntries: turn.clientSteerEntries.filter(
+            (steerEntry) => steerEntry.entry.id !== action.entryId,
           ),
         },
       },
