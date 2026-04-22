@@ -142,7 +142,12 @@ export function IntegrationResourceListItem(
           </Button>
         ) : null}
       </div>
-      {renderExpandedResourceSection({ input, isExpanded })}
+      {renderExpandedResourceSection(
+        isExpanded,
+        input.connectionId,
+        input.resource,
+        input.resourceItems,
+      )}
       {statusContent === null ? null : (
         <div className="mt-1 pt-1 sm:hidden">
           <div
@@ -159,27 +164,34 @@ export function IntegrationResourceListItem(
   );
 }
 
-function renderExpandedResourceSection(input: {
-  input: IntegrationResourceListItemProps;
-  isExpanded: boolean;
-}): React.JSX.Element | null {
-  if (input.isExpanded === false) {
+function renderExpandedResourceSection(
+  isExpanded: boolean,
+  connectionId: string,
+  resource: IntegrationResourceListItemResourceSummary,
+  resourceItems: IntegrationResourceListItemData | null,
+): React.JSX.Element | null {
+  if (isExpanded === false) {
     return null;
   }
 
-  if (input.input.resourceItems !== null) {
-    return renderExpandedResourceItems(input.input.resourceItems);
+  if (resource.syncState === "never-synced") {
+    return renderExpandedResourceItems({
+      errorMessage: null,
+      isLoading: false,
+      items: [],
+      kind: resource.kind,
+    });
   }
 
-  if (input.input.resource.syncState === "never-synced") {
-    return null;
+  if (resourceItems !== null) {
+    return renderExpandedResourceItems(resourceItems);
   }
 
   return (
     <LazyExpandedResourceItems
-      connectionId={input.input.connectionId}
-      kind={input.input.resource.kind}
-      syncState={input.input.resource.syncState}
+      connectionId={connectionId}
+      kind={resource.kind}
+      syncState={resource.syncState}
     />
   );
 }
