@@ -7,6 +7,7 @@ import {
   reserveAvailablePort,
   runCleanupTasks,
 } from "@mistle/test-harness";
+import { systemSleeper } from "@mistle/time";
 import { Client } from "pg";
 import { it as vitestIt } from "vitest";
 import { z } from "zod";
@@ -19,6 +20,8 @@ import { ensureCommitSignBinary } from "./helpers/commit-sign.js";
 
 const RUNTIME_DATABASE_NAME_PREFIX = "mistle_control_plane_api_it_runtime";
 const TestContextId = "control-plane-api.integration";
+const DatabaseDrainTimeoutMs = 5_000;
+const DatabaseDrainPollIntervalMs = 50;
 
 const SharedInfraConfigSchema = z
   .object({
@@ -91,6 +94,39 @@ function createFileScopedDatabaseName(input: {
   });
 }
 
+async function waitForDatabaseDisconnections(input: {
+  adminClient: Client;
+  databaseName: string;
+}): Promise<void> {
+  const deadline = Date.now() + DatabaseDrainTimeoutMs;
+
+  while (Date.now() < deadline) {
+    const result = await input.adminClient.query<{ connection_count: string }>(
+      `
+        select count(*)::text as connection_count
+        from pg_stat_activity
+        where datname = $1
+          and pid <> pg_backend_pid()
+      `,
+      [input.databaseName],
+    );
+    const row = result.rows[0];
+    if (row === undefined) {
+      throw new Error("Expected database connection count query to return a row.");
+    }
+
+    if (Number(row.connection_count) === 0) {
+      return;
+    }
+
+    await systemSleeper.sleep(DatabaseDrainPollIntervalMs);
+  }
+
+  throw new Error(
+    `Timed out waiting for runtime database '${input.databaseName}' connections to drain before cleanup.`,
+  );
+}
+
 async function resetWorkerDatabaseFromTemplate(input: {
   username: string;
   password: string;
@@ -150,7 +186,14 @@ async function dropDatabaseIfExists(input: {
 
   await adminClient.connect();
   try {
-    await adminClient.query(`DROP DATABASE IF EXISTS ${quotedRuntimeDatabaseName} WITH (FORCE)`);
+    await adminClient.query(
+      `ALTER DATABASE ${quotedRuntimeDatabaseName} WITH ALLOW_CONNECTIONS false`,
+    );
+    await waitForDatabaseDisconnections({
+      adminClient,
+      databaseName: input.databaseName,
+    });
+    await adminClient.query(`DROP DATABASE IF EXISTS ${quotedRuntimeDatabaseName}`);
   } finally {
     await adminClient.end();
   }
