@@ -11580,6 +11580,10 @@
                           "displayName": {
                             "type": "string"
                           },
+                          "activeVersion": {
+                            "type": ["integer", "null"],
+                            "minimum": 1
+                          },
                           "status": {
                             "type": "string",
                             "enum": ["active", "inactive"]
@@ -11597,6 +11601,7 @@
                           "id",
                           "organizationId",
                           "displayName",
+                          "activeVersion",
                           "status",
                           "createdAt",
                           "updatedAt"
@@ -11778,6 +11783,10 @@
                     "displayName": {
                       "type": "string"
                     },
+                    "activeVersion": {
+                      "type": ["integer", "null"],
+                      "minimum": 1
+                    },
                     "status": {
                       "type": "string",
                       "enum": ["active", "inactive"]
@@ -11795,6 +11804,7 @@
                     "id",
                     "organizationId",
                     "displayName",
+                    "activeVersion",
                     "status",
                     "createdAt",
                     "updatedAt"
@@ -11909,6 +11919,10 @@
                           "displayName": {
                             "type": "string"
                           },
+                          "activeVersion": {
+                            "type": ["integer", "null"],
+                            "minimum": 1
+                          },
                           "status": {
                             "type": "string",
                             "enum": ["active", "inactive"]
@@ -11952,6 +11966,7 @@
                           "id",
                           "organizationId",
                           "displayName",
+                          "activeVersion",
                           "status",
                           "createdAt",
                           "updatedAt",
@@ -12058,6 +12073,10 @@
                     "displayName": {
                       "type": "string"
                     },
+                    "activeVersion": {
+                      "type": ["integer", "null"],
+                      "minimum": 1
+                    },
                     "status": {
                       "type": "string",
                       "enum": ["active", "inactive"]
@@ -12075,6 +12094,7 @@
                     "id",
                     "organizationId",
                     "displayName",
+                    "activeVersion",
                     "status",
                     "createdAt",
                     "updatedAt"
@@ -12233,6 +12253,10 @@
                     "displayName": {
                       "type": "string"
                     },
+                    "activeVersion": {
+                      "type": ["integer", "null"],
+                      "minimum": 1
+                    },
                     "status": {
                       "type": "string",
                       "enum": ["active", "inactive"]
@@ -12250,6 +12274,7 @@
                     "id",
                     "organizationId",
                     "displayName",
+                    "activeVersion",
                     "status",
                     "createdAt",
                     "updatedAt"
@@ -12533,9 +12558,16 @@
                           "version": {
                             "type": "integer",
                             "minimum": 1
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["draft", "published"]
+                          },
+                          "isActive": {
+                            "type": "boolean"
                           }
                         },
-                        "required": ["sandboxProfileId", "version"],
+                        "required": ["sandboxProfileId", "version", "state", "isActive"],
                         "additionalProperties": false
                       }
                     }
