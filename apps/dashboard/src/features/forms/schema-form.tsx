@@ -1,12 +1,15 @@
 import {
   Checkbox,
   DetailLabel,
+  DetailLabelWithTooltip,
   Field,
   FieldContent,
   FieldError,
   FieldHeader,
   FieldLabel,
+  FieldLabelWithTooltip,
   FieldTitle,
+  FieldTitleWithTooltip,
   Input,
   Select,
   SelectContent,
@@ -14,12 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
   cn,
 } from "@mistle/ui";
-import { InfoIcon } from "@phosphor-icons/react";
 import { withTheme } from "@rjsf/core";
 import type {
   DescriptionFieldProps,
@@ -878,26 +877,6 @@ function shouldSpanFullWidth(input: {
   return isRecord(input.schema) && input.schema.type === "array";
 }
 
-function SchemaFormDescriptionTooltip(input: { description: string }): React.JSX.Element {
-  return (
-    <Tooltip delay={0}>
-      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-        <button
-          aria-label="Field description"
-          className="text-muted-foreground hover:text-foreground inline-flex cursor-help items-center justify-center rounded-sm"
-          tabIndex={0}
-          type="button"
-        >
-          <InfoIcon aria-hidden className="size-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64 text-left" side="top">
-        {input.description}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 function SchemaFormFieldTemplate(
   props: FieldTemplateProps<JsonObject, RJSFSchema, SchemaFormContext>,
 ): React.JSX.Element {
@@ -915,6 +894,10 @@ function SchemaFormFieldTemplate(
   const hasErrors = (props.rawErrors ?? []).length > 0;
   const labelTone = resolveLabelTone(props.registry.formContext);
   const useDetailLabel = labelTone === "detail" && layout === "vertical";
+  const rawDescription =
+    typeof props.rawDescription === "string" && props.rawDescription.length > 0
+      ? props.rawDescription
+      : null;
   const useFullWidth = shouldSpanFullWidth({
     layout,
     formContext: props.registry.formContext,
@@ -936,16 +919,29 @@ function SchemaFormFieldTemplate(
     >
       {props.displayLabel && props.label.length > 0 ? (
         <FieldHeader>
-          <div className="flex items-center gap-1.5">
-            {useDetailLabel ? (
+          {rawDescription === null ? (
+            useDetailLabel ? (
               <DetailLabel as="p">{props.label}</DetailLabel>
             ) : (
               <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
-            )}
-            {typeof props.rawDescription === "string" && props.rawDescription.length > 0 ? (
-              <SchemaFormDescriptionTooltip description={props.rawDescription} />
-            ) : null}
-          </div>
+            )
+          ) : useDetailLabel ? (
+            <DetailLabelWithTooltip
+              as="p"
+              tooltip={rawDescription}
+              tooltipLabel="Field description"
+            >
+              {props.label}
+            </DetailLabelWithTooltip>
+          ) : (
+            <FieldLabelWithTooltip
+              htmlFor={props.id}
+              tooltip={rawDescription}
+              tooltipLabel="Field description"
+            >
+              {props.label}
+            </FieldLabelWithTooltip>
+          )}
         </FieldHeader>
       ) : null}
       <FieldContent>
@@ -954,6 +950,33 @@ function SchemaFormFieldTemplate(
         {props.help}
       </FieldContent>
     </Field>
+  );
+}
+
+function SchemaFormObjectHeader(input: {
+  description: string | undefined;
+  title: string;
+}): React.JSX.Element | null {
+  if (input.title.length === 0 && input.description === undefined) {
+    return null;
+  }
+
+  if (input.title.length === 0) {
+    return (
+      <DetailLabelWithTooltip as="p" tooltip={input.description} tooltipLabel="Field description">
+        Description
+      </DetailLabelWithTooltip>
+    );
+  }
+
+  if (input.description === undefined) {
+    return <FieldTitle>{input.title}</FieldTitle>;
+  }
+
+  return (
+    <FieldTitleWithTooltip tooltip={input.description} tooltipLabel="Field description">
+      {input.title}
+    </FieldTitleWithTooltip>
   );
 }
 
@@ -1029,12 +1052,7 @@ function SchemaFormObjectFieldTemplate(
       >
         {title.length > 0 || description !== undefined ? (
           <FieldHeader className={columns === 2 ? "md:col-span-2" : undefined}>
-            <div className="flex items-center gap-1.5">
-              {title.length > 0 ? <FieldTitle>{title}</FieldTitle> : null}
-              {description !== undefined ? (
-                <SchemaFormDescriptionTooltip description={description} />
-              ) : null}
-            </div>
+            <SchemaFormObjectHeader description={description} title={title} />
           </FieldHeader>
         ) : null}
         {visibleRenderableProperties.map((property) => (

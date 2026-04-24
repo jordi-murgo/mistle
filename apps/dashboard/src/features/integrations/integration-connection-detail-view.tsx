@@ -5,6 +5,7 @@ import {
   BadgeListField,
   CopyableValue,
   DefinitionList,
+  DetailLabel,
   Notice,
   Select,
   SelectContent,
@@ -224,7 +225,7 @@ export function IntegrationConnectionDetailView(
             </SelectValue>
           </SelectTrigger>
           {isMobileConnectionSelectOpen ? (
-            <SelectContent alignItemWithTrigger={false}>
+            <SelectContent>
               {props.connections.map((connection) => (
                 <SelectItem key={connection.id} value={connection.id}>
                   {connection.displayName}
@@ -876,9 +877,7 @@ function WebhookSourceCard(input: {
       {shouldShowHeaderRow ? (
         <div className="flex items-start justify-between gap-3">
           {shouldShowHeaderText ? (
-            <p className="text-muted-foreground text-xs uppercase tracking-wide">
-              {input.source.displayName}
-            </p>
+            <DetailLabel as="p">{input.source.displayName}</DetailLabel>
           ) : (
             <span />
           )}
