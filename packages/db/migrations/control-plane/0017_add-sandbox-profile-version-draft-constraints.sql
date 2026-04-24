@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "sandbox_profile_versions_one_draft_per_profile_uidx" ON "control_plane"."sandbox_profile_versions" USING btree ("sandbox_profile_id") WHERE "control_plane"."sandbox_profile_versions"."state" = 'draft';
