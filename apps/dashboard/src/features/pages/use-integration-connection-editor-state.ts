@@ -9,10 +9,12 @@ import type {
   IntegrationConnectionEditorState,
   IntegrationConnectionMethodId,
 } from "../integrations/integration-connection-editor.js";
+import { resolveSelectedConnectionMethod } from "../integrations/integration-connection-method-selection.js";
 import type { IntegrationConnectionMethod } from "../integrations/integrations-service-shared.js";
 import {
   cancelDeviceAuthorizationAttempt,
   createFormIntegrationConnection,
+  createGitHubAppDraftIntegrationConnection,
   getDeviceAuthorizationAttempt,
   startDeviceAuthorizationIntegrationConnection,
   startRedirectIntegrationConnection,
@@ -33,6 +35,7 @@ import {
 type IntegrationConnectionSubmitSuccessInput = {
   connectionId: string | null;
   editor: IntegrationConnectionEditorState;
+  methodId: IntegrationConnectionMethodId;
 };
 
 type UseIntegrationConnectionEditorStateInput = {
@@ -55,6 +58,17 @@ function isDeviceAuthorizationMethod(
   return method?.kind === "device-authorization";
 }
 
+function shouldCreateGitHubAppDraftConnection(input: {
+  editor: IntegrationConnectionEditorState;
+  methodId: IntegrationConnectionMethodId;
+}): boolean {
+  return (
+    input.editor.mode === "create" &&
+    input.editor.targetFamilyId === "github" &&
+    input.methodId === IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
+  );
+}
+
 function resolveEditableConfigValue(input: {
   configValue: Record<string, unknown>;
   configForm: ReturnType<typeof resolveConnectionMethodFormUiModel>;
@@ -69,17 +83,6 @@ function resolveEditableConfigValue(input: {
   });
 
   return Object.fromEntries(entries);
-}
-
-function resolveSelectedMethod(input: {
-  editor: IntegrationConnectionEditorState;
-  methodId: IntegrationConnectionMethodId;
-}): IntegrationConnectionMethod | null {
-  if (input.editor.mode === "update") {
-    return input.editor.currentMethod.id === input.methodId ? input.editor.currentMethod : null;
-  }
-
-  return input.editor.methods.find((method) => method.id === input.methodId) ?? null;
 }
 
 const DeviceAuthorizationPollFloorMs = 2_000;
@@ -109,6 +112,11 @@ export function useIntegrationConnectionEditorState(
       config: Record<string, unknown>;
       secrets: Record<string, string>;
     }) => createFormIntegrationConnection(mutationInput),
+  });
+
+  const createGitHubAppDraftMutation = useMutation({
+    mutationFn: async (mutationInput: { targetKey: string; displayName: string }) =>
+      createGitHubAppDraftIntegrationConnection(mutationInput),
   });
 
   const startRedirectMutation = useMutation({
@@ -158,6 +166,7 @@ export function useIntegrationConnectionEditorState(
     });
   const submitPending =
     createFormMutation.isPending ||
+    createGitHubAppDraftMutation.isPending ||
     startDeviceAuthorizationMutation.isPending ||
     startRedirectMutation.isPending ||
     updateConnectionMutation.isPending ||
@@ -251,6 +260,7 @@ export function useIntegrationConnectionEditorState(
                 await handleSubmitSuccess({
                   connectionId: null,
                   editor,
+                  methodId: draft.methodId,
                 });
               }
               return;
@@ -311,7 +321,7 @@ export function useIntegrationConnectionEditorState(
     }
 
     const normalizedConnectionDisplayName = draft.connectionDisplayNameValue.trim();
-    const selectedMethod = resolveSelectedMethod({
+    const selectedMethod = resolveSelectedConnectionMethod({
       editor,
       methodId: draft.methodId,
     });
@@ -343,9 +353,33 @@ export function useIntegrationConnectionEditorState(
         await handleSubmitSuccess({
           connectionId: updatedConnection.id,
           editor,
+          methodId: draft.methodId,
         });
         return;
       } else {
+        if (
+          shouldCreateGitHubAppDraftConnection({
+            editor,
+            methodId: draft.methodId,
+          })
+        ) {
+          const createdConnection = await createGitHubAppDraftMutation.mutateAsync({
+            targetKey: editor.targetKey,
+            displayName: normalizedConnectionDisplayName,
+          });
+
+          await queryClient.invalidateQueries({
+            queryKey: input.queryKey,
+          });
+
+          await handleSubmitSuccess({
+            connectionId: createdConnection.id,
+            editor,
+            methodId: draft.methodId,
+          });
+          return;
+        }
+
         const createdConnection = await createFormMutation.mutateAsync({
           targetKey: editor.targetKey,
           displayName: normalizedConnectionDisplayName,
@@ -361,6 +395,7 @@ export function useIntegrationConnectionEditorState(
         await handleSubmitSuccess({
           connectionId: createdConnection.id,
           editor,
+          methodId: draft.methodId,
         });
         return;
       }
@@ -384,6 +419,7 @@ export function useIntegrationConnectionEditorState(
       await handleSubmitSuccess({
         connectionId: updatedConnection.id,
         editor,
+        methodId: draft.methodId,
       });
       return;
     }

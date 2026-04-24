@@ -4,13 +4,10 @@ import { withDashboardPageStory } from "../../storybook/decorators.js";
 import {
   AddFlowStorySpecs,
   IntegrationSettingsAddFlowStory,
-  ProposedGitHubCloudExistingAppSetupStory,
-  ProposedGitHubCloudManifestSetupStory,
-  ProposedGitHubCloudAddFlowStory,
 } from "./organization-integrations-settings-page-story-support.js";
 
 function OrganizationIntegrationsAddFlowStory(): React.JSX.Element {
-  return <IntegrationSettingsAddFlowStory {...AddFlowStorySpecs.GitHubCloud} />;
+  return <IntegrationSettingsAddFlowStory {...AddFlowStorySpecs.Jira} />;
 }
 
 const meta = {
@@ -22,34 +19,6 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
-
-export const GitHubCloud: Story = {
-  name: "GitHub Cloud",
-  render: function RenderStory() {
-    return <IntegrationSettingsAddFlowStory {...AddFlowStorySpecs.GitHubCloud} />;
-  },
-};
-
-export const GitHubCloudProposedFlow: Story = {
-  name: "GitHub Cloud Proposed Flow",
-  render: function RenderStory() {
-    return <ProposedGitHubCloudAddFlowStory />;
-  },
-};
-
-export const GitHubCloudExistingAppSetup: Story = {
-  name: "GitHub Cloud Existing App Setup",
-  render: function RenderStory() {
-    return <ProposedGitHubCloudExistingAppSetupStory />;
-  },
-};
-
-export const GitHubCloudManifestSetup: Story = {
-  name: "GitHub Cloud Manifest Setup",
-  render: function RenderStory() {
-    return <ProposedGitHubCloudManifestSetupStory />;
-  },
-};
 
 export const GitHubEnterpriseServer: Story = {
   name: "GitHub Enterprise Server",

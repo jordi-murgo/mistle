@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { cn } from "../../lib/utils.js";
+import { detailLabelTextClassName } from "./label-text.js";
 
 type DetailLabelProps = React.HTMLAttributes<HTMLElement> & {
   as?: "dt" | "p" | "div" | "span";
@@ -9,7 +10,7 @@ type DetailLabelProps = React.HTMLAttributes<HTMLElement> & {
 function DetailLabel({ as: Component = "dt", className, ...props }: DetailLabelProps) {
   return (
     <Component
-      className={cn("text-muted-foreground text-xs uppercase tracking-wide", className)}
+      className={cn(detailLabelTextClassName, className)}
       data-slot="detail-label"
       {...props}
     />
