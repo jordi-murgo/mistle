@@ -29,7 +29,6 @@ import {
 import { getSandboxProfile } from "../sandbox-profiles/sandbox-profiles-service.js";
 import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
 import { FormPageFrame, PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
-import { IntegrationsEditorSection } from "./integrations-editor-section.js";
 import type {
   IntegrationConnectionSummary,
   IntegrationTargetSummary,
@@ -39,6 +38,7 @@ import {
   SandboxProfileEditorSections,
   type SandboxProfileEditorSection,
 } from "./sandbox-profile-editor-sections.js";
+import { SandboxProfileIntegrationsSetupSection } from "./sandbox-profile-integrations-setup-section.js";
 import {
   useLoadedSandboxProfileIntegrationsState,
   useSandboxProfileIntegrationsLoader,
@@ -47,6 +47,7 @@ import {
   useCreateSandboxProfileMetaState,
   useEditSandboxProfileMetaState,
 } from "./sandbox-profile-meta-state.js";
+import { SandboxProfileResourcesAndToolsSection } from "./sandbox-profile-resources-and-tools-section.js";
 import {
   useLoadedSandboxProfileSetupScriptState,
   useSandboxProfileSetupScriptLoader,
@@ -294,9 +295,9 @@ function LoadedSandboxProfileEditorPage(
         }
 
         return (
-          <LoadedSandboxProfileIntegrationsSection
-            key={`${sectionId}:${input.profileId}`}
-            kind={resolveIntegrationSectionKind(sectionId)}
+          <LoadedSandboxProfileIntegrationSetupSection
+            key={`${input.profileId}:integration-setup`}
+            activeSectionId={sectionId}
             loader={integrationsLoader}
             onHasUnsavedChangesChange={setHasUnsavedIntegrationChanges}
             profileId={input.profileId}
@@ -311,16 +312,12 @@ function LoadedSandboxProfileEditorPage(
 
 const SandboxProfileEditorTabs = [
   {
-    id: "agent",
-    label: "Agent Harness",
+    id: "integrations",
+    label: "Integrations",
   },
   {
-    id: "git",
-    label: "Git Provider",
-  },
-  {
-    id: "connector",
-    label: "Connectors",
+    id: "resources-and-tools",
+    label: "Resources & Tools",
   },
   {
     id: "configurations",
@@ -328,20 +325,12 @@ const SandboxProfileEditorTabs = [
   },
 ] as const satisfies readonly SandboxProfileEditorSection[];
 
-function resolveIntegrationSectionKind(sectionId: string): "agent" | "git" | "connector" {
-  if (sectionId === "agent" || sectionId === "git" || sectionId === "connector") {
-    return sectionId;
-  }
-
-  throw new Error(`Unsupported integration section: ${sectionId}`);
-}
-
 export function SandboxProfileEditorView(input: {
   profileName: string | null;
   profileNameFallback: string;
   onSaveProfileName: (nextValue: string) => Promise<void>;
   sections: readonly SandboxProfileEditorSection[];
-  renderSectionPanel: (sectionId: string) => React.JSX.Element;
+  renderSectionPanel: (sectionId: SandboxProfileEditorSection["id"]) => React.JSX.Element;
   hasUnsavedIntegrationChanges?: boolean;
   isSavingProfileName?: boolean;
 }): React.JSX.Element {
@@ -373,52 +362,52 @@ export function SandboxProfileEditorView(input: {
   );
 }
 
-function LoadedSandboxProfileIntegrationsSection(input: {
-  kind: "agent" | "git" | "connector";
+function LoadedSandboxProfileIntegrationSetupSection(input: {
+  activeSectionId: string;
   profileId: string;
   loader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
   invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
   onHasUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
 }): React.JSX.Element {
+  const showBindingsUnavailableNotice =
+    input.loader.integrationBindingsQuery.isError ||
+    (!input.loader.integrationBindingsQuery.isPending && input.loader.version === null);
+  const showDirectoryUnavailableNotice = input.loader.integrationDirectoryQuery.isError;
+
   if (
     input.loader.integrationBindingsQuery.isPending ||
-    input.loader.integrationBindingsQuery.isError ||
     input.loader.integrationDirectoryQuery.isPending ||
-    input.loader.integrationDirectoryQuery.isError ||
     input.loader.initialRows === null ||
-    input.loader.version === null
+    input.loader.version === null ||
+    input.loader.integrationBindingsQuery.isError ||
+    input.loader.integrationDirectoryQuery.isError
   ) {
     return (
-      <IntegrationsEditorSection
-        availableConnections={input.loader.availableConnections}
-        availableTargets={input.loader.availableTargets}
-        integrationBindingsQuery={input.loader.integrationBindingsQuery}
-        integrationDirectoryQuery={input.loader.integrationDirectoryQuery}
-        integrationRowErrorsByClientId={{}}
-        integrationRows={[]}
-        integrationSaveError={null}
-        isSubmittingIntegrationBindings={false}
-        onAddIntegrationBindingRow={async () => false}
-        onIntegrationBindingRowChange={() => {}}
-        onRemoveIntegrationBindingRow={() => {}}
-        sectionKinds={[input.kind]}
-        showSectionNavigation={false}
-        {...(input.onHasUnsavedChangesChange === undefined
-          ? {}
-          : { onHasUnsavedChangesChange: input.onHasUnsavedChangesChange })}
+      <SandboxProfileIntegrationsSetupUnavailableState
+        activeSectionId={input.activeSectionId}
+        integrationBindingsError={
+          showBindingsUnavailableNotice ? input.loader.integrationBindingsQuery.error : null
+        }
+        integrationDirectoryError={
+          showDirectoryUnavailableNotice ? input.loader.integrationDirectoryQuery.error : null
+        }
+        isPending={
+          input.loader.integrationBindingsQuery.isPending ||
+          input.loader.integrationDirectoryQuery.isPending
+        }
       />
     );
   }
 
   return (
-    <ReadySandboxProfileIntegrationsSection
+    <ReadySandboxProfileIntegrationSetupSection
       key={`${input.profileId}:${String(input.loader.version)}`}
+      activeSectionId={input.activeSectionId}
       profileId={input.profileId}
       version={input.loader.version}
       initialRows={input.loader.initialRows}
       availableConnections={input.loader.availableConnections}
       availableTargets={input.loader.availableTargets}
-      kind={input.kind}
       invalidateVersionBindings={input.invalidateVersionBindings}
       integrationDirectoryQuery={input.loader.integrationDirectoryQuery}
       {...(input.onHasUnsavedChangesChange === undefined
@@ -428,8 +417,46 @@ function LoadedSandboxProfileIntegrationsSection(input: {
   );
 }
 
-function ReadySandboxProfileIntegrationsSection(input: {
-  kind: "agent" | "git" | "connector";
+export function SandboxProfileIntegrationsSetupUnavailableState(input: {
+  activeSectionId: SandboxProfileEditorSection["id"];
+  integrationBindingsError: unknown;
+  integrationDirectoryError: unknown;
+  isPending: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-4">
+      {input.isPending && input.activeSectionId !== "resources-and-tools" ? (
+        <div
+          aria-live="polite"
+          className="text-muted-foreground flex items-center gap-2 text-sm"
+          role="status"
+        >
+          <SpinnerGapIcon aria-hidden className="size-4 animate-spin" />
+          <span>Loading integrations...</span>
+        </div>
+      ) : null}
+      {input.integrationBindingsError !== null ? (
+        <Notice title="Could not load integration bindings" variant="alert">
+          {resolveApiErrorMessage({
+            error: input.integrationBindingsError,
+            fallbackMessage: "Could not load sandbox profile integration bindings.",
+          })}
+        </Notice>
+      ) : null}
+      {input.integrationDirectoryError !== null ? (
+        <Notice title="Could not load integration connections" variant="alert">
+          {resolveApiErrorMessage({
+            error: input.integrationDirectoryError,
+            fallbackMessage: "Could not load integration connections.",
+          })}
+        </Notice>
+      ) : null}
+    </div>
+  );
+}
+
+function ReadySandboxProfileIntegrationSetupSection(input: {
+  activeSectionId: string;
   profileId: string;
   version: number;
   initialRows: readonly SandboxProfileBindingEditorRow[];
@@ -450,8 +477,15 @@ function ReadySandboxProfileIntegrationsSection(input: {
     invalidateVersionBindings: input.invalidateVersionBindings,
   });
 
-  return (
-    <IntegrationsEditorSection
+  return input.activeSectionId === "resources-and-tools" ? (
+    <SandboxProfileResourcesAndToolsSection
+      availableConnections={integrationsState.availableConnections}
+      availableTargets={integrationsState.availableTargets}
+      onRowChange={integrationsState.onIntegrationBindingRowChange}
+      rows={integrationsState.integrationRows}
+    />
+  ) : (
+    <SandboxProfileIntegrationsSetupSection
       availableConnections={integrationsState.availableConnections}
       availableTargets={integrationsState.availableTargets}
       integrationBindingsQuery={{
@@ -460,18 +494,11 @@ function ReadySandboxProfileIntegrationsSection(input: {
         isPending: false,
       }}
       integrationDirectoryQuery={input.integrationDirectoryQuery}
-      integrationRowErrorsByClientId={integrationsState.integrationRowErrorsByClientId}
       integrationRows={integrationsState.integrationRows}
       integrationSaveError={integrationsState.integrationSaveError}
-      isSubmittingIntegrationBindings={integrationsState.isSubmittingIntegrationBindings}
       onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
       onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
       onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
-      sectionKinds={[input.kind]}
-      showSectionNavigation={false}
-      {...(input.onHasUnsavedChangesChange === undefined
-        ? {}
-        : { onHasUnsavedChangesChange: input.onHasUnsavedChangesChange })}
     />
   );
 }
