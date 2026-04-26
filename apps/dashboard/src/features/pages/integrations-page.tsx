@@ -1,3 +1,4 @@
+import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { getDashboardConfig } from "../../config.js";
@@ -6,7 +7,7 @@ import { DeleteIntegrationConnectionDialog } from "../integrations/delete-integr
 import { IntegrationConnectionApiKeyDialog } from "../integrations/integration-connection-api-key-dialog.js";
 import { IntegrationConnectionDetailView } from "../integrations/integration-connection-detail-view.js";
 import { useRequiredOrganizationId } from "../shell/require-auth.js";
-import { GitHubManualSetupPane } from "./integration-connection-github-manual-setup-page.js";
+import { GitHubAppSetupPane } from "./integration-connection-github-app-setup-page.js";
 import {
   buildIntegrationConnectionDetailItems,
   resolveIntegrationConnectionDetailWebhookPolicy,
@@ -24,7 +25,7 @@ function isUninstalledGitHubAppConnection(input: {
   config: Record<string, unknown> | undefined;
   externalSubjectId: string | undefined;
 }): boolean {
-  if (input.connectionMethodId !== "github-app-installation") {
+  if (input.connectionMethodId !== IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION) {
     return false;
   }
 
@@ -157,7 +158,7 @@ export function IntegrationsPage() {
             config: selectedDetailConnection.config,
             externalSubjectId: selectedDetailConnection.externalSubjectId,
           }) ? (
-            <GitHubManualSetupPane
+            <GitHubAppSetupPane
               connection={selectedDetailConnection}
               key={selectedDetailConnection.id}
             />

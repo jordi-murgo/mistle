@@ -10,13 +10,11 @@ import {
   Route,
   RouterProvider,
 } from "react-router";
+import { z } from "zod";
 
 import { resetDashboardConfigForTest } from "../../config.js";
 import { withDashboardCenteredStory, withDashboardPageStory } from "../../storybook/decorators.js";
-import {
-  IntegrationConnectionDetailView,
-  type IntegrationConnectionDetailViewProps,
-} from "../integrations/integration-connection-detail-view.js";
+import { IntegrationConnectionDetailView } from "../integrations/integration-connection-detail-view.js";
 import { createGitHubAppDetailViewStoryProps } from "../integrations/integration-story-harness.js";
 import type {
   IntegrationConnection,
@@ -25,7 +23,7 @@ import type {
 } from "../integrations/integrations-service.js";
 import { ROUTE_HANDLES } from "../navigation/route-handles.js";
 import { IntegrationConnectionCreatePage } from "./integration-connection-create-page.js";
-import { IntegrationConnectionGitHubManualSetupPage } from "./integration-connection-github-manual-setup-page.js";
+import { IntegrationConnectionGitHubAppSetupPage } from "./integration-connection-github-app-setup-page.js";
 import { SETTINGS_INTEGRATIONS_QUERY_KEY } from "./use-integrations-directory-state.js";
 
 const IntegrationRegistry = createBrowserIntegrationRegistry();
@@ -44,14 +42,6 @@ function getGitHubDefinitionOrThrow(): AnyIntegrationDefinition {
 
 const GitHubDefinition = getGitHubDefinitionOrThrow();
 const StoryControlPlaneApiOrigin = "https://control-plane.example.com";
-const StoryIntegrationCreateHandle = {
-  ...ROUTE_HANDLES.integrationCreate,
-  description: "",
-} as const;
-const StoryIntegrationGitHubManualSetupHandle = {
-  ...ROUTE_HANDLES.integrationGitHubManualSetup,
-  description: "",
-} as const;
 
 function configureDashboardRuntimeForStory(): void {
   globalThis.__MISTLE_RUNTIME_CONFIG__ = {
@@ -120,15 +110,6 @@ function createGitHubTargetFixture(): IntegrationTarget {
             inputType: field.inputType,
             ...(field.slotKey === undefined ? {} : { slotKey: field.slotKey }),
           })),
-        };
-      }
-
-      if (method.kind === "redirect") {
-        return {
-          id: method.id,
-          label: method.label,
-          kind: method.kind,
-          ui: method.ui,
         };
       }
 
@@ -211,6 +192,16 @@ function createPageResponse<T>(items: readonly T[]): {
   };
 }
 
+const StoryFormUpdateRequestBodySchema = z.object({
+  displayName: z.string(),
+  config: z.record(z.string(), z.unknown()),
+  secrets: z.record(z.string(), z.string()).optional(),
+});
+
+const StoryDraftConnectionRequestBodySchema = z.object({
+  displayName: z.string(),
+});
+
 function useGitHubStoryControlPlane(input: { queryClient: QueryClient }): void {
   useEffect(() => {
     const originalFetch = globalThis.fetch;
@@ -257,11 +248,8 @@ function useGitHubStoryControlPlane(input: { queryClient: QueryClient }): void {
       const updateFormMatch = path.match(/^\/v1\/integration\/connections\/([^/]+)\/form$/);
       if (method === "PUT" && updateFormMatch !== null) {
         const connectionId = decodeURIComponent(updateFormMatch[1] ?? "");
-        const body = (await request.json()) as {
-          displayName: string;
-          config: Record<string, unknown>;
-          secrets?: Record<string, string>;
-        };
+        const requestBody: unknown = await request.json();
+        const body = StoryFormUpdateRequestBodySchema.parse(requestBody);
         const currentConnection =
           directoryData.connections.find((connection) => connection.id === connectionId) ?? null;
         if (currentConnection === null) {
@@ -311,7 +299,8 @@ function useGitHubStoryControlPlane(input: { queryClient: QueryClient }): void {
       );
       if (method === "POST" && createDraftMatch !== null) {
         const targetKey = decodeURIComponent(createDraftMatch[1] ?? "");
-        const body = (await request.json()) as { displayName: string };
+        const requestBody: unknown = await request.json();
+        const body = StoryDraftConnectionRequestBodySchema.parse(requestBody);
         const createdConnection: IntegrationConnection = {
           id: "icn_github_story_created",
           targetKey,
@@ -344,7 +333,7 @@ function useGitHubStoryControlPlane(input: { queryClient: QueryClient }): void {
       }
 
       return createJsonResponse(
-        { code: "STORYBOOK_UNHANDLED", message: `${method} ${path} is not stubbed in Storybook.` },
+        { code: "STORYBOOK_UNHANDLED", message: `${method} ${path} is not handled in Storybook.` },
         500,
       );
     };
@@ -375,7 +364,10 @@ function GitHubCreatePageStory(): React.JSX.Element {
             <Route element={<Outlet />} handle={ROUTE_HANDLES.integrationDetail} path=":targetKey">
               <Route
                 element={<IntegrationConnectionCreatePage />}
-                handle={StoryIntegrationCreateHandle}
+                handle={{
+                  ...ROUTE_HANDLES.integrationCreate,
+                  description: "",
+                }}
                 path="add"
               />
             </Route>
@@ -395,15 +387,15 @@ function GitHubCreatePageStory(): React.JSX.Element {
   );
 }
 
-function GitHubManualSetupPageStory(input: {
+function GitHubAppSetupPageStory(input: {
   connection: IntegrationConnection;
-  webhookSources: readonly IntegrationWebhookSource[];
+  initialEntry?: string;
 }): React.JSX.Element {
   configureDashboardRuntimeForStory();
   const [queryClient] = useState(() =>
     createStoryQueryClient({
       connections: [input.connection],
-      webhookSources: input.webhookSources,
+      webhookSources: [createWebhookSourceFixture()],
     }),
   );
   const [router] = useState(() =>
@@ -413,8 +405,11 @@ function GitHubManualSetupPageStory(input: {
           <Route element={<Outlet />} handle={ROUTE_HANDLES.integrations} path="/integrations">
             <Route element={<Outlet />} handle={ROUTE_HANDLES.integrationDetail} path=":targetKey">
               <Route
-                element={<IntegrationConnectionGitHubManualSetupPage />}
-                handle={StoryIntegrationGitHubManualSetupHandle}
+                element={<IntegrationConnectionGitHubAppSetupPage />}
+                handle={{
+                  ...ROUTE_HANDLES.integrationGitHubAppSetup,
+                  description: "",
+                }}
                 path=":connectionId/github-app/setup"
               />
             </Route>
@@ -422,7 +417,10 @@ function GitHubManualSetupPageStory(input: {
         </Route>,
       ),
       {
-        initialEntries: ["/integrations/github-cloud/icn_github_story_draft/github-app/setup"],
+        initialEntries: [
+          input.initialEntry ??
+            "/integrations/github-cloud/icn_github_story_draft/github-app/setup",
+        ],
       },
     ),
   );
@@ -434,36 +432,8 @@ function GitHubManualSetupPageStory(input: {
   );
 }
 
-function GitHubDetailStory(input: {
-  props: Omit<
-    IntegrationConnectionDetailViewProps,
-    | "onCreateWebhookSource"
-    | "onDeleteWebhookSource"
-    | "onEditAuthentication"
-    | "onRefreshResource"
-    | "onStartGitHubAppInstallation"
-  >;
-}): React.JSX.Element {
-  return (
-    <IntegrationConnectionDetailView
-      {...input.props}
-      onCreateWebhookSource={() => {}}
-      onDeleteWebhookSource={() => {}}
-      onEditAuthentication={() => {}}
-      onRefreshResource={() => {}}
-      onStartGitHubAppInstallation={async () => {}}
-      titleEditor={{
-        disabled: false,
-        errorMessageByConnectionId: {},
-        onStartEditing: () => {},
-        onSave: async () => {},
-      }}
-    />
-  );
-}
-
 const pageMeta = {
-  title: "Dashboard/Integrations/Add Flows/GitHub",
+  title: "Dashboard/Integrations/GitHub App Flows",
   decorators: [withDashboardPageStory],
 } satisfies Meta;
 
@@ -477,21 +447,16 @@ export const AddConnection: PageStory = {
   },
 };
 
-export const SetupAppManually: PageStory = {
+export const SetupDraftWithManifest: PageStory = {
   render: function RenderStory() {
-    return (
-      <GitHubManualSetupPageStory
-        connection={createDraftGitHubConnection()}
-        webhookSources={[createWebhookSourceFixture()]}
-      />
-    );
+    return <GitHubAppSetupPageStory connection={createDraftGitHubConnection()} />;
   },
 };
 
-export const SetupAppManuallyWithPrefilledValues: PageStory = {
+export const SetupDraftWithExistingApp: PageStory = {
   render: function RenderStory() {
     return (
-      <GitHubManualSetupPageStory
+      <GitHubAppSetupPageStory
         connection={createDraftGitHubConnection({
           config: {
             app_id: "12345",
@@ -499,16 +464,15 @@ export const SetupAppManuallyWithPrefilledValues: PageStory = {
             client_id: "Iv1.prefilledstorybook",
           },
         })}
-        webhookSources={[createWebhookSourceFixture()]}
       />
     );
   },
 };
 
-export const SetupAppManuallyWithConfiguredSecrets: PageStory = {
+export const SetupDraftReadyToInstall: PageStory = {
   render: function RenderStory() {
     return (
-      <GitHubManualSetupPageStory
+      <GitHubAppSetupPageStory
         connection={createDraftGitHubConnection({
           config: {
             app_id: "12345",
@@ -517,7 +481,24 @@ export const SetupAppManuallyWithConfiguredSecrets: PageStory = {
           },
           configuredSecretNames: ["appPrivateKeyPem", "clientSecret", "webhookSecret"],
         })}
-        webhookSources={[createWebhookSourceFixture()]}
+      />
+    );
+  },
+};
+
+export const ManifestCreationSuccess: PageStory = {
+  render: function RenderStory() {
+    return (
+      <GitHubAppSetupPageStory
+        connection={createDraftGitHubConnection({
+          config: {
+            app_id: "12345",
+            app_slug: "mistle-github-app",
+            client_id: "Iv1.manifeststorybook",
+          },
+          configuredSecretNames: ["appPrivateKeyPem", "clientSecret", "webhookSecret"],
+        })}
+        initialEntry="/integrations/github-cloud/icn_github_story_draft/github-app/setup?githubAppManifest=created"
       />
     );
   },
@@ -526,6 +507,21 @@ export const SetupAppManuallyWithConfiguredSecrets: PageStory = {
 export const InstalledDetail: PageStory = {
   decorators: [withDashboardCenteredStory],
   render: function RenderStory() {
-    return <GitHubDetailStory props={createGitHubAppDetailViewStoryProps()} />;
+    return (
+      <IntegrationConnectionDetailView
+        {...createGitHubAppDetailViewStoryProps()}
+        onCreateWebhookSource={() => {}}
+        onDeleteWebhookSource={() => {}}
+        onEditAuthentication={() => {}}
+        onRefreshResource={() => {}}
+        onStartGitHubAppInstallation={async () => {}}
+        titleEditor={{
+          disabled: false,
+          errorMessageByConnectionId: {},
+          onStartEditing: () => {},
+          onSave: async () => {},
+        }}
+      />
+    );
   },
 };

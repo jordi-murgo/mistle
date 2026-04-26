@@ -1,9 +1,9 @@
 import type { RouteHandler } from "@hono/zod-openapi";
 import { withHttpErrorHandler } from "@mistle/http/errors.js";
 
-import { withRequiredSession } from "../../middleware/with-required-session.js";
-import type { AppContextBindings, AppSession } from "../../types.js";
-import { createGitHubAppDraftConnection } from "../services/create-github-app-draft-connection.js";
+import { withRequiredSession } from "../../../middleware/with-required-session.js";
+import type { AppContextBindings, AppSession } from "../../../types.js";
+import { startGitHubAppInstallationConnection } from "../services/start-installation.js";
 import { route } from "./route.js";
 
 const routeHandler = async (
@@ -12,22 +12,22 @@ const routeHandler = async (
 ) => {
   const db = ctx.get("db");
   const integrationRegistry = ctx.get("integrationRegistry");
-  const { targetKey } = ctx.req.valid("param");
-  const { displayName } = ctx.req.valid("json");
+  const integrationsConfig = ctx.get("config").integrations;
+  const { connectionId } = ctx.req.valid("param");
 
-  const createdConnection = await createGitHubAppDraftConnection(
+  const startedConnection = await startGitHubAppInstallationConnection(
     {
       db,
       integrationRegistry,
+      integrationsConfig,
     },
     {
       organizationId: session.activeOrganizationId,
-      targetKey,
-      displayName,
+      connectionId,
     },
   );
 
-  return ctx.json(createdConnection, 201);
+  return ctx.json(startedConnection, 200);
 };
 
 export const handler: RouteHandler<typeof route, AppContextBindings> = withHttpErrorHandler(

@@ -13,11 +13,11 @@ import {
 import {
   IntegrationConnectionsBadRequestCodes,
   IntegrationConnectionsNotFoundCodes,
-} from "../constants.js";
-import { buildIntegrationConnectionResponse } from "./build-integration-connection-response.js";
-import { ensureImplicitConnectionWebhookSource } from "./webhook-sources.js";
+} from "../../constants.js";
+import { buildIntegrationConnectionResponse } from "../../services/build-integration-connection-response.js";
+import { ensureImplicitConnectionWebhookSource } from "../../services/webhook-sources.js";
 
-export type CreateGitHubAppDraftConnectionInput = {
+type CreateGitHubAppDraftConnectionInput = {
   organizationId: string;
   targetKey: string;
   displayName: string;

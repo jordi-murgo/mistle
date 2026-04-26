@@ -8,6 +8,8 @@ import { DetailLabel } from "./detail-label.js";
 import { Spinner } from "./spinner.js";
 
 const COPY_SUCCESS_DISPLAY_MS = 1200;
+const singleLineValueClassName =
+  "min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-1 font-mono text-xs";
 
 type CopyFeedback =
   | { state: "idle" }
@@ -20,7 +22,6 @@ type LoadingCopyableValueProps = {
   label: string;
   loading: true;
   loadingLabel?: string;
-  variant?: "field";
 };
 
 type ReadyCopyableValueBaseProps = {
@@ -99,17 +100,13 @@ export function CopyableValue(input: CopyableValueProps): React.JSX.Element {
   }
 
   const readyInput = input;
+  const usesGenericCopyLabel = readyInput.variant === "panel" || readyInput.variant === "inline";
 
   const copyAriaLabel =
-    readyInput.copyAriaLabel ??
-    (readyInput.variant === "panel" || readyInput.variant === "inline"
-      ? "Copy value"
-      : `Copy ${readyInput.label}`);
+    readyInput.copyAriaLabel ?? (usesGenericCopyLabel ? "Copy value" : `Copy ${readyInput.label}`);
   const idleTitle =
-    readyInput.copyTitle ??
-    (readyInput.variant === "panel" || readyInput.variant === "inline"
-      ? "Copy value"
-      : `Copy ${readyInput.label}`);
+    readyInput.copyTitle ?? (usesGenericCopyLabel ? "Copy value" : `Copy ${readyInput.label}`);
+  const failureMessage = readyInput.failureMessage ?? "Could not copy automatically.";
   const visibleCopyState =
     copyFeedback.state === "idle" || copyFeedback.value !== readyInput.value
       ? "idle"
@@ -161,9 +158,7 @@ export function CopyableValue(input: CopyableValueProps): React.JSX.Element {
           {readyInput.value}
         </pre>
         {visibleCopyState === "failed" ? (
-          <p className="text-destructive mt-2 px-3 pb-3 text-xs">
-            {readyInput.failureMessage ?? "Could not copy automatically."}
-          </p>
+          <p className="text-destructive mt-2 px-3 pb-3 text-xs">{failureMessage}</p>
         ) : null}
       </div>
     );
@@ -173,13 +168,11 @@ export function CopyableValue(input: CopyableValueProps): React.JSX.Element {
     return (
       <div className="gap-1.5 flex flex-col">
         <div className="bg-muted/30 flex items-center gap-2 rounded-md border p-2">
-          <p className="min-w-0 flex-1 break-all px-1 font-mono text-xs">{readyInput.value}</p>
+          <p className={singleLineValueClassName}>{readyInput.value}</p>
           {button}
         </div>
         {visibleCopyState === "failed" ? (
-          <p className="text-destructive text-xs">
-            {readyInput.failureMessage ?? "Could not copy automatically."}
-          </p>
+          <p className="text-destructive text-xs">{failureMessage}</p>
         ) : null}
       </div>
     );
@@ -189,13 +182,11 @@ export function CopyableValue(input: CopyableValueProps): React.JSX.Element {
     <div className="gap-1.5 flex flex-col">
       <DetailLabel as="p">{readyInput.labelContent ?? readyInput.label}</DetailLabel>
       <div className="bg-muted/30 flex items-center gap-2 rounded-md border p-2">
-        <p className="min-w-0 flex-1 break-all px-1 font-mono text-xs">{readyInput.value}</p>
+        <p className={singleLineValueClassName}>{readyInput.value}</p>
         {button}
       </div>
       {visibleCopyState === "failed" ? (
-        <p className="text-destructive text-xs">
-          {readyInput.failureMessage ?? "Could not copy automatically."}
-        </p>
+        <p className="text-destructive text-xs">{failureMessage}</p>
       ) : null}
     </div>
   );

@@ -32,27 +32,14 @@ function normalizeIntegrationBreadcrumbLabel(targetKey: string): string {
   return normalizedId.split(" ").map(toTitleCaseWord).join(" ");
 }
 
-function resolveIntegrationDetailBreadcrumb(input: RouteTextResolverInput): string {
-  const targetKey = input.params["targetKey"];
-  if (targetKey === undefined || targetKey.trim().length === 0) {
-    return "Connection";
-  }
-
-  const metadata = resolveIntegrationDefinitionMetadata(targetKey);
-  if (metadata !== null) {
-    return metadata.displayName;
-  }
-
-  return normalizeIntegrationBreadcrumbLabel(targetKey);
-}
-
 function resolveIntegrationDefinitionMetadata(targetKey: string): {
   displayName: string;
   logoKey: string;
 } | null {
+  const definitions = listBrowserIntegrationDefinitions();
   const definition =
-    listBrowserIntegrationDefinitions().find((candidate) => candidate.variantId === targetKey) ??
-    listBrowserIntegrationDefinitions().find((candidate) => candidate.familyId === targetKey) ??
+    definitions.find((candidate) => candidate.variantId === targetKey) ??
+    definitions.find((candidate) => candidate.familyId === targetKey) ??
     null;
 
   if (definition === null) {
@@ -114,7 +101,7 @@ function resolveIntegrationEditTitle(input: RouteTextResolverInput): string {
   return `Edit ${resolveIntegrationDetailTitle(input)} Connection`;
 }
 
-function resolveGitHubManualSetupTitle(input: RouteTextResolverInput): string {
+function resolveGitHubAppSetupTitle(input: RouteTextResolverInput): string {
   return `Setup ${resolveIntegrationDetailTitle(input)} App`;
 }
 
@@ -176,7 +163,7 @@ export const ROUTE_HANDLES = {
   },
   integrationDetail: {
     appShellInsetOwner: "child",
-    breadcrumb: resolveIntegrationDetailBreadcrumb,
+    breadcrumb: resolveIntegrationDetailTitle,
     breadcrumbIcon: resolveIntegrationBreadcrumbIcon,
     title: resolveIntegrationDetailTitle,
     description: resolveIntegrationDetailSubtitle,
@@ -202,10 +189,10 @@ export const ROUTE_HANDLES = {
       icon: resolveIntegrationDetailHeaderIcon,
     },
   },
-  integrationGitHubManualSetup: {
+  integrationGitHubAppSetup: {
     appShellInsetOwner: "child",
     breadcrumb: "Setup",
-    title: resolveGitHubManualSetupTitle,
+    title: resolveGitHubAppSetupTitle,
     description: resolveIntegrationDetailSubtitle,
     header: {
       icon: resolveIntegrationDetailHeaderIcon,
@@ -319,7 +306,7 @@ export const ROUTE_HANDLES = {
     description: "",
   },
   settingsOrganizationIntegrationDetail: {
-    breadcrumb: resolveIntegrationDetailBreadcrumb,
+    breadcrumb: resolveIntegrationDetailTitle,
     title: resolveIntegrationDetailTitle,
     description: resolveIntegrationDetailSubtitle,
     header: {

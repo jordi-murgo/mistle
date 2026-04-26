@@ -58,17 +58,6 @@ function isDeviceAuthorizationMethod(
   return method?.kind === "device-authorization";
 }
 
-function shouldCreateGitHubAppDraftConnection(input: {
-  editor: IntegrationConnectionEditorState;
-  methodId: IntegrationConnectionMethodId;
-}): boolean {
-  return (
-    input.editor.mode === "create" &&
-    input.editor.targetFamilyId === "github" &&
-    input.methodId === IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
-  );
-}
-
 function resolveEditableConfigValue(input: {
   configValue: Record<string, unknown>;
   configForm: ReturnType<typeof resolveConnectionMethodFormUiModel>;
@@ -122,7 +111,6 @@ export function useIntegrationConnectionEditorState(
   const startRedirectMutation = useMutation({
     mutationFn: async (mutationInput: {
       targetKey: string;
-      methodId: "oauth2-authorization-code";
       displayName?: string;
       config?: Record<string, unknown>;
     }) => startRedirectIntegrationConnection(mutationInput),
@@ -358,10 +346,8 @@ export function useIntegrationConnectionEditorState(
         return;
       } else {
         if (
-          shouldCreateGitHubAppDraftConnection({
-            editor,
-            methodId: draft.methodId,
-          })
+          editor.targetFamilyId === "github" &&
+          draft.methodId === IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
         ) {
           const createdConnection = await createGitHubAppDraftMutation.mutateAsync({
             targetKey: editor.targetKey,
@@ -451,7 +437,6 @@ export function useIntegrationConnectionEditorState(
 
     const started = await startRedirectMutation.mutateAsync({
       targetKey: editor.targetKey,
-      methodId: draft.methodId,
       ...(Object.keys(draft.configValue).length === 0 ? {} : { config: draft.configValue }),
       ...(normalizedConnectionDisplayName.length === 0
         ? {}
