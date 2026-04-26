@@ -6,6 +6,7 @@ import { logger } from "../../logger.js";
 import {
   BOOTSTRAP_WEBSOCKET_MAX_CONSECUTIVE_MISSED_PONGS,
   ATTACHMENT_TTL_MS,
+  OWNER_LEASE_RENEW_INTERVAL_MS,
   PRESENCE_LEASE_RENEW_INTERVAL_MS,
   PRESENCE_LEASE_TTL_MS,
   WEBSOCKET_PING_INTERVAL_MS,
@@ -14,10 +15,6 @@ import {
 import type { SandboxPresenceStore } from "../../runtime-state/sandbox-presence-store.js";
 import type { SandboxRuntimeAttachmentStore } from "../../runtime-state/sandbox-runtime-attachment-store.js";
 import type { InteractiveStreamRouter } from "../gateway-forwarding/index.js";
-import type {
-  SandboxOwnerLeaseHeartbeat,
-  SandboxOwnerLeaseHeartbeatHandle,
-} from "../ownership/sandbox-owner-lease-heartbeat.js";
 import type { SandboxOwnerStore } from "../ownership/sandbox-owner-store.js";
 import type { TunnelRelayCoordinator } from "../relay-coordinator.js";
 import {
@@ -31,13 +28,17 @@ import { startWebSocketHealthMonitor } from "./websocket-health-monitor.js";
 
 const ConnectionPresenceLeaseSource = "dashboard";
 
+type LeaseRenewalHandle = {
+  stop: () => void;
+};
+
 /**
  * Captures the live relay target for an attached websocket peer plus any
  * teardown handle that must be stopped when the peer disconnects.
  */
 export type AttachedTunnelPeer = {
   relayTarget: RelayTarget;
-  leaseHeartbeatHandle?: SandboxOwnerLeaseHeartbeatHandle;
+  leaseHeartbeatHandle?: LeaseRenewalHandle;
   presenceLeaseRenewalHandle?: {
     stop: () => void;
   };
@@ -82,7 +83,6 @@ export class TunnelSessionService {
     private readonly relayCoordinator: TunnelRelayCoordinator,
     private readonly tunnelSessionRegistry: TunnelSessionRegistry,
     private readonly sandboxOwnerStore: SandboxOwnerStore,
-    private readonly sandboxOwnerLeaseHeartbeat: SandboxOwnerLeaseHeartbeat,
     private readonly sandboxPresenceStore: SandboxPresenceStore,
     private readonly sandboxRuntimeAttachmentStore: SandboxRuntimeAttachmentStore,
     private readonly sandboxInstanceDeadlineService: SandboxInstanceDeadlineService,
@@ -119,6 +119,10 @@ export class TunnelSessionService {
           isHealthy: () => boolean;
         }
       | undefined;
+
+    const attachedPeer: AttachedTunnelPeer = {
+      relayTarget,
+    };
 
     try {
       websocketHealthHandle = startWebSocketHealthMonitor({
@@ -171,52 +175,18 @@ export class TunnelSessionService {
       });
     }
 
-    void this.refreshRuntimeAttachment({
+    void this.activateBootstrapAttachment({
       attachedAtMs: runtimeAttachmentAttachedAtMs,
+      attachedPeer,
       leaseId: input.leaseId,
+      onFatalError: input.onFatalError,
+      onLeaseLost: input.onLeaseLost,
+      ownerLeaseTtlMs: input.ownerLeaseTtlMs,
       relaySessionId: input.relaySessionId,
+      relayTarget,
       sandboxInstanceId: input.sandboxInstanceId,
-    }).catch((error: unknown) => {
-      logger.error(
-        {
-          err: error,
-          sandboxInstanceId: input.sandboxInstanceId,
-        },
-        "Failed to persist sandbox runtime attachment",
-      );
-      input.onFatalError({
-        closeReason: "Failed to persist sandbox runtime attachment.",
-        error,
-        statusMessage: "Failed to persist sandbox runtime attachment.",
-      });
-    });
-
-    void this.enqueueBootstrapLifecycleTransition({
-      sandboxInstanceId: input.sandboxInstanceId,
-      operation: async () => {
-        if (!this.relayCoordinator.isCurrentPeer(relayTarget)) {
-          return;
-        }
-
-        await this.sandboxInstanceDeadlineService.handleBootstrapAttach({
-          sandboxInstanceId: input.sandboxInstanceId,
-          ownerLeaseId: input.leaseId,
-        });
-      },
-    }).catch((error: unknown) => {
-      logger.error(
-        {
-          err: error,
-          sandboxInstanceId: input.sandboxInstanceId,
-          ownerLeaseId: input.leaseId,
-        },
-        "Failed to persist sandbox deadlines for attached bootstrap tunnel",
-      );
-      input.onFatalError({
-        closeReason: "Failed to persist sandbox deadlines for attached bootstrap tunnel.",
-        error,
-        statusMessage: "Failed to persist sandbox deadlines for attached bootstrap tunnel.",
-      });
+      socket: input.socket,
+      websocketHealthHandle,
     });
 
     void notifyConnectionPeerOfReleasedInteractiveStreams({
@@ -238,48 +208,11 @@ export class TunnelSessionService {
       });
     });
 
-    const leaseHeartbeatHandle = this.sandboxOwnerLeaseHeartbeat.start({
-      sandboxInstanceId: input.sandboxInstanceId,
-      leaseId: input.leaseId,
-      ttlMs: input.ownerLeaseTtlMs,
-      onLeaseRenewed: () => {
-        if (websocketHealthHandle?.isHealthy() === true) {
-          void this.refreshRuntimeAttachment({
-            attachedAtMs: runtimeAttachmentAttachedAtMs,
-            leaseId: input.leaseId,
-            relaySessionId: input.relaySessionId,
-            sandboxInstanceId: input.sandboxInstanceId,
-          }).catch((error: unknown) => {
-            logger.error(
-              {
-                err: error,
-                sandboxInstanceId: input.sandboxInstanceId,
-              },
-              "Failed to refresh sandbox runtime attachment",
-            );
-          });
-        }
-      },
-      onLeaseLost: () => {
-        logger.error(
-          {
-            sandboxInstanceId: input.sandboxInstanceId,
-            leaseId: input.leaseId,
-          },
-          "Lost sandbox ownership while bootstrap websocket was still connected",
-        );
-        input.onLeaseLost({
-          closeReason: "Sandbox ownership lease could not be renewed.",
-          statusMessage: "Sandbox ownership lease could not be renewed.",
-        });
-      },
-    });
+    if (websocketHealthHandle !== undefined) {
+      attachedPeer.websocketHealthHandle = websocketHealthHandle;
+    }
 
-    return {
-      leaseHeartbeatHandle,
-      relayTarget,
-      ...(websocketHealthHandle === undefined ? {} : { websocketHealthHandle }),
-    };
+    return attachedPeer;
   }
 
   /**
@@ -352,18 +285,19 @@ export class TunnelSessionService {
     presenceLeaseRenewalHandle = this.startPresenceLeaseRenewal({
       leaseId: input.relaySessionId,
       onLeaseTouched: async () => {
-        const owner = await this.sandboxOwnerStore.getOwner({
+        const activeSession = await this.sandboxRuntimeAttachmentStore.getAttachment({
           sandboxInstanceId: input.sandboxInstanceId,
+          nowMs: this.clock.nowMs(),
         });
-        if (owner === undefined) {
+        if (activeSession === null) {
           throw new Error(
-            `Expected active owner lease for sandbox '${input.sandboxInstanceId}' before touching presence deadline.`,
+            `Expected active bootstrap session for sandbox '${input.sandboxInstanceId}' before touching presence deadline.`,
           );
         }
 
         await this.sandboxInstanceDeadlineService.touchIdleDeadline({
           sandboxInstanceId: input.sandboxInstanceId,
-          ownerLeaseId: owner.leaseId,
+          ownerLeaseId: activeSession.ownerLeaseId,
         });
       },
       onTouchFailed: (error) => {
@@ -558,6 +492,219 @@ export class TunnelSessionService {
       ttlMs: ATTACHMENT_TTL_MS,
       nowMs: this.clock.nowMs(),
     });
+  }
+
+  private async activateBootstrapAttachment(input: {
+    attachedAtMs: number;
+    attachedPeer: AttachedTunnelPeer;
+    leaseId: string;
+    onFatalError: (failure: TunnelSessionFatalError) => void;
+    onLeaseLost: (failure: TunnelSessionLeaseLost) => void;
+    ownerLeaseTtlMs: number;
+    relaySessionId: string;
+    relayTarget: RelayTarget;
+    sandboxInstanceId: string;
+    socket: RelayPeerSocket;
+    websocketHealthHandle?:
+      | {
+          stop: () => void;
+          isHealthy: () => boolean;
+        }
+      | undefined;
+  }): Promise<void> {
+    try {
+      const owner = await this.sandboxOwnerStore.claimOwner({
+        leaseId: input.leaseId,
+        sandboxInstanceId: input.sandboxInstanceId,
+        nodeId: this.gatewayNodeId,
+        sessionId: input.relaySessionId,
+        ttlMs: input.ownerLeaseTtlMs,
+      });
+      if (owner.leaseId !== input.leaseId) {
+        throw new Error(
+          `Expected claimed owner lease '${input.leaseId}' for sandbox '${input.sandboxInstanceId}', received '${owner.leaseId}' instead.`,
+        );
+      }
+
+      if (
+        input.socket.readyState !== WebSocket.OPEN ||
+        !this.relayCoordinator.isCurrentPeer(input.relayTarget)
+      ) {
+        await this.sandboxOwnerStore.releaseOwner({
+          sandboxInstanceId: input.sandboxInstanceId,
+          leaseId: owner.leaseId,
+        });
+        return;
+      }
+
+      await this.refreshRuntimeAttachment({
+        attachedAtMs: input.attachedAtMs,
+        leaseId: owner.leaseId,
+        relaySessionId: input.relaySessionId,
+        sandboxInstanceId: input.sandboxInstanceId,
+      });
+
+      await this.enqueueBootstrapLifecycleTransition({
+        sandboxInstanceId: input.sandboxInstanceId,
+        operation: async () => {
+          if (!this.relayCoordinator.isCurrentPeer(input.relayTarget)) {
+            return;
+          }
+
+          await this.sandboxInstanceDeadlineService.handleBootstrapAttach({
+            sandboxInstanceId: input.sandboxInstanceId,
+            ownerLeaseId: owner.leaseId,
+          });
+        },
+      });
+
+      input.attachedPeer.leaseHeartbeatHandle = this.startRuntimeAttachmentRenewal({
+        attachedAtMs: input.attachedAtMs,
+        leaseId: owner.leaseId,
+        onLeaseLost: () => {
+          logger.error(
+            {
+              sandboxInstanceId: input.sandboxInstanceId,
+              leaseId: owner.leaseId,
+            },
+            "Lost sandbox active attachment while bootstrap websocket was still connected",
+          );
+          input.onLeaseLost({
+            closeReason: "Sandbox active attachment was replaced.",
+            statusMessage: "Sandbox active attachment was replaced.",
+          });
+        },
+        onRefreshFailed: (error) => {
+          logger.error(
+            {
+              err: error,
+              sandboxInstanceId: input.sandboxInstanceId,
+            },
+            "Failed to refresh sandbox runtime attachment",
+          );
+          input.onFatalError({
+            closeReason: "Failed to refresh sandbox runtime attachment.",
+            error,
+            statusMessage: "Failed to refresh sandbox runtime attachment.",
+          });
+        },
+        relaySessionId: input.relaySessionId,
+        sandboxInstanceId: input.sandboxInstanceId,
+        socket: input.socket,
+        ttlMs: input.ownerLeaseTtlMs,
+        websocketHealthHandle: input.websocketHealthHandle,
+      });
+    } catch (error) {
+      logger.error(
+        {
+          err: error,
+          sandboxInstanceId: input.sandboxInstanceId,
+          ownerLeaseId: input.leaseId,
+        },
+        "Failed to activate sandbox ownership for attached bootstrap tunnel",
+      );
+      input.onFatalError({
+        closeReason: "Failed to activate sandbox ownership for attached bootstrap tunnel.",
+        error,
+        statusMessage: "Failed to activate sandbox ownership for attached bootstrap tunnel.",
+      });
+    }
+  }
+
+  private startRuntimeAttachmentRenewal(input: {
+    attachedAtMs: number;
+    leaseId: string;
+    onLeaseLost: () => void;
+    onRefreshFailed: (error: unknown) => void;
+    relaySessionId: string;
+    sandboxInstanceId: string;
+    socket: RelayPeerSocket;
+    ttlMs: number;
+    websocketHealthHandle?:
+      | {
+          stop: () => void;
+          isHealthy: () => boolean;
+        }
+      | undefined;
+  }): LeaseRenewalHandle {
+    let stopped = false;
+    let scheduledHandle: TimerHandle | undefined;
+
+    const scheduleNextRenewal = (): void => {
+      if (stopped) {
+        return;
+      }
+
+      scheduledHandle = this.scheduler.schedule(() => {
+        void renewRuntimeAttachment();
+      }, OWNER_LEASE_RENEW_INTERVAL_MS);
+    };
+
+    const renewRuntimeAttachment = async (): Promise<void> => {
+      if (stopped) {
+        return;
+      }
+      if (input.socket.readyState !== WebSocket.OPEN) {
+        stopped = true;
+        scheduledHandle = undefined;
+        return;
+      }
+
+      const nowMs = this.clock.nowMs();
+
+      try {
+        const currentAttachment = await this.sandboxRuntimeAttachmentStore.getAttachment({
+          sandboxInstanceId: input.sandboxInstanceId,
+          nowMs,
+        });
+        if (
+          currentAttachment !== null &&
+          (currentAttachment.ownerLeaseId !== input.leaseId ||
+            currentAttachment.sessionId !== input.relaySessionId)
+        ) {
+          stopped = true;
+          scheduledHandle = undefined;
+          input.onLeaseLost();
+          return;
+        }
+
+        if (input.websocketHealthHandle?.isHealthy() === true || currentAttachment === null) {
+          await this.refreshRuntimeAttachment({
+            attachedAtMs: input.attachedAtMs,
+            leaseId: input.leaseId,
+            relaySessionId: input.relaySessionId,
+            sandboxInstanceId: input.sandboxInstanceId,
+          });
+        }
+      } catch (error) {
+        if (stopped) {
+          return;
+        }
+
+        stopped = true;
+        scheduledHandle = undefined;
+        input.onRefreshFailed(error);
+        return;
+      }
+
+      scheduleNextRenewal();
+    };
+
+    scheduleNextRenewal();
+
+    return {
+      stop: () => {
+        if (stopped) {
+          return;
+        }
+
+        stopped = true;
+        if (scheduledHandle !== undefined) {
+          this.scheduler.cancel(scheduledHandle);
+          scheduledHandle = undefined;
+        }
+      },
+    };
   }
 
   private startPresenceLeaseRenewal(input: {

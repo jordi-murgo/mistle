@@ -10,6 +10,7 @@ import {
   DefaultDataPlaneGatewayLifecycleDurations,
   SandboxInstanceDeadlineService,
 } from "../../deadlines/sandbox-instance-deadline-service.js";
+import { createAttachmentBackedActiveBootstrapSessionStore } from "../../runtime-state/active-bootstrap-session-store.js";
 import { InMemorySandboxPresenceStore } from "../../runtime-state/adapters/in-memory-sandbox-presence-store.js";
 import { InMemorySandboxRuntimeAttachmentStore } from "../../runtime-state/adapters/in-memory-sandbox-runtime-attachment-store.js";
 import { LocalGatewayForwardingClientAdapter } from "../gateway-forwarding/adapters/local-gateway-forwarding-client-adapter.js";
@@ -17,8 +18,7 @@ import { LocalGatewayForwardingServerAdapter } from "../gateway-forwarding/adapt
 import { InteractiveStreamRouter } from "../gateway-forwarding/interactive-stream-router.js";
 import { InMemoryLocalPeerRegistryAdapter } from "../local-peer-registry/adapters/in-memory-local-peer-registry-adapter.js";
 import { InMemorySandboxOwnerStore } from "../ownership/adapters/in-memory-sandbox-owner-store.js";
-import { SandboxOwnerLeaseHeartbeat } from "../ownership/sandbox-owner-lease-heartbeat.js";
-import { StoreBackedSandboxOwnerResolver } from "../ownership/store-backed-sandbox-owner-resolver.js";
+import { AttachmentBackedSandboxOwnerResolver } from "../ownership/attachment-backed-sandbox-owner-resolver.js";
 import { TunnelRelayCoordinator } from "../relay-coordinator.js";
 import { InMemoryRelayTransportAdapter } from "../relay-transport/adapters/in-memory-relay-transport-adapter.js";
 import { InMemoryTunnelSessionRegistryAdapter } from "../tunnel-session/adapters/in-memory-tunnel-session-registry-adapter.js";
@@ -232,11 +232,21 @@ async function createDisconnectTestHarness() {
   const clock = createMutableClock(1_000);
   const scheduler = createManualScheduler(clock);
   const ownerStore = new InMemorySandboxOwnerStore(clock);
-  await ownerStore.claimOwner({
+  const attachmentStore = new InMemorySandboxRuntimeAttachmentStore(clock);
+  const owner = await ownerStore.claimOwner({
     sandboxInstanceId: SandboxInstanceId,
     nodeId: GatewayNodeId,
     sessionId: BootstrapSessionId,
     ttlMs: 60_000,
+  });
+  await attachmentStore.upsertAttachment({
+    sandboxInstanceId: SandboxInstanceId,
+    ownerLeaseId: owner.leaseId,
+    nodeId: GatewayNodeId,
+    sessionId: BootstrapSessionId,
+    attachedAtMs: clock.nowMs(),
+    ttlMs: 60_000,
+    nowMs: clock.nowMs(),
   });
 
   const tunnelSessionRegistry = new TunnelSessionRegistry(
@@ -249,7 +259,11 @@ async function createDisconnectTestHarness() {
   );
   const interactiveStreamRouter = new InteractiveStreamRouter(
     GatewayNodeId,
-    new StoreBackedSandboxOwnerResolver(GatewayNodeId, ownerStore),
+    new AttachmentBackedSandboxOwnerResolver(
+      GatewayNodeId,
+      createAttachmentBackedActiveBootstrapSessionStore(attachmentStore),
+      clock,
+    ),
     new LocalGatewayForwardingClientAdapter(
       GatewayNodeId,
       new LocalGatewayForwardingServerAdapter(tunnelSessionRegistry),
@@ -262,9 +276,8 @@ async function createDisconnectTestHarness() {
     relayCoordinator,
     tunnelSessionRegistry,
     ownerStore,
-    new SandboxOwnerLeaseHeartbeat(ownerStore, scheduler, 5_000),
     new InMemorySandboxPresenceStore(clock),
-    new InMemorySandboxRuntimeAttachmentStore(clock),
+    attachmentStore,
     new SandboxInstanceDeadlineService(
       {
         async putSandboxInstanceDeadline() {
@@ -333,20 +346,19 @@ describe("TunnelSessionService", () => {
     const tunnelSessionRegistry = new TunnelSessionRegistry(
       new InMemoryTunnelSessionRegistryAdapter(),
     );
+    const attachmentStore = new InMemorySandboxRuntimeAttachmentStore(clock);
     const interactiveStreamRouter = new InteractiveStreamRouter(
       GatewayNodeId,
-      new StoreBackedSandboxOwnerResolver(GatewayNodeId, ownerStore),
+      new AttachmentBackedSandboxOwnerResolver(
+        GatewayNodeId,
+        createAttachmentBackedActiveBootstrapSessionStore(attachmentStore),
+        clock,
+      ),
       new LocalGatewayForwardingClientAdapter(
         GatewayNodeId,
         new LocalGatewayForwardingServerAdapter(tunnelSessionRegistry),
       ),
     );
-    await ownerStore.claimOwner({
-      sandboxInstanceId: SandboxInstanceId,
-      nodeId: GatewayNodeId,
-      sessionId: BootstrapSessionId,
-      ttlMs: 60_000,
-    });
     let idlePutCount = 0;
 
     const service = new TunnelSessionService(
@@ -355,9 +367,8 @@ describe("TunnelSessionService", () => {
       relayCoordinator,
       tunnelSessionRegistry,
       ownerStore,
-      new SandboxOwnerLeaseHeartbeat(ownerStore, scheduler, 5_000),
       new InMemorySandboxPresenceStore(clock),
-      new InMemorySandboxRuntimeAttachmentStore(clock),
+      attachmentStore,
       new SandboxInstanceDeadlineService(
         {
           async putSandboxInstanceDeadline(input) {
@@ -412,8 +423,23 @@ describe("TunnelSessionService", () => {
       sandboxInstanceId: SandboxInstanceId,
       socket: bootstrapPair.peerSocket,
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    let activeAttachment = await attachmentStore.getAttachment({
+      sandboxInstanceId: SandboxInstanceId,
+      nowMs: clock.nowMs(),
+    });
+    for (
+      let attempt = 0;
+      (activeAttachment?.ownerLeaseId !== OwnerLeaseId || idlePutCount !== 1) && attempt < 10;
+      attempt += 1
+    ) {
+      await Promise.resolve();
+      activeAttachment = await attachmentStore.getAttachment({
+        sandboxInstanceId: SandboxInstanceId,
+        nowMs: clock.nowMs(),
+      });
+    }
+    expect(activeAttachment?.ownerLeaseId).toBe(OwnerLeaseId);
+    expect(idlePutCount).toBe(1);
 
     let connectionFatalErrorMessage: string | undefined;
     service.attachConnectionPeer({
