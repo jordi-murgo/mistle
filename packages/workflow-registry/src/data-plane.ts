@@ -4,7 +4,7 @@ import type {
   SandboxInstanceStarterKind,
 } from "@mistle/db/data-plane";
 import type { CompiledRuntimePlan } from "@mistle/integrations-core";
-import type { SandboxImageHandle } from "@mistle/sandbox";
+import type { SandboxImageHandle, SandboxProvider } from "@mistle/sandbox";
 import { defineWorkflowSpec } from "openworkflow";
 
 export const StartSandboxInstanceWorkflowName = "data-plane.sandbox-instances.start";
@@ -18,15 +18,26 @@ export const ReconcileSandboxInstanceWorkflowVersion = "1";
 export const HandleSandboxInstanceDeadlineWorkflowName =
   "data-plane.sandbox-instance-deadlines.handle";
 export const HandleSandboxInstanceDeadlineWorkflowVersion = "1";
+export const MaterializeSandboxProfileVersionSnapshotWorkflowName =
+  "data-plane.sandbox-profile-version-snapshots.materialize";
+export const MaterializeSandboxProfileVersionSnapshotWorkflowVersion = "1";
 
 export type SandboxStopReason = "idle";
 export type SandboxReconcileReason = "disconnect_grace_elapsed";
 export type SandboxInstanceDeadlineKind = "idle" | "disconnect";
 
-export type StartSandboxInstanceWorkflowImageInput = Pick<
-  SandboxImageHandle,
-  "imageId" | "createdAt"
->;
+export const SandboxStartImageKinds = {
+  BASE: "base",
+  SNAPSHOT: "snapshot",
+} as const;
+export type SandboxStartImageKind =
+  (typeof SandboxStartImageKinds)[keyof typeof SandboxStartImageKinds];
+
+export type StartSandboxInstanceWorkflowImageInput = Pick<SandboxImageHandle, "imageId"> & {
+  createdAt?: SandboxImageHandle["createdAt"];
+  kind: SandboxStartImageKind;
+  provider?: SandboxProvider;
+};
 
 export type SandboxWorkflowGitIdentityInput = {
   name: string;
@@ -69,6 +80,30 @@ export const StartSandboxInstanceWorkflowSpec = defineWorkflowSpec<
 >({
   name: StartSandboxInstanceWorkflowName,
   version: StartSandboxInstanceWorkflowVersion,
+});
+
+export type MaterializeSandboxProfileVersionSnapshotWorkflowInput = {
+  snapshotJobId: string;
+  sandboxInstanceId: string;
+  organizationId: string;
+  sandboxProfileId: string;
+  sandboxProfileVersion: number;
+  image: StartSandboxInstanceWorkflowImageInput;
+};
+
+export type MaterializeSandboxProfileVersionSnapshotWorkflowOutput = {
+  snapshotJobId: string;
+  sandboxInstanceId: string;
+  claimed: boolean;
+  image?: SandboxImageHandle;
+};
+
+export const MaterializeSandboxProfileVersionSnapshotWorkflowSpec = defineWorkflowSpec<
+  MaterializeSandboxProfileVersionSnapshotWorkflowInput,
+  MaterializeSandboxProfileVersionSnapshotWorkflowOutput
+>({
+  name: MaterializeSandboxProfileVersionSnapshotWorkflowName,
+  version: MaterializeSandboxProfileVersionSnapshotWorkflowVersion,
 });
 
 export type ResumeSandboxInstanceWorkflowInput = {

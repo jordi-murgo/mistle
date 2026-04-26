@@ -2362,6 +2362,10 @@ mod tests {
 
     fn sample_runtime_plan() -> CompiledRuntimePlan {
         CompiledRuntimePlan {
+            image: crate::runtime::CompiledRuntimePlanImage {
+                source: crate::runtime::CompiledRuntimePlanImageSource::Base,
+                image_ref: "registry.example.test/base:latest".to_string(),
+            },
             setup_script: None,
             egress_routes: vec![CompiledEgressRoute {
                 egress_rule_id: "egress-rule-1".to_string(),
@@ -2403,6 +2407,7 @@ mod tests {
     fn sample_startup_input() -> StartupInput {
         StartupInput {
             startup_mode: StartupMode::New,
+            execution_mode: crate::protocol::startup::StartupExecutionMode::Session,
             bootstrap_token: "bootstrap-token".to_string(),
             tunnel_exchange_token: "exchange-token".to_string(),
             tunnel_gateway_ws_url: "ws://127.0.0.1:4500/tunnel/sandbox/sandbox-123".to_string(),

@@ -42,6 +42,10 @@ export type StartSandboxProfileInstanceInput =
   paths["/internal/sandbox-runtime/start-profile-instance"]["post"]["requestBody"]["content"]["application/json"];
 export type StartSandboxProfileInstanceOutput =
   paths["/internal/sandbox-runtime/start-profile-instance"]["post"]["responses"]["200"]["content"]["application/json"];
+export type CompileSandboxProfileVersionRuntimePlanInput =
+  paths["/internal/sandbox-runtime/compile-plan"]["post"]["requestBody"]["content"]["application/json"];
+export type CompileSandboxProfileVersionRuntimePlanOutput =
+  paths["/internal/sandbox-runtime/compile-plan"]["post"]["responses"]["200"]["content"]["application/json"];
 export type GetSandboxInstanceInput =
   paths["/internal/sandbox-runtime/get-sandbox-instance"]["post"]["requestBody"]["content"]["application/json"];
 export type GetSandboxInstanceOutput =
@@ -75,6 +79,27 @@ export type RequestIntegrationConnectionResourceRefreshInput =
   paths["/internal/integration-connections/refresh-resource"]["post"]["requestBody"]["content"]["application/json"];
 export type RequestIntegrationConnectionResourceRefreshOutput =
   paths["/internal/integration-connections/refresh-resource"]["post"]["responses"]["202"]["content"]["application/json"];
+export type ClaimSandboxProfileVersionSnapshotJobInput = {
+  snapshotJobId: string;
+  workflowRunId: paths["/internal/snapshot-jobs/{jobId}/claim"]["post"]["requestBody"]["content"]["application/json"]["workflowRunId"];
+};
+export type ClaimSandboxProfileVersionSnapshotJobOutput =
+  paths["/internal/snapshot-jobs/{jobId}/claim"]["post"]["responses"]["200"]["content"]["application/json"];
+export type MarkSandboxProfileVersionSnapshotJobSucceededInput = {
+  snapshotJobId: string;
+  workflowRunId: paths["/internal/snapshot-jobs/{jobId}/succeed"]["post"]["requestBody"]["content"]["application/json"]["workflowRunId"];
+  image: paths["/internal/snapshot-jobs/{jobId}/succeed"]["post"]["requestBody"]["content"]["application/json"]["image"];
+};
+export type MarkSandboxProfileVersionSnapshotJobSucceededOutput =
+  paths["/internal/snapshot-jobs/{jobId}/succeed"]["post"]["responses"]["200"]["content"]["application/json"];
+export type MarkSandboxProfileVersionSnapshotJobFailedInput = {
+  snapshotJobId: string;
+  workflowRunId: paths["/internal/snapshot-jobs/{jobId}/fail"]["post"]["requestBody"]["content"]["application/json"]["workflowRunId"];
+  errorCode: paths["/internal/snapshot-jobs/{jobId}/fail"]["post"]["requestBody"]["content"]["application/json"]["errorCode"];
+  errorMessage: paths["/internal/snapshot-jobs/{jobId}/fail"]["post"]["requestBody"]["content"]["application/json"]["errorMessage"];
+};
+export type MarkSandboxProfileVersionSnapshotJobFailedOutput =
+  paths["/internal/snapshot-jobs/{jobId}/fail"]["post"]["responses"]["200"]["content"]["application/json"];
 
 function extractErrorMessage(input: unknown): string {
   const parsedError = InternalErrorSchema.safeParse(input);
@@ -217,6 +242,25 @@ export class ControlPlaneInternalClient {
     throw new Error(
       `Control-plane internal sandbox start failed with status ${String(result.response.status)}: ${extractErrorMessage(result.error)}`,
     );
+  }
+
+  async compileSandboxProfileVersionRuntimePlan(
+    input: CompileSandboxProfileVersionRuntimePlanInput,
+  ): Promise<CompileSandboxProfileVersionRuntimePlanOutput> {
+    const result = await this.#client.POST("/internal/sandbox-runtime/compile-plan", {
+      body: input,
+      signal: AbortSignal.timeout(this.#requestTimeoutMs),
+    });
+
+    if (result.response.status === 200 && result.data !== undefined) {
+      return result.data;
+    }
+
+    throw new ControlPlaneInternalClientRequestError({
+      status: result.response.status,
+      code: extractErrorCode(result.error),
+      message: `Control-plane internal runtime plan compile failed with status ${String(result.response.status)}: ${extractErrorMessage(result.error)}`,
+    });
   }
 
   async mintSandboxConnectionToken(
@@ -387,5 +431,86 @@ export class ControlPlaneInternalClient {
     throw new Error(
       `Control-plane internal resource refresh failed with status ${String(result.response.status)}: ${extractErrorMessage(result.error)}`,
     );
+  }
+
+  async claimSandboxProfileVersionSnapshotJob(
+    input: ClaimSandboxProfileVersionSnapshotJobInput,
+  ): Promise<ClaimSandboxProfileVersionSnapshotJobOutput> {
+    const result = await this.#client.POST("/internal/snapshot-jobs/{jobId}/claim", {
+      params: {
+        path: {
+          jobId: input.snapshotJobId,
+        },
+      },
+      body: {
+        workflowRunId: input.workflowRunId,
+      },
+      signal: AbortSignal.timeout(this.#requestTimeoutMs),
+    });
+
+    if (result.response.status === 200 && result.data !== undefined) {
+      return result.data;
+    }
+
+    throw new ControlPlaneInternalClientRequestError({
+      status: result.response.status,
+      code: extractErrorCode(result.error),
+      message: `Control-plane internal snapshot job claim failed with status ${String(result.response.status)}: ${extractErrorMessage(result.error)}`,
+    });
+  }
+
+  async markSandboxProfileVersionSnapshotJobSucceeded(
+    input: MarkSandboxProfileVersionSnapshotJobSucceededInput,
+  ): Promise<MarkSandboxProfileVersionSnapshotJobSucceededOutput> {
+    const result = await this.#client.POST("/internal/snapshot-jobs/{jobId}/succeed", {
+      params: {
+        path: {
+          jobId: input.snapshotJobId,
+        },
+      },
+      body: {
+        workflowRunId: input.workflowRunId,
+        image: input.image,
+      },
+      signal: AbortSignal.timeout(this.#requestTimeoutMs),
+    });
+
+    if (result.response.status === 200 && result.data !== undefined) {
+      return result.data;
+    }
+
+    throw new ControlPlaneInternalClientRequestError({
+      status: result.response.status,
+      code: extractErrorCode(result.error),
+      message: `Control-plane internal snapshot job success update failed with status ${String(result.response.status)}: ${extractErrorMessage(result.error)}`,
+    });
+  }
+
+  async markSandboxProfileVersionSnapshotJobFailed(
+    input: MarkSandboxProfileVersionSnapshotJobFailedInput,
+  ): Promise<MarkSandboxProfileVersionSnapshotJobFailedOutput> {
+    const result = await this.#client.POST("/internal/snapshot-jobs/{jobId}/fail", {
+      params: {
+        path: {
+          jobId: input.snapshotJobId,
+        },
+      },
+      body: {
+        workflowRunId: input.workflowRunId,
+        errorCode: input.errorCode,
+        errorMessage: input.errorMessage,
+      },
+      signal: AbortSignal.timeout(this.#requestTimeoutMs),
+    });
+
+    if (result.response.status === 200 && result.data !== undefined) {
+      return result.data;
+    }
+
+    throw new ControlPlaneInternalClientRequestError({
+      status: result.response.status,
+      code: extractErrorCode(result.error),
+      message: `Control-plane internal snapshot job failure update failed with status ${String(result.response.status)}: ${extractErrorMessage(result.error)}`,
+    });
   }
 }

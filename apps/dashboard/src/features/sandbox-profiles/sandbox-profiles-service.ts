@@ -272,8 +272,22 @@ export async function deleteSandboxProfile(input: {
 const SandboxProfileVersionSchema = z
   .object({
     isActive: z.boolean(),
+    latestSnapshotJob: z
+      .object({
+        id: z.string().min(1),
+        trigger: z.enum(["publish", "manual_refresh", "scheduled_refresh"]),
+        state: z.enum(["queued", "running", "succeeded", "failed"]),
+        errorCode: z.string().min(1).nullable(),
+        errorMessage: z.string().min(1).nullable(),
+        createdAt: z.string().min(1),
+        startedAt: z.string().min(1).nullable(),
+        finishedAt: z.string().min(1).nullable(),
+      })
+      .strict()
+      .nullable(),
     sandboxProfileId: z.string().min(1),
     state: z.enum(["draft", "published"]),
+    usable: z.boolean(),
     version: z.number().int().min(1),
   })
   .strict();
@@ -309,7 +323,19 @@ const SandboxProfileVersionPublishabilitySchema = z
 
 const PublishSandboxProfileVersionResultSchema = z
   .object({
-    activeVersion: z.number().int().min(1),
+    activeVersion: z.number().int().min(1).nullable(),
+    snapshotJob: z
+      .object({
+        id: z.string().min(1),
+        trigger: z.enum(["publish", "manual_refresh", "scheduled_refresh"]),
+        state: z.enum(["queued", "running", "succeeded", "failed"]),
+        errorCode: z.string().min(1).nullable(),
+        errorMessage: z.string().min(1).nullable(),
+        createdAt: z.string().min(1),
+        startedAt: z.string().min(1).nullable(),
+        finishedAt: z.string().min(1).nullable(),
+      })
+      .strict(),
     version: SandboxProfileVersionSchema,
   })
   .strict();

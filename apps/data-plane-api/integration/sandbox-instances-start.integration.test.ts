@@ -35,6 +35,15 @@ const WorkflowRunInputSchema = z
       SandboxInstancePersistenceModes.EPHEMERAL,
       SandboxInstancePersistenceModes.PERSISTENT,
     ]),
+    image: z
+      .object({
+        imageId: z.string().min(1),
+        createdAt: z.string().min(1).optional(),
+        kind: z.enum(["base", "snapshot"]),
+        provider: z.enum(["docker", "e2b"]).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .loose();
 
@@ -139,6 +148,7 @@ describe("sandboxInstances.start integration", () => {
       image: {
         imageId: "im_dp_api_integration_001",
         createdAt: "2026-02-27T00:00:00.000Z",
+        kind: "base",
       },
     };
 
@@ -187,6 +197,74 @@ describe("sandboxInstances.start integration", () => {
     expect(parsedWorkflowInput.persistenceMode).toBe(SandboxInstancePersistenceModes.EPHEMERAL);
   }, 60_000);
 
+  it("queues snapshot launches with the stored snapshot provider", async ({ fixture }) => {
+    const client = createSandboxInstancesClient(fixture.baseUrl, fixture.internalAuthServiceToken);
+    const sandboxProfileId = "sbp_dp_api_snapshot_launch";
+    const workflowInput: StartSandboxInstanceInput = {
+      organizationId: "org_dp_api_snapshot_launch",
+      sandboxProfileId,
+      sandboxProfileVersion: 9,
+      runtimePlan: {
+        ...createRuntimePlan({
+          sandboxProfileId,
+          version: 9,
+        }),
+        image: {
+          source: "snapshot",
+          imageRef: "snap_dp_api_snapshot_launch",
+        },
+      },
+      startedBy: {
+        kind: "user",
+        id: "usr_dp_api_snapshot_launch",
+      },
+      source: "dashboard",
+      image: {
+        imageId: "snap_dp_api_snapshot_launch",
+        createdAt: "2026-02-27T00:00:00.000Z",
+        kind: "snapshot",
+        provider: "docker",
+      },
+    };
+
+    const startedSandbox = await client.startSandboxInstance(workflowInput);
+
+    const workflowRuns = await waitForWorkflowRuns({
+      runQuery: async (organizationId, profileId) => {
+        const result = await fixture.dbPool.query<WorkflowRunRow>(
+          `
+            select id, namespace_id, workflow_name, status, input, output
+            from data_plane_openworkflow.workflow_runs
+            where
+              namespace_id = $1
+              and workflow_name = $2
+              and input->>'organizationId' = $3
+              and input->>'sandboxProfileId' = $4
+            order by created_at asc
+          `,
+          [fixture.config.workflow.namespaceId, WorkflowName, organizationId, profileId],
+        );
+        return result.rows;
+      },
+      organizationId: workflowInput.organizationId,
+      sandboxProfileId: workflowInput.sandboxProfileId,
+    });
+
+    const queuedRun = workflowRuns[0];
+    if (queuedRun === undefined) {
+      throw new Error("Expected queued workflow run row to exist.");
+    }
+
+    const parsedWorkflowInput = WorkflowRunInputSchema.parse(queuedRun.input);
+    expect(parsedWorkflowInput.sandboxInstanceId).toBe(startedSandbox.sandboxInstanceId);
+    expect(parsedWorkflowInput.image).toEqual({
+      imageId: "snap_dp_api_snapshot_launch",
+      createdAt: "2026-02-27T00:00:00.000Z",
+      kind: "snapshot",
+      provider: "docker",
+    });
+  }, 60_000);
+
   it("deduplicates duplicate start requests by idempotency key", async ({ fixture }) => {
     const client = createSandboxInstancesClient(fixture.baseUrl, fixture.internalAuthServiceToken);
     const sandboxProfileId = "sbp_dp_api_integration_idempotent";
@@ -207,6 +285,7 @@ describe("sandboxInstances.start integration", () => {
       image: {
         imageId: "im_dp_api_integration_idempotent",
         createdAt: "2026-02-27T00:00:00.000Z",
+        kind: "base",
       },
     };
 
@@ -261,6 +340,7 @@ describe("sandboxInstances.start integration", () => {
       image: {
         imageId: "im_dp_api_sync_insert",
         createdAt: "2026-02-27T00:00:00.000Z",
+        kind: "base",
       },
     };
 
@@ -330,6 +410,7 @@ describe("sandboxInstances.start integration", () => {
       image: {
         imageId: "im_dp_api_persistent_mode",
         createdAt: "2026-02-27T00:00:00.000Z",
+        kind: "base",
       },
     };
 
@@ -440,6 +521,7 @@ describe("sandboxInstances.start integration", () => {
         image: {
           imageId: "im_dp_api_e2b_archil_persistent_mode",
           createdAt: "2026-02-27T00:00:00.000Z",
+          kind: "base",
         },
       };
 
@@ -553,6 +635,7 @@ describe("sandboxInstances.start integration", () => {
         image: {
           imageId: "im_dp_api_persistent_without_backend",
           createdAt: "2026-02-27T00:00:00.000Z",
+          kind: "base",
         },
       };
 

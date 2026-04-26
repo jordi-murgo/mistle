@@ -6,6 +6,10 @@
       "type": "string",
       "enum": ["new", "existing"]
     },
+    "executionMode": {
+      "type": "string",
+      "enum": ["session", "snapshot"]
+    },
     "bootstrapToken": {
       "type": "string",
       "minLength": 1
@@ -37,23 +41,14 @@
               "properties": {
                 "source": {
                   "type": "string",
-                  "const": "profile-base"
+                  "const": "base"
                 },
                 "imageRef": {
                   "type": "string",
                   "minLength": 1
-                },
-                "sandboxProfileId": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "version": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 9007199254740991
                 }
               },
-              "required": ["source", "imageRef", "sandboxProfileId", "version"],
+              "required": ["source", "imageRef"],
               "additionalProperties": false
             },
             {
@@ -61,7 +56,7 @@
               "properties": {
                 "source": {
                   "type": "string",
-                  "const": "base"
+                  "const": "snapshot"
                 },
                 "imageRef": {
                   "type": "string",

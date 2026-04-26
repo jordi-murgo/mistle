@@ -46,8 +46,20 @@ export type SandboxProfileVersion = ListSandboxProfileVersionsResponse["versions
 export type SandboxProfileVersionPublishability =
   paths["/v1/sandbox/profiles/{profileId}/versions/{version}/publishability"]["get"]["responses"][200]["content"]["application/json"];
 
-export type PublishSandboxProfileVersionResult =
-  paths["/v1/sandbox/profiles/{profileId}/versions/{version}/publish"]["post"]["responses"][200]["content"]["application/json"];
+export type PublishSandboxProfileVersionResult = {
+  activeVersion: number | null;
+  snapshotJob: {
+    id: string;
+    trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+    state: "queued" | "running" | "succeeded" | "failed";
+    errorCode: string | null;
+    errorMessage: string | null;
+    createdAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+  };
+  version: SandboxProfileVersion;
+};
 
 export type SandboxProfileVersionIntegrationBinding =
   SandboxProfileVersionIntegrationBindingsResponse["bindings"][number];

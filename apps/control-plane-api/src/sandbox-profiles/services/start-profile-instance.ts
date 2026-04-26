@@ -1,11 +1,26 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  sandboxProfiles,
+  sandboxProfileVersions,
+  SandboxProfileVersionStates,
+  type SandboxProfileVersionState,
+} from "@mistle/db/control-plane";
 import type { SandboxInstanceSource, SandboxInstanceStarterKind } from "@mistle/db/data-plane";
-import { type CompiledRuntimePlan } from "@mistle/integrations-core";
+import { type CompiledRuntimePlan, type ResolvedSandboxImage } from "@mistle/integrations-core";
+import { SandboxProvider } from "@mistle/sandbox";
+import type { StartSandboxInstanceWorkflowImageInput } from "@mistle/workflow-registry/data-plane";
+import { and, eq } from "drizzle-orm";
 
 import { compileProfileVersionRuntimePlan } from "../compile-profile-version-runtime-plan.js";
 import { SandboxProfilesCompileError, SandboxProfilesCompileErrorCodes } from "../errors.js";
 import { SandboxProfilesBadRequestCodes, SandboxProfilesBadRequestError } from "../errors.js";
+import {
+  SandboxProfilesConflictCodes,
+  SandboxProfilesConflictError,
+  SandboxProfilesNotFoundCodes,
+  SandboxProfilesNotFoundError,
+} from "../errors.js";
 import { listProfileVersionRepositoryOptions } from "./repository-options.js";
 import {
   resolveActingUserGitIdentity,
@@ -25,10 +40,6 @@ type StartProfileInstanceInput = {
   };
   actingUser?: SandboxActingUser;
   source: SandboxInstanceSource;
-  image: {
-    imageId: string;
-    createdAt: string;
-  };
 };
 
 type StartProfileInstanceOutput = {
@@ -36,6 +47,27 @@ type StartProfileInstanceOutput = {
   workflowRunId: string;
   sandboxInstanceId: string;
 };
+
+type ResolvedLaunchImage = {
+  versionState: SandboxProfileVersionState;
+  compileImage: ResolvedSandboxImage;
+  workflowImage: StartSandboxInstanceWorkflowImageInput;
+};
+
+const LaunchImageKinds = {
+  BASE: "base",
+  SNAPSHOT: "snapshot",
+} as const;
+
+function assertSnapshotImageProvider(
+  provider: string,
+): NonNullable<StartSandboxInstanceWorkflowImageInput["provider"]> {
+  if (provider === SandboxProvider.DOCKER || provider === SandboxProvider.E2B) {
+    return provider;
+  }
+
+  throw new Error(`Unsupported persisted snapshot image provider '${provider}'.`);
+}
 
 async function resolveEffectiveRuntimePlan(
   { db }: Pick<CreateSandboxProfilesServiceInput, "db">,
@@ -89,15 +121,115 @@ async function resolveEffectiveRuntimePlan(
   };
 }
 
+async function resolveLaunchImage(
+  {
+    db,
+    defaultBaseImage,
+  }: Pick<CreateSandboxProfilesServiceInput, "db"> & { defaultBaseImage: string },
+  input: {
+    organizationId: string;
+    profileId: string;
+    profileVersion: number;
+  },
+): Promise<ResolvedLaunchImage> {
+  const [sandboxProfileVersion] = await db
+    .select({
+      profileId: sandboxProfiles.id,
+      state: sandboxProfileVersions.state,
+      snapshotImageProvider: sandboxProfileVersions.snapshotImageProvider,
+      snapshotImageId: sandboxProfileVersions.snapshotImageId,
+    })
+    .from(sandboxProfiles)
+    .leftJoin(
+      sandboxProfileVersions,
+      and(
+        eq(sandboxProfileVersions.sandboxProfileId, sandboxProfiles.id),
+        eq(sandboxProfileVersions.version, input.profileVersion),
+      ),
+    )
+    .where(
+      and(
+        eq(sandboxProfiles.id, input.profileId),
+        eq(sandboxProfiles.organizationId, input.organizationId),
+      ),
+    );
+
+  if (sandboxProfileVersion === undefined) {
+    throw new SandboxProfilesNotFoundError(
+      SandboxProfilesNotFoundCodes.PROFILE_NOT_FOUND,
+      "Sandbox profile was not found.",
+    );
+  }
+
+  if (sandboxProfileVersion.state === null) {
+    throw new SandboxProfilesNotFoundError(
+      SandboxProfilesNotFoundCodes.PROFILE_VERSION_NOT_FOUND,
+      "Sandbox profile version was not found.",
+    );
+  }
+
+  if (sandboxProfileVersion.state === SandboxProfileVersionStates.PUBLISHED) {
+    if (
+      sandboxProfileVersion.snapshotImageProvider === null ||
+      sandboxProfileVersion.snapshotImageId === null
+    ) {
+      throw new SandboxProfilesConflictError(
+        SandboxProfilesConflictCodes.PROFILE_VERSION_NOT_USABLE,
+        `Sandbox profile version '${String(input.profileVersion)}' is published but not yet usable.`,
+      );
+    }
+
+    return {
+      versionState: sandboxProfileVersion.state,
+      compileImage: {
+        source: "snapshot",
+        imageRef: sandboxProfileVersion.snapshotImageId,
+      },
+      workflowImage: {
+        imageId: sandboxProfileVersion.snapshotImageId,
+        kind: LaunchImageKinds.SNAPSHOT,
+        provider: assertSnapshotImageProvider(sandboxProfileVersion.snapshotImageProvider),
+      },
+    };
+  }
+
+  return {
+    versionState: sandboxProfileVersion.state,
+    compileImage: {
+      source: "base",
+      imageRef: defaultBaseImage,
+    },
+    workflowImage: {
+      imageId: defaultBaseImage,
+      createdAt: new Date().toISOString(),
+      kind: LaunchImageKinds.BASE,
+    },
+  };
+}
+
 export async function startProfileInstance(
   {
     db,
     integrationsConfig,
     dataPlaneClient,
-  }: Pick<CreateSandboxProfilesServiceInput, "db" | "integrationsConfig" | "dataPlaneClient">,
+    defaultBaseImage,
+  }: Pick<CreateSandboxProfilesServiceInput, "db" | "integrationsConfig" | "dataPlaneClient"> & {
+    defaultBaseImage: string;
+  },
   serviceInput: StartProfileInstanceInput,
 ): Promise<StartProfileInstanceOutput> {
   const idempotencyKey = serviceInput.idempotencyKey ?? randomUUID();
+  const launchImage = await resolveLaunchImage(
+    {
+      db,
+      defaultBaseImage,
+    },
+    {
+      organizationId: serviceInput.organizationId,
+      profileId: serviceInput.profileId,
+      profileVersion: serviceInput.profileVersion,
+    },
+  );
   const compiledRuntimePlan = await compileProfileVersionRuntimePlan(
     {
       db,
@@ -107,10 +239,7 @@ export async function startProfileInstance(
       organizationId: serviceInput.organizationId,
       profileId: serviceInput.profileId,
       profileVersion: serviceInput.profileVersion,
-      image: {
-        source: "base",
-        imageRef: serviceInput.image.imageId,
-      },
+      image: launchImage.compileImage,
     },
   );
   if (compiledRuntimePlan.agentRuntimes.length === 0) {
@@ -150,7 +279,7 @@ export async function startProfileInstance(
       : { actingUserId: serviceInput.actingUser.userId }),
     ...(gitIdentity === undefined ? {} : { gitIdentity }),
     source: serviceInput.source,
-    image: serviceInput.image,
+    image: launchImage.workflowImage,
   });
 
   return {

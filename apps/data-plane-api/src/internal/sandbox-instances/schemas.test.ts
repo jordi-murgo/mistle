@@ -126,6 +126,7 @@ describe("StartSandboxInstanceInputSchema", () => {
       image: {
         imageId: "img_123",
         createdAt: "2026-03-10T00:00:00.000Z",
+        kind: "base",
       },
     };
 
@@ -146,6 +147,28 @@ describe("StartSandboxInstanceInputSchema", () => {
       image: {
         imageId: "img_123",
         createdAt: "2026-03-10T00:00:00.000Z",
+        kind: "base",
+      },
+    };
+
+    expect(StartSandboxInstanceInputSchema.parse(input)).toEqual(input);
+  });
+
+  it("accepts system-origin start requests", () => {
+    const input = {
+      organizationId: "org_123",
+      sandboxProfileId: "sbp_123",
+      sandboxProfileVersion: 1,
+      runtimePlan: createRuntimePlan(),
+      startedBy: {
+        kind: "system",
+        id: "job_123",
+      },
+      source: "system",
+      image: {
+        imageId: "img_123",
+        createdAt: "2026-03-10T00:00:00.000Z",
+        kind: "base",
       },
     };
 

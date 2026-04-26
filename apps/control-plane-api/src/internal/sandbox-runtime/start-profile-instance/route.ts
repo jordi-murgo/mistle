@@ -57,6 +57,14 @@ export const route = createRoute({
         },
       },
     },
+    409: {
+      description: "Referenced sandbox profile version cannot be launched in its current state.",
+      content: {
+        "application/json": {
+          schema: InternalSandboxRuntimeErrorResponseSchema,
+        },
+      },
+    },
     500: {
       description: "Internal server error.",
       content: {

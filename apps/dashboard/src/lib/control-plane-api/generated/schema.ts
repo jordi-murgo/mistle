@@ -6980,9 +6980,22 @@ export interface paths {
             "application/json": {
               versions: {
                 isActive: boolean;
+                latestSnapshotJob: {
+                  createdAt: string;
+                  errorCode: string | null;
+                  errorMessage: string | null;
+                  finishedAt: string | null;
+                  id: string;
+                  startedAt: string | null;
+                  /** @enum {string} */
+                  state: "queued" | "running" | "succeeded" | "failed";
+                  /** @enum {string} */
+                  trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+                } | null;
                 sandboxProfileId: string;
                 /** @enum {string} */
                 state: "draft" | "published";
+                usable: boolean;
                 version: number;
               }[];
             };
@@ -7071,9 +7084,22 @@ export interface paths {
           content: {
             "application/json": {
               isActive: boolean;
+              latestSnapshotJob: {
+                createdAt: string;
+                errorCode: string | null;
+                errorMessage: string | null;
+                finishedAt: string | null;
+                id: string;
+                startedAt: string | null;
+                /** @enum {string} */
+                state: "queued" | "running" | "succeeded" | "failed";
+                /** @enum {string} */
+                trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+              } | null;
               sandboxProfileId: string;
               /** @enum {string} */
               state: "draft" | "published";
+              usable: boolean;
               version: number;
             };
           };
@@ -7515,6 +7541,19 @@ export interface paths {
             };
           };
         };
+        /** @description Sandbox profile version cannot be launched in its current state. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "PROFILE_VERSION_NOT_USABLE";
+              message: string;
+            };
+          };
+        };
         /** @description Internal server error. */
         500: {
           headers: {
@@ -7810,19 +7849,44 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description Publish the specified sandbox profile draft version and make it active. */
+        /** @description Publish the specified sandbox profile draft version and queue snapshot materialization. */
         200: {
           headers: {
             [name: string]: unknown;
           };
           content: {
             "application/json": {
-              activeVersion: number;
+              activeVersion: number | null;
+              snapshotJob: {
+                createdAt: string;
+                errorCode: string | null;
+                errorMessage: string | null;
+                finishedAt: string | null;
+                id: string;
+                startedAt: string | null;
+                /** @enum {string} */
+                state: "queued" | "running" | "succeeded" | "failed";
+                /** @enum {string} */
+                trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+              };
               version: {
                 isActive: boolean;
+                latestSnapshotJob: {
+                  createdAt: string;
+                  errorCode: string | null;
+                  errorMessage: string | null;
+                  finishedAt: string | null;
+                  id: string;
+                  startedAt: string | null;
+                  /** @enum {string} */
+                  state: "queued" | "running" | "succeeded" | "failed";
+                  /** @enum {string} */
+                  trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+                } | null;
                 sandboxProfileId: string;
                 /** @enum {string} */
                 state: "draft" | "published";
+                usable: boolean;
                 version: number;
               };
             };
@@ -8018,6 +8082,152 @@ export interface paths {
     };
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/sandbox/profiles/{profileId}/versions/{version}/refresh": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          profileId: string;
+          version: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Queue manual snapshot refresh for the specified usable sandbox profile version. */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              activeVersion: number | null;
+              snapshotJob: {
+                createdAt: string;
+                errorCode: string | null;
+                errorMessage: string | null;
+                finishedAt: string | null;
+                id: string;
+                startedAt: string | null;
+                /** @enum {string} */
+                state: "queued" | "running" | "succeeded" | "failed";
+                /** @enum {string} */
+                trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+              };
+              version: {
+                isActive: boolean;
+                latestSnapshotJob: {
+                  createdAt: string;
+                  errorCode: string | null;
+                  errorMessage: string | null;
+                  finishedAt: string | null;
+                  id: string;
+                  startedAt: string | null;
+                  /** @enum {string} */
+                  state: "queued" | "running" | "succeeded" | "failed";
+                  /** @enum {string} */
+                  trigger: "publish" | "manual_refresh" | "scheduled_refresh";
+                } | null;
+                sandboxProfileId: string;
+                /** @enum {string} */
+                state: "draft" | "published";
+                usable: boolean;
+                version: number;
+              };
+            };
+          };
+        };
+        /** @description Invalid request. */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "VALIDATION_ERROR";
+              message: string;
+            };
+          };
+        };
+        /** @description Authentication is required. */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Active organization is required. */
+        403: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "FORBIDDEN";
+              message: string;
+            };
+          };
+        };
+        /** @description Sandbox profile or version was not found. */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "PROFILE_NOT_FOUND" | "PROFILE_VERSION_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Sandbox profile version cannot be refreshed. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "PROFILE_VERSION_NOT_USABLE" | "PROFILE_VERSION_SNAPSHOT_IN_PROGRESS";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal server error. */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "text/plain": string;
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;

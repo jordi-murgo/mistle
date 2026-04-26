@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  SandboxExecutionModes,
   SandboxStartupModes,
   createSandboxTunnelGatewayWsUrl,
   encodeSandboxStartupInput,
@@ -13,18 +14,10 @@ const Decoder = new TextDecoder();
 const RuntimePlanSchema = z.object({
   sandboxProfileId: z.string().min(1),
   version: z.number().int(),
-  image: z.discriminatedUnion("source", [
-    z.object({
-      source: z.literal("profile-base"),
-      imageRef: z.string().min(1),
-      sandboxProfileId: z.string().min(1),
-      version: z.number().int(),
-    }),
-    z.object({
-      source: z.literal("base"),
-      imageRef: z.string().min(1),
-    }),
-  ]),
+  image: z.object({
+    source: z.literal("base"),
+    imageRef: z.string().min(1),
+  }),
   setupScript: z.string().min(1).optional(),
   egressRoutes: z.array(
     z.object({
@@ -251,6 +244,7 @@ const RuntimePlanSchema = z.object({
 
 const SandboxStartupInputSchema = z.object({
   startupMode: z.enum([SandboxStartupModes.NEW, SandboxStartupModes.EXISTING]),
+  executionMode: z.enum([SandboxExecutionModes.SESSION, SandboxExecutionModes.SNAPSHOT]).optional(),
   bootstrapToken: z.string().min(1),
   tunnelExchangeToken: z.string().min(1),
   tunnelGatewayWsUrl: z.string().min(1),
@@ -382,6 +376,21 @@ describe("encodeSandboxStartupInput", () => {
       name: "Mistle User",
       email: "mistle-user@example.com",
     });
+  });
+
+  it("encodes optional snapshot execution mode when present", () => {
+    const encoded = encodeSandboxStartupInput({
+      startupMode: SandboxStartupModes.NEW,
+      executionMode: SandboxExecutionModes.SNAPSHOT,
+      bootstrapToken: "bootstrap-token-value",
+      tunnelExchangeToken: "tunnel-exchange-token-value",
+      tunnelGatewayWsUrl: "ws://127.0.0.1:5003/tunnel/sandbox",
+      runtimePlan: createRuntimePlan(),
+      egressGrantByRuleId: {},
+    });
+
+    const decoded = SandboxStartupInputSchema.parse(JSON.parse(Decoder.decode(encoded).trimEnd()));
+    expect(decoded.executionMode).toBe(SandboxExecutionModes.SNAPSHOT);
   });
 
   it("encodes optional git signing config when present", () => {

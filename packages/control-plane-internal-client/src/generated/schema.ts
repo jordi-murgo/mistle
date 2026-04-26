@@ -512,6 +512,438 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/internal/sandbox-runtime/compile-plan": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          "application/json": {
+            image: {
+              imageId: string;
+              /** @enum {string} */
+              kind: "base" | "snapshot";
+            };
+            organizationId: string;
+            profileId: string;
+            profileVersion: number;
+          };
+        };
+      };
+      responses: {
+        /** @description Compile a sandbox profile version runtime plan for internal callers. */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              runtimePlan: {
+                agentRuntimes: {
+                  bindingId: string;
+                  clientId: string;
+                  endpointKey: string;
+                  ptyLaunch: {
+                    displayName: string;
+                    newLaunch: {
+                      args: (
+                        | {
+                            /** @enum {string} */
+                            kind: "literal";
+                            value: string;
+                          }
+                        | {
+                            /** @enum {string} */
+                            kind: "threadId";
+                          }
+                      )[];
+                      cols: number;
+                      command: string;
+                      cwd?: string;
+                      ptySessionId: string;
+                      rows: number;
+                    };
+                    resumeLaunch: {
+                      args: (
+                        | {
+                            /** @enum {string} */
+                            kind: "literal";
+                            value: string;
+                          }
+                        | {
+                            /** @enum {string} */
+                            kind: "threadId";
+                          }
+                      )[];
+                      cols: number;
+                      command: string;
+                      cwd?: string;
+                      ptySessionId: string;
+                      rows: number;
+                    };
+                    runtimeId: string;
+                  };
+                  runtimeId: string;
+                  runtimeKey: string;
+                }[];
+                artifacts: {
+                  artifactKey: string;
+                  description?: string;
+                  env?: {
+                    [key: string]: string;
+                  };
+                  lifecycle: {
+                    install: (
+                      | {
+                          asset:
+                            | {
+                                fileName: string;
+                                /** @enum {string} */
+                                format: "binary";
+                                /** @enum {string} */
+                                kind: "exact";
+                              }
+                            | {
+                                extractedPath: string;
+                                fileName: string;
+                                /** @enum {string} */
+                                format: "tar.gz";
+                                /** @enum {string} */
+                                kind: "exact";
+                              }
+                            | {
+                                aarch64:
+                                  | {
+                                      fileName: string;
+                                      /** @enum {string} */
+                                      format: "binary";
+                                    }
+                                  | {
+                                      extractedPath: string;
+                                      fileName: string;
+                                      /** @enum {string} */
+                                      format: "tar.gz";
+                                    };
+                                /** @enum {string} */
+                                kind: "by_arch";
+                                x86_64:
+                                  | {
+                                      fileName: string;
+                                      /** @enum {string} */
+                                      format: "binary";
+                                    }
+                                  | {
+                                      extractedPath: string;
+                                      fileName: string;
+                                      /** @enum {string} */
+                                      format: "tar.gz";
+                                    };
+                              };
+                          installPath: string;
+                          /** @enum {string} */
+                          op: "github_release_install";
+                          release:
+                            | {
+                                /** @enum {string} */
+                                kind: "latest";
+                              }
+                            | {
+                                /** @enum {string} */
+                                kind: "tag";
+                                /** @enum {string} */
+                                match: "exact";
+                                tag: string;
+                              }
+                            | {
+                                /** @enum {string} */
+                                kind: "tag";
+                                /** @enum {string} */
+                                match: "latest_matching_prefix";
+                                prefix: string;
+                              };
+                          repository: string;
+                          timeoutMs?: number;
+                        }
+                      | {
+                          force?: boolean;
+                          /** @enum {string} */
+                          op: "mise_install";
+                          timeoutMs?: number;
+                          tools: string[];
+                        }
+                      | {
+                          command: {
+                            args: string[];
+                            cwd?: string;
+                            env?: {
+                              [key: string]: string;
+                            };
+                            timeoutMs?: number;
+                          };
+                          /** @enum {string} */
+                          op: "exec";
+                        }
+                    )[];
+                  };
+                  name: string;
+                }[];
+                egressRoutes: {
+                  additionalCredentialHeaders?: {
+                    credentialResolver:
+                      | {
+                          connectionId: string;
+                          /** @enum {string} */
+                          kind: "integration_connection";
+                          resolverKey?: string;
+                          secretType: string;
+                          slotKey?: string;
+                        }
+                      | {
+                          actingUserRequired: boolean;
+                          credentialKind?: string;
+                          /** @enum {string} */
+                          kind: "linked_principal";
+                          providerFamily: string;
+                          /** @enum {string} */
+                          resolutionMode: "required" | "preferred";
+                        };
+                    header: string;
+                  }[];
+                  additionalHeaders?: {
+                    [key: string]: string;
+                  };
+                  authInjection:
+                    | {
+                        target: string;
+                        /** @enum {string} */
+                        type: "bearer";
+                      }
+                    | {
+                        target: string;
+                        /** @enum {string} */
+                        type: "basic";
+                        username?: string;
+                      }
+                    | {
+                        target: string;
+                        /** @enum {string} */
+                        type: "header";
+                      }
+                    | {
+                        target: string;
+                        /** @enum {string} */
+                        type: "query";
+                      }
+                    | {
+                        region: string;
+                        service: string;
+                        /** @enum {string} */
+                        type: "aws_sigv4";
+                      };
+                  bindingId: string;
+                  credentialResolver:
+                    | {
+                        connectionId: string;
+                        /** @enum {string} */
+                        kind: "integration_connection";
+                        resolverKey?: string;
+                        secretType: string;
+                        slotKey?: string;
+                      }
+                    | {
+                        actingUserRequired: boolean;
+                        credentialKind?: string;
+                        /** @enum {string} */
+                        kind: "linked_principal";
+                        providerFamily: string;
+                        /** @enum {string} */
+                        resolutionMode: "required" | "preferred";
+                      };
+                  egressRuleId: string;
+                  familyId: string;
+                  match: {
+                    hosts: string[];
+                    methods?: string[];
+                    pathPrefixes?: string[];
+                  };
+                  requestMiddleware?: string[];
+                  upstream: {
+                    baseUrl: string;
+                  };
+                  variantId: string;
+                }[];
+                image:
+                  | {
+                      imageRef: string;
+                      /** @enum {string} */
+                      source: "base";
+                    }
+                  | {
+                      imageRef: string;
+                      /** @enum {string} */
+                      source: "snapshot";
+                    };
+                runtimeClients: {
+                  clientId: string;
+                  endpoints: {
+                    /** @enum {string} */
+                    connectionMode: "dedicated" | "shared";
+                    endpointKey: string;
+                    processKey?: string;
+                    transport: {
+                      /** @enum {string} */
+                      type: "ws";
+                      /** Format: uri */
+                      url: string;
+                    };
+                  }[];
+                  processes: {
+                    command: {
+                      args: string[];
+                      cwd?: string;
+                      env?: {
+                        [key: string]: string;
+                      };
+                      timeoutMs?: number;
+                    };
+                    processKey: string;
+                    readiness:
+                      | {
+                          /** @enum {string} */
+                          type: "none";
+                        }
+                      | {
+                          host: string;
+                          port: number;
+                          timeoutMs: number;
+                          /** @enum {string} */
+                          type: "tcp";
+                        }
+                      | {
+                          expectedStatus: number;
+                          timeoutMs: number;
+                          /** @enum {string} */
+                          type: "http";
+                          /** Format: uri */
+                          url: string;
+                        }
+                      | {
+                          timeoutMs: number;
+                          /** @enum {string} */
+                          type: "ws";
+                          /** Format: uri */
+                          url: string;
+                        };
+                    stop: {
+                      gracePeriodMs?: number;
+                      /** @enum {string} */
+                      signal: "sigterm" | "sigkill";
+                      timeoutMs: number;
+                    };
+                  }[];
+                  setup: {
+                    env: {
+                      [key: string]: string;
+                    };
+                    files: {
+                      content: string;
+                      fileId: string;
+                      mode: number;
+                      path: string;
+                      /** @enum {string} */
+                      writeMode?: "overwrite" | "if-absent";
+                    }[];
+                    launchArgs?: string[];
+                  };
+                }[];
+                sandboxProfileId: string;
+                setupScript?: string;
+                version: number;
+                workspaceSources: {
+                  /** Format: uri */
+                  originUrl: string;
+                  path: string;
+                  /** @enum {string} */
+                  resourceKind: "repository";
+                  /** @enum {string} */
+                  sourceKind: "git-clone";
+                }[];
+              };
+            };
+          };
+        };
+        /** @description Invalid request body or compile-time validation failure. */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json":
+              | {
+                  code: string;
+                  message: string;
+                }
+              | {
+                  /** @enum {string} */
+                  code: "VALIDATION_ERROR";
+                  message: string;
+                };
+          };
+        };
+        /** @description Internal service authentication failed. */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Referenced sandbox profile version was not found. */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              code: string;
+              message: string;
+            };
+          };
+        };
+        /** @description Internal server error. */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "text/plain": string;
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/internal/sandbox-runtime/get-sandbox-instance": {
     parameters: {
       query?: never;
@@ -808,6 +1240,18 @@ export interface paths {
         };
         /** @description Referenced sandbox profile version was not found. */
         404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              code: string;
+              message: string;
+            };
+          };
+        };
+        /** @description Referenced sandbox profile version cannot be launched in its current state. */
+        409: {
           headers: {
             [name: string]: unknown;
           };
@@ -1184,6 +1628,333 @@ export interface paths {
             "application/json": {
               /** @enum {string} */
               code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal server error. */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "text/plain": string;
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/snapshot-jobs/{jobId}/claim": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          jobId: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          "application/json": {
+            workflowRunId: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Claim a queued snapshot job for workflow execution. */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              status: "ok";
+            };
+          };
+        };
+        /** @description Invalid claim request. */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "VALIDATION_ERROR";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal service authentication failed. */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Snapshot job was not found. */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "SNAPSHOT_JOB_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Snapshot job could not be claimed. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "SNAPSHOT_JOB_STATE_CONFLICT" | "SNAPSHOT_JOB_OWNERSHIP_MISMATCH";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal server error. */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "text/plain": string;
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/snapshot-jobs/{jobId}/fail": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          jobId: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          "application/json": {
+            errorCode: string;
+            errorMessage: string;
+            workflowRunId: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Mark a running snapshot job failed. */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              status: "ok";
+            };
+          };
+        };
+        /** @description Invalid failure request. */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "VALIDATION_ERROR";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal service authentication failed. */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Snapshot job was not found. */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "SNAPSHOT_JOB_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Snapshot job could not be marked failed. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "SNAPSHOT_JOB_STATE_CONFLICT" | "SNAPSHOT_JOB_OWNERSHIP_MISMATCH";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal server error. */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "text/plain": string;
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/internal/snapshot-jobs/{jobId}/succeed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          jobId: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          "application/json": {
+            image: {
+              imageId: string;
+              provider: string;
+            };
+            workflowRunId: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Mark a running snapshot job succeeded. */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              status: "ok";
+            };
+          };
+        };
+        /** @description Invalid success request. */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "VALIDATION_ERROR";
+              message: string;
+            };
+          };
+        };
+        /** @description Internal service authentication failed. */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "UNAUTHORIZED";
+              message: string;
+            };
+          };
+        };
+        /** @description Snapshot job was not found. */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "SNAPSHOT_JOB_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Snapshot job could not be marked succeeded. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "SNAPSHOT_JOB_STATE_CONFLICT" | "SNAPSHOT_JOB_OWNERSHIP_MISMATCH";
               message: string;
             };
           };

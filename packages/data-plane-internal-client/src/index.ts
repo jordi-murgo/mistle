@@ -1,6 +1,6 @@
 import type { SandboxInstanceSource, SandboxInstanceStarterKind } from "@mistle/db/data-plane";
 import { CompiledRuntimePlanSchema, type CompiledRuntimePlan } from "@mistle/integrations-core";
-import type { SandboxImageHandle } from "@mistle/sandbox";
+import type { SandboxImageHandle, SandboxProvider } from "@mistle/sandbox";
 import type { Client } from "openapi-fetch";
 import createClient from "openapi-fetch";
 import { z } from "zod";
@@ -47,7 +47,11 @@ export type StartSandboxInstanceInput = {
     };
   };
   source: SandboxInstanceSource;
-  image: Pick<SandboxImageHandle, "imageId" | "createdAt">;
+  image: Pick<SandboxImageHandle, "imageId"> & {
+    createdAt?: SandboxImageHandle["createdAt"];
+    kind: "base" | "snapshot";
+    provider?: SandboxProvider;
+  };
   idempotencyKey?: string;
 };
 export type StartSandboxInstanceAcceptedResponse =
@@ -134,6 +138,10 @@ const PatchSandboxInstanceTitleResponseSchema = z
 export type PatchSandboxInstanceTitleResponse = z.infer<
   typeof PatchSandboxInstanceTitleResponseSchema
 >;
+export type MaterializeSandboxProfileVersionSnapshotJobInput =
+  paths["/internal/sandbox/profile-version-snapshot-jobs/materialize"]["post"]["requestBody"]["content"]["application/json"];
+export type MaterializeSandboxProfileVersionSnapshotJobAcceptedResponse =
+  paths["/internal/sandbox/profile-version-snapshot-jobs/materialize"]["post"]["responses"]["202"]["content"]["application/json"];
 export type GetSandboxInstanceInput = {
   organizationId: string;
   instanceId: string;
@@ -192,6 +200,9 @@ export type DataPlaneSandboxInstancesClient = {
   patchSandboxInstanceTitle: (
     input: PatchSandboxInstanceTitleInput,
   ) => Promise<PatchSandboxInstanceTitleResponse>;
+  materializeSandboxProfileVersionSnapshotJob: (
+    input: MaterializeSandboxProfileVersionSnapshotJobInput,
+  ) => Promise<MaterializeSandboxProfileVersionSnapshotJobAcceptedResponse>;
   getSandboxInstance: (input: GetSandboxInstanceInput) => Promise<GetSandboxInstanceResponse>;
   listSandboxInstances: (input: ListSandboxInstancesInput) => Promise<ListSandboxInstancesResponse>;
 };
@@ -224,6 +235,7 @@ function createClientError(input: {
   error: unknown;
   operation:
     | "start"
+    | "materialize"
     | "resume"
     | "stop"
     | "reconcile"
@@ -235,6 +247,7 @@ function createClientError(input: {
 }): DataPlaneSandboxInstancesClientError {
   const operationLabel = {
     start: "start",
+    materialize: "materialize",
     resume: "resume",
     stop: "stop",
     reconcile: "reconcile",
@@ -341,7 +354,7 @@ export function createDataPlaneSandboxInstancesClient(
       throw createClientError({
         status: response.status,
         error: errorBody,
-        operation: "start",
+        operation: "materialize",
       });
     },
 
@@ -552,6 +565,36 @@ export function createDataPlaneSandboxInstancesClient(
         status: response.status,
         error: errorBody,
         operation: "patch",
+      });
+    },
+
+    async materializeSandboxProfileVersionSnapshotJob(materializeInput) {
+      const response = await fetch(
+        new URL(
+          "/internal/sandbox/profile-version-snapshot-jobs/materialize",
+          internalClient.baseUrl,
+        ),
+        {
+          method: "POST",
+          headers: createAuthedJsonHeaders(internalClient.serviceToken),
+          body: JSON.stringify(materializeInput),
+          signal: AbortSignal.timeout(internalClient.requestTimeoutMs),
+        },
+      );
+
+      if (response.status === 202) {
+        const responseBody: MaterializeSandboxProfileVersionSnapshotJobAcceptedResponse =
+          await response.json();
+
+        return responseBody;
+      }
+
+      const errorBody = await readResponseBody(response);
+
+      throw createClientError({
+        status: response.status,
+        error: errorBody,
+        operation: "start",
       });
     },
 

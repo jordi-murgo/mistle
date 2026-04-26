@@ -14,6 +14,18 @@ export const SandboxdStartupModeSchema = z.enum([
 
 export type SandboxdStartupMode = z.infer<typeof SandboxdStartupModeSchema>;
 
+export const SandboxdExecutionModes = {
+  SESSION: "session",
+  SNAPSHOT: "snapshot",
+} as const;
+
+export const SandboxdExecutionModeSchema = z.enum([
+  SandboxdExecutionModes.SESSION,
+  SandboxdExecutionModes.SNAPSHOT,
+]);
+
+export type SandboxdExecutionMode = z.infer<typeof SandboxdExecutionModeSchema>;
+
 export const SandboxdGitIdentitySchema = z
   .object({
     name: z.string().min(1),
@@ -38,6 +50,7 @@ export type SandboxdGitIdentity = z.infer<typeof SandboxdGitIdentitySchema>;
 export const SandboxdStartupInputSchema = z
   .object({
     startupMode: SandboxdStartupModeSchema,
+    executionMode: SandboxdExecutionModeSchema.optional(),
     bootstrapToken: z.string().min(1),
     tunnelExchangeToken: z.string().min(1),
     tunnelGatewayWsUrl: z.string().min(1),

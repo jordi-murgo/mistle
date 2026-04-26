@@ -1,4 +1,7 @@
-import type { SandboxdStartupInput } from "@mistle/sandbox-runtime-contract";
+import {
+  SandboxdExecutionModes,
+  type SandboxdStartupInput,
+} from "@mistle/sandbox-runtime-contract";
 import type { StartSandboxInstanceWorkflowInput } from "@mistle/workflow-registry/data-plane";
 
 const Encoder = new TextEncoder();
@@ -10,12 +13,21 @@ export const SandboxStartupModes = {
 
 export type SandboxStartupMode = (typeof SandboxStartupModes)[keyof typeof SandboxStartupModes];
 
+export const SandboxExecutionModes = {
+  SESSION: SandboxdExecutionModes.SESSION,
+  SNAPSHOT: SandboxdExecutionModes.SNAPSHOT,
+} as const;
+
+export type SandboxExecutionMode =
+  (typeof SandboxExecutionModes)[keyof typeof SandboxExecutionModes];
+
 function trimTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
 export type SandboxStartupInput = {
   startupMode: SandboxStartupMode;
+  executionMode?: SandboxExecutionMode;
   bootstrapToken: string;
   tunnelExchangeToken: string;
   tunnelGatewayWsUrl: string;

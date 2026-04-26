@@ -2078,20 +2078,18 @@ export type TriggerRule = {
 
 export const SandboxImageSources = {
   BASE: "base",
-  PROFILE_BASE: "profile-base",
+  SNAPSHOT: "snapshot",
 } as const;
 
 export type SandboxImageSource = (typeof SandboxImageSources)[keyof typeof SandboxImageSources];
 
 export type ResolvedSandboxImage =
   | {
-      source: typeof SandboxImageSources.PROFILE_BASE;
+      source: typeof SandboxImageSources.BASE;
       imageRef: string;
-      sandboxProfileId: string;
-      version: number;
     }
   | {
-      source: typeof SandboxImageSources.BASE;
+      source: typeof SandboxImageSources.SNAPSHOT;
       imageRef: string;
     };
 

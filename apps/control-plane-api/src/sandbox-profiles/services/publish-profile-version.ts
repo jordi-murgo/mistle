@@ -1,9 +1,12 @@
 import {
-  sandboxProfiles,
+  sandboxProfileVersionSnapshotJobs,
   sandboxProfileVersions,
+  SandboxProfileVersionSnapshotJobStates,
+  SandboxProfileVersionSnapshotJobTriggers,
   SandboxProfileVersionStates,
 } from "@mistle/db/control-plane";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { typeid } from "typeid-js";
 
 import {
   SandboxProfilesConflictCodes,
@@ -11,6 +14,7 @@ import {
   SandboxProfilesNotFoundCodes,
   SandboxProfilesNotFoundError,
 } from "../errors.js";
+import { enqueueSnapshotMaterializationJob } from "./enqueue-snapshot-materialization-job.js";
 import { getProfileVersionPublishability } from "./get-profile-version-publishability.js";
 import type { CreateSandboxProfilesServiceInput } from "./types.js";
 
@@ -26,18 +30,48 @@ type PublishProfileVersionOutput = {
     version: number;
     state: (typeof SandboxProfileVersionStates)[keyof typeof SandboxProfileVersionStates];
     isActive: boolean;
+    usable: boolean;
+    latestSnapshotJob: {
+      id: string;
+      trigger: (typeof SandboxProfileVersionSnapshotJobTriggers)[keyof typeof SandboxProfileVersionSnapshotJobTriggers];
+      state: (typeof SandboxProfileVersionSnapshotJobStates)[keyof typeof SandboxProfileVersionSnapshotJobStates];
+      errorCode: string | null;
+      errorMessage: string | null;
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+    };
   };
-  activeVersion: number;
+  activeVersion: number | null;
+  snapshotJob: {
+    id: string;
+    trigger: (typeof SandboxProfileVersionSnapshotJobTriggers)[keyof typeof SandboxProfileVersionSnapshotJobTriggers];
+    state: (typeof SandboxProfileVersionSnapshotJobStates)[keyof typeof SandboxProfileVersionSnapshotJobStates];
+    errorCode: string | null;
+    errorMessage: string | null;
+    createdAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+  };
 };
 
 export async function publishProfileVersion(
-  { db }: Pick<CreateSandboxProfilesServiceInput, "db">,
+  {
+    db,
+    dataPlaneClient,
+    defaultBaseImage,
+  }: Pick<CreateSandboxProfilesServiceInput, "db" | "dataPlaneClient"> & {
+    defaultBaseImage: string;
+  },
   input: PublishProfileVersionInput,
 ): Promise<PublishProfileVersionOutput> {
-  return db.transaction(async (tx) => {
+  const sandboxInstanceId = typeid("sbi").toString();
+
+  const publishedResult = await db.transaction(async (tx) => {
     const sandboxProfile = await tx.query.sandboxProfiles.findFirst({
       columns: {
         id: true,
+        activeVersion: true,
       },
       where: (table, { and, eq }) =>
         and(eq(table.id, input.profileId), eq(table.organizationId, input.organizationId)),
@@ -95,9 +129,11 @@ export async function publishProfileVersion(
         publishedAt: sql`now()`,
       })
       .where(
-        sql`${sandboxProfileVersions.sandboxProfileId} = ${input.profileId}
-          and ${sandboxProfileVersions.version} = ${input.profileVersion}
-          and ${sandboxProfileVersions.state} = ${SandboxProfileVersionStates.DRAFT}`,
+        and(
+          eq(sandboxProfileVersions.sandboxProfileId, input.profileId),
+          eq(sandboxProfileVersions.version, input.profileVersion),
+          eq(sandboxProfileVersions.state, SandboxProfileVersionStates.DRAFT),
+        ),
       )
       .returning({
         sandboxProfileId: sandboxProfileVersions.sandboxProfileId,
@@ -112,28 +148,57 @@ export async function publishProfileVersion(
       );
     }
 
-    const [updatedProfile] = await tx
-      .update(sandboxProfiles)
-      .set({
-        activeVersion: input.profileVersion,
+    const [snapshotJob] = await tx
+      .insert(sandboxProfileVersionSnapshotJobs)
+      .values({
+        sandboxProfileId: input.profileId,
+        sandboxProfileVersion: input.profileVersion,
+        trigger: SandboxProfileVersionSnapshotJobTriggers.PUBLISH,
+        state: SandboxProfileVersionSnapshotJobStates.QUEUED,
       })
-      .where(sql`${sandboxProfiles.id} = ${input.profileId}`)
       .returning({
-        activeVersion: sandboxProfiles.activeVersion,
+        id: sandboxProfileVersionSnapshotJobs.id,
+        trigger: sandboxProfileVersionSnapshotJobs.trigger,
+        state: sandboxProfileVersionSnapshotJobs.state,
+        errorCode: sandboxProfileVersionSnapshotJobs.errorCode,
+        errorMessage: sandboxProfileVersionSnapshotJobs.errorMessage,
+        createdAt: sandboxProfileVersionSnapshotJobs.createdAt,
+        startedAt: sandboxProfileVersionSnapshotJobs.startedAt,
+        finishedAt: sandboxProfileVersionSnapshotJobs.finishedAt,
       });
 
-    if (updatedProfile === undefined || updatedProfile.activeVersion === null) {
+    if (snapshotJob === undefined) {
       throw new Error(
-        `Failed to set active version '${String(input.profileVersion)}' for sandbox profile '${input.profileId}'.`,
+        `Failed to create snapshot job for sandbox profile '${input.profileId}' version '${String(input.profileVersion)}'.`,
       );
     }
 
     return {
       version: {
         ...publishedVersion,
-        isActive: true,
+        isActive: false,
+        usable: false,
+        latestSnapshotJob: snapshotJob,
       },
-      activeVersion: updatedProfile.activeVersion,
+      activeVersion: sandboxProfile.activeVersion,
+      snapshotJob,
     };
   });
+
+  await enqueueSnapshotMaterializationJob(
+    {
+      db,
+      dataPlaneClient,
+      defaultBaseImage,
+    },
+    {
+      snapshotJobId: publishedResult.snapshotJob.id,
+      sandboxInstanceId,
+      organizationId: input.organizationId,
+      profileId: input.profileId,
+      profileVersion: input.profileVersion,
+    },
+  );
+
+  return publishedResult;
 }

@@ -2,6 +2,8 @@ import { z } from "@hono/zod-openapi";
 import {
   IntegrationBindingKinds,
   SandboxProfileStatuses,
+  SandboxProfileVersionSnapshotJobStates,
+  SandboxProfileVersionSnapshotJobTriggers,
   SandboxProfileVersionStates,
   sandboxProfileVersionIntegrationBindings,
   sandboxProfileVersions,
@@ -28,6 +30,29 @@ const sandboxProfileVersionStateSchema = z.enum([
   SandboxProfileVersionStates.DRAFT,
   SandboxProfileVersionStates.PUBLISHED,
 ]);
+const sandboxProfileVersionSnapshotJobTriggerSchema = z.enum([
+  SandboxProfileVersionSnapshotJobTriggers.PUBLISH,
+  SandboxProfileVersionSnapshotJobTriggers.MANUAL_REFRESH,
+  SandboxProfileVersionSnapshotJobTriggers.SCHEDULED_REFRESH,
+]);
+const sandboxProfileVersionSnapshotJobStateSchema = z.enum([
+  SandboxProfileVersionSnapshotJobStates.QUEUED,
+  SandboxProfileVersionSnapshotJobStates.RUNNING,
+  SandboxProfileVersionSnapshotJobStates.SUCCEEDED,
+  SandboxProfileVersionSnapshotJobStates.FAILED,
+]);
+const sandboxProfileVersionSnapshotJobSummarySchema = z
+  .object({
+    id: z.string().min(1),
+    trigger: sandboxProfileVersionSnapshotJobTriggerSchema,
+    state: sandboxProfileVersionSnapshotJobStateSchema,
+    errorCode: z.string().min(1).nullable(),
+    errorMessage: z.string().min(1).nullable(),
+    createdAt: z.string().min(1),
+    startedAt: z.string().min(1).nullable(),
+    finishedAt: z.string().min(1).nullable(),
+  })
+  .strict();
 
 export const sandboxProfileSchema = createSelectSchema(sandboxProfiles, {
   activeVersion: z.number().int().min(1).nullable(),
@@ -81,6 +106,8 @@ export const sandboxProfileVersionSchema = createSelectSchema(sandboxProfileVers
   })
   .extend({
     isActive: z.boolean(),
+    usable: z.boolean(),
+    latestSnapshotJob: sandboxProfileVersionSnapshotJobSummarySchema.nullable(),
   })
   .strict();
 
@@ -126,7 +153,19 @@ export const createSandboxProfileVersionResponseSchema = sandboxProfileVersionSc
 export const publishSandboxProfileVersionResponseSchema = z
   .object({
     version: sandboxProfileVersionSchema,
-    activeVersion: z.number().int().min(1),
+    activeVersion: z.number().int().min(1).nullable(),
+    snapshotJob: z
+      .object({
+        id: z.string().min(1),
+        trigger: sandboxProfileVersionSnapshotJobTriggerSchema,
+        state: sandboxProfileVersionSnapshotJobStateSchema,
+        errorCode: z.string().min(1).nullable(),
+        errorMessage: z.string().min(1).nullable(),
+        createdAt: z.string().min(1),
+        startedAt: z.string().min(1).nullable(),
+        finishedAt: z.string().min(1).nullable(),
+      })
+      .strict(),
   })
   .strict();
 
