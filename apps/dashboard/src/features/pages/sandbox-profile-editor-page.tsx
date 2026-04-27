@@ -1,11 +1,4 @@
 import {
-  systemClock,
-  systemScheduler,
-  type Clock,
-  type Scheduler,
-  type TimerHandle,
-} from "@mistle/time";
-import {
   Button,
   ButtonGroup,
   Card,
@@ -28,7 +21,7 @@ import {
 } from "@mistle/ui";
 import { CheckCircleIcon, SpinnerGapIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import { Navigate, Outlet, useNavigate, useOutletContext, useParams } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
@@ -61,7 +54,6 @@ import type {
 } from "../sandbox-profiles/sandbox-profiles-types.js";
 import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
 import { FormPageFrame, PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
-import { useAppShellHeaderActions } from "../shell/app-shell-header-actions.js";
 import type {
   IntegrationConnectionSummary,
   IntegrationTargetSummary,
@@ -1014,72 +1006,67 @@ function ReadySandboxProfileEditorPage(input: {
   }
 
   return (
-    <>
-      <SandboxProfileEditorHeaderActions
-        isSavingDraftChanges={input.mode.kind === "draft" && isSavingDraftChanges}
-      />
-      <SandboxProfileEditorView
-        snapshotPreparationStatus={resolveSnapshotPreparationStatus({
-          mode: input.mode,
-          version: input.currentVersion,
-        })}
-        hasUnsavedIntegrationChanges={integrationDraftState.hasUnsavedChanges}
-        hasUnsavedSetupScriptChanges={setupScriptDraftState.hasUnsavedChanges}
-        isSavingProfileName={metaState.isUpdating}
-        mode={input.mode}
-        deleteProfileAutomationUsages={input.deleteProfileAutomationUsages}
-        deleteProfileAutomationUsagesError={input.deleteProfileAutomationUsagesError}
-        deleteProfileAutomationUsagesIsPending={input.deleteProfileAutomationUsagesIsPending}
-        deleteProfileError={input.deleteProfileError}
-        deleteProfileIsPending={input.deleteProfileIsPending}
-        onMakeChanges={input.onMakeChanges}
-        onConfirmDeleteProfile={input.onConfirmDeleteProfile}
-        onDeleteProfileDialogOpenChange={input.onDeleteProfileDialogOpenChange}
-        onDiscardChangesAndLeaveDraft={input.onDiscardChangesAndLeaveDraft}
-        onPublish={(version) => {
-          void handlePublish(version);
-        }}
-        onRefreshSnapshot={input.onRefreshSnapshot}
-        onSaveProfileName={metaState.onProfileNameSave}
-        onViewActive={input.onViewActive}
-        onViewDraft={input.onViewDraft}
-        profileName={metaState.formState.displayName}
-        profileNameFallback={metaState.pageTitle}
-        publishRequestIsPending={publishRequestIsPending}
-        versionActionError={publishFlushError ?? input.versionActionError}
-        versionActionIsPending={input.versionActionIsPending}
-        isDeleteProfileDialogOpen={input.isDeleteProfileDialogOpen}
-        renderSectionPanel={(sectionId) => {
-          if (sectionId === "configurations") {
-            return (
-              <LoadedSandboxProfileSetupScriptSection
-                disabled={draftFieldsAreDisabled}
-                key={`${input.profileId}:${String(input.mode.version)}`}
-                loader={setupScriptLoader}
-                profileId={input.profileId}
-                invalidateVersionSetupScript={input.invalidateVersionSetupScript}
-                onDraftStateChange={setSetupScriptDraftState}
-                version={input.mode.version}
-              />
-            );
-          }
-
+    <SandboxProfileEditorView
+      snapshotPreparationStatus={resolveSnapshotPreparationStatus({
+        mode: input.mode,
+        version: input.currentVersion,
+      })}
+      hasUnsavedIntegrationChanges={integrationDraftState.hasUnsavedChanges}
+      hasUnsavedSetupScriptChanges={setupScriptDraftState.hasUnsavedChanges}
+      isSavingProfileName={metaState.isUpdating}
+      mode={input.mode}
+      deleteProfileAutomationUsages={input.deleteProfileAutomationUsages}
+      deleteProfileAutomationUsagesError={input.deleteProfileAutomationUsagesError}
+      deleteProfileAutomationUsagesIsPending={input.deleteProfileAutomationUsagesIsPending}
+      deleteProfileError={input.deleteProfileError}
+      deleteProfileIsPending={input.deleteProfileIsPending}
+      onMakeChanges={input.onMakeChanges}
+      onConfirmDeleteProfile={input.onConfirmDeleteProfile}
+      onDeleteProfileDialogOpenChange={input.onDeleteProfileDialogOpenChange}
+      onDiscardChangesAndLeaveDraft={input.onDiscardChangesAndLeaveDraft}
+      onPublish={(version) => {
+        void handlePublish(version);
+      }}
+      onRefreshSnapshot={input.onRefreshSnapshot}
+      onSaveProfileName={metaState.onProfileNameSave}
+      onViewActive={input.onViewActive}
+      onViewDraft={input.onViewDraft}
+      profileName={metaState.formState.displayName}
+      profileNameFallback={metaState.pageTitle}
+      publishRequestIsPending={publishRequestIsPending}
+      versionActionError={publishFlushError ?? input.versionActionError}
+      versionActionIsPending={input.versionActionIsPending}
+      isDeleteProfileDialogOpen={input.isDeleteProfileDialogOpen}
+      renderSectionPanel={(sectionId) => {
+        if (sectionId === "configurations") {
           return (
-            <LoadedSandboxProfileIntegrationSetupSection
-              key={`${input.profileId}:integration-setup`}
-              activeSectionId={sectionId}
-              loader={integrationsLoader}
-              onDraftStateChange={setIntegrationDraftState}
-              profileId={input.profileId}
+            <LoadedSandboxProfileSetupScriptSection
               disabled={draftFieldsAreDisabled}
+              key={`${input.profileId}:${String(input.mode.version)}`}
+              loader={setupScriptLoader}
+              profileId={input.profileId}
+              invalidateVersionSetupScript={input.invalidateVersionSetupScript}
+              onDraftStateChange={setSetupScriptDraftState}
               version={input.mode.version}
-              invalidateVersionBindings={input.invalidateVersionBindings}
             />
           );
-        }}
-        sections={SandboxProfileEditorTabs}
-      />
-    </>
+        }
+
+        return (
+          <LoadedSandboxProfileIntegrationSetupSection
+            key={`${input.profileId}:integration-setup`}
+            activeSectionId={sectionId}
+            loader={integrationsLoader}
+            onDraftStateChange={setIntegrationDraftState}
+            profileId={input.profileId}
+            disabled={draftFieldsAreDisabled}
+            version={input.mode.version}
+            invalidateVersionBindings={input.invalidateVersionBindings}
+          />
+        );
+      }}
+      sections={SandboxProfileEditorTabs}
+    />
   );
 }
 
@@ -1098,91 +1085,8 @@ const SandboxProfileEditorTabs = [
   },
 ] as const satisfies readonly SandboxProfileEditorSection[];
 
-const DraftSavingIndicatorShowDelayMs = 200;
-const DraftSavingIndicatorMinimumVisibleMs = 500;
 const DraftFlushBeforePublishErrorMessage =
   "Could not save draft changes before publishing. Check your draft changes and try again.";
-
-export function SandboxProfileEditorHeaderActions(input: {
-  isSavingDraftChanges: boolean;
-  minimumVisibleMs?: number;
-  scheduler?: Scheduler;
-  showDelayMs?: number;
-}): null {
-  const showSavingIndicator = useDelayedMinimumVisibleFlag({
-    active: input.isSavingDraftChanges,
-    clock: systemClock,
-    minimumVisibleMs: input.minimumVisibleMs ?? DraftSavingIndicatorMinimumVisibleMs,
-    scheduler: input.scheduler ?? systemScheduler,
-    showDelayMs: input.showDelayMs ?? DraftSavingIndicatorShowDelayMs,
-  });
-  const headerActions = useMemo(
-    () =>
-      showSavingIndicator ? (
-        <div
-          aria-live="polite"
-          className="text-muted-foreground inline-flex h-6 items-center gap-1.5 text-xs"
-          role="status"
-        >
-          <SpinnerGapIcon aria-hidden="true" className="size-3.5 animate-spin" />
-          <span>Saving</span>
-        </div>
-      ) : null,
-    [showSavingIndicator],
-  );
-  useAppShellHeaderActions(headerActions);
-
-  return null;
-}
-
-function useDelayedMinimumVisibleFlag(input: {
-  active: boolean;
-  clock: Clock;
-  minimumVisibleMs: number;
-  scheduler: Scheduler;
-  showDelayMs: number;
-}): boolean {
-  const [visible, setVisible] = useState(false);
-  const visibleSinceRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    let timeoutId: TimerHandle | null = null;
-
-    if (input.active && !visible) {
-      timeoutId = input.scheduler.schedule(() => {
-        visibleSinceRef.current = input.clock.nowMs();
-        setVisible(true);
-      }, input.showDelayMs);
-    } else if (!input.active && visible) {
-      const visibleSince = visibleSinceRef.current;
-      const elapsedVisibleMs =
-        visibleSince === null ? input.minimumVisibleMs : input.clock.nowMs() - visibleSince;
-      const remainingVisibleMs = Math.max(input.minimumVisibleMs - elapsedVisibleMs, 0);
-
-      timeoutId = input.scheduler.schedule(() => {
-        visibleSinceRef.current = null;
-        setVisible(false);
-      }, remainingVisibleMs);
-    } else if (!input.active && !visible) {
-      visibleSinceRef.current = null;
-    }
-
-    return () => {
-      if (timeoutId !== null) {
-        input.scheduler.cancel(timeoutId);
-      }
-    };
-  }, [
-    input.active,
-    input.clock,
-    input.minimumVisibleMs,
-    input.scheduler,
-    input.showDelayMs,
-    visible,
-  ]);
-
-  return visible;
-}
 
 function DeleteSandboxProfileDialog(input: {
   automationUsages: readonly WebhookAutomationSandboxProfileUsage[];

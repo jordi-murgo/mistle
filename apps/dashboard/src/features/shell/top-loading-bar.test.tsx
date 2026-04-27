@@ -6,6 +6,10 @@ import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } f
 import { describe, expect, it } from "vitest";
 
 import { createTestQueryClient } from "../../test-support/query-client.js";
+import {
+  AppShellLoadingIndicatorMeta,
+  AppShellLoadingIndicators,
+} from "./app-shell-loading-indicator-meta.js";
 import { TopLoadingBar } from "./top-loading-bar.js";
 
 function createDeferredPromise<T>() {
@@ -33,7 +37,7 @@ function SuppressedQueryLoadingHarness(props: { promise: Promise<string> }): Rea
   useQuery({
     queryKey: ["top-loading-bar-test", "suppressed"],
     meta: {
-      suppressTopLoadingBar: true,
+      [AppShellLoadingIndicatorMeta.INDICATOR]: AppShellLoadingIndicators.NONE,
     },
     queryFn: async () => props.promise,
   });
@@ -43,6 +47,29 @@ function SuppressedQueryLoadingHarness(props: { promise: Promise<string> }): Rea
 
 function MutationLoadingHarness(props: { promise: Promise<string> }): React.JSX.Element {
   const mutation = useMutation({
+    mutationFn: async () => props.promise,
+  });
+
+  return (
+    <>
+      <button
+        onClick={() => {
+          mutation.mutate();
+        }}
+        type="button"
+      >
+        Trigger mutation
+      </button>
+      <TopLoadingBar />
+    </>
+  );
+}
+
+function SuppressedMutationLoadingHarness(props: { promise: Promise<string> }): React.JSX.Element {
+  const mutation = useMutation({
+    meta: {
+      [AppShellLoadingIndicatorMeta.INDICATOR]: AppShellLoadingIndicators.NONE,
+    },
     mutationFn: async () => props.promise,
   });
 
@@ -103,7 +130,7 @@ describe("top-loading-bar", () => {
     });
   });
 
-  it("does not render for queries that suppress top loading bar activity", async () => {
+  it("does not render for queries that select no shell loading indicator", async () => {
     const queryClient = createTestQueryClient();
     const pendingQuery = createDeferredPromise<string>();
     const router = createMemoryRouter(
@@ -154,5 +181,33 @@ describe("top-loading-bar", () => {
     await waitFor(() => {
       expect(screen.queryByRole("progressbar", { name: "Loading" })).toBeNull();
     });
+  });
+
+  it("does not render for mutations that select no shell loading indicator", async () => {
+    const queryClient = createTestQueryClient();
+    const pendingMutation = createDeferredPromise<string>();
+    const router = createMemoryRouter(
+      createRoutesFromElements(
+        <Route
+          element={<SuppressedMutationLoadingHarness promise={pendingMutation.promise} />}
+          path="/"
+        />,
+      ),
+      { initialEntries: ["/"] },
+    );
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Trigger mutation" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar", { name: "Loading" })).toBeNull();
+    });
+
+    pendingMutation.resolve("done");
   });
 });

@@ -14,6 +14,10 @@ import {
   putSandboxProfileVersionIntegrationBindings,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
 import type { SandboxIntegrationBindingKind } from "../sandbox-profiles/sandbox-profiles-types.js";
+import {
+  AppShellLoadingIndicatorMeta,
+  AppShellLoadingIndicators,
+} from "../shell/app-shell-loading-indicator-meta.js";
 import { resolveBindingConfigUiModel } from "./sandbox-profile-binding-config-editor.js";
 import type {
   IntegrationConnectionSummary,
@@ -232,6 +236,9 @@ export function useLoadedSandboxProfileIntegrationsState(input: {
   }
 
   const putIntegrationBindingsMutation = useMutation({
+    meta: {
+      [AppShellLoadingIndicatorMeta.INDICATOR]: AppShellLoadingIndicators.AUTOSAVE,
+    },
     mutationFn: async (mutationInput: {
       bindings: Array<{
         id?: string;

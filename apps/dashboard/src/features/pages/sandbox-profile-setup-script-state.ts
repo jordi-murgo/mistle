@@ -12,6 +12,10 @@ import {
   getErrorMessage,
   scheduleSavedStateReset,
 } from "../shared/auto-save-behavior.js";
+import {
+  AppShellLoadingIndicatorMeta,
+  AppShellLoadingIndicators,
+} from "../shell/app-shell-loading-indicator-meta.js";
 
 type AutoSaveStatus = "idle" | "saving" | "saved" | "saved-fading";
 
@@ -83,6 +87,9 @@ export function useLoadedSandboxProfileSetupScriptState(input: {
   persistedValueRef.current = persistedValue;
 
   const saveMutation = useMutation({
+    meta: {
+      [AppShellLoadingIndicatorMeta.INDICATOR]: AppShellLoadingIndicators.AUTOSAVE,
+    },
     mutationFn: async (setupScript: string | null) =>
       putSandboxProfileVersionSetupScript({
         profileId: input.profileId,
