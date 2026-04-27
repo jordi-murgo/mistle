@@ -282,10 +282,8 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{
-        INIT_LOG_PATH, RESUME_LOG_PATH, StartupDiagnosticsLogger, StartupOperation,
-        test_log_dir_override_lock,
-    };
+    use super::{INIT_LOG_PATH, RESUME_LOG_PATH, StartupDiagnosticsLogger, StartupOperation};
+    use crate::test_support::TestEnvVarGuard;
     use crate::time::Clock;
 
     #[derive(Debug)]
@@ -303,18 +301,15 @@ mod tests {
 
     #[test]
     fn initializes_and_appends_operation_log_lines() {
-        let _lock = test_log_dir_override_lock()
-            .lock()
-            .expect("test log dir lock should not be poisoned");
         let temp_dir = std::env::temp_dir().join(format!(
-            "sandboxd-startup-diagnostics-{}",
-            std::process::id()
+            "sandboxd-startup-diagnostics-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
         ));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).expect("temp dir should be creatable");
-        unsafe {
-            std::env::set_var("MISTLE_SANDBOXD_OPERATION_LOG_DIR", &temp_dir);
-        }
+        let _log_dir_guard =
+            TestEnvVarGuard::set(super::TEST_LOG_DIR_ENV, temp_dir.to_string_lossy().as_ref());
 
         let logger = StartupDiagnosticsLogger::initialize(
             StartupOperation::Init,
@@ -378,9 +373,6 @@ mod tests {
                 && record["error"] == "workspace clone failed"
         }));
 
-        unsafe {
-            std::env::remove_var("MISTLE_SANDBOXD_OPERATION_LOG_DIR");
-        }
         let _ = fs::remove_dir_all(&temp_dir);
         assert_eq!(INIT_LOG_PATH, "/run/mistle/init.log");
         assert_eq!(RESUME_LOG_PATH, "/run/mistle/resume.log");

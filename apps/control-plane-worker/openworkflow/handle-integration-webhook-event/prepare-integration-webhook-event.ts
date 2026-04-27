@@ -19,6 +19,9 @@ export type IntegrationWebhookResourceSyncRequest = {
 
 export type PrepareIntegrationWebhookEventOutput = {
   webhookEventId: string;
+  externalDeliveryId: string | null;
+  integrationConnectionId: string;
+  targetKey: string;
   automationRunIds: ReadonlyArray<string>;
   resourceSyncRequests: ReadonlyArray<IntegrationWebhookResourceSyncRequest>;
   finalized: boolean;
@@ -49,8 +52,11 @@ export async function prepareIntegrationWebhookEvent(
   if (isTerminalWebhookEventStatus(webhookEvent.status)) {
     return {
       automationRunIds: [],
+      externalDeliveryId: webhookEvent.externalDeliveryId,
       finalized: true,
+      integrationConnectionId: webhookEvent.integrationConnectionId,
       resourceSyncRequests: [],
+      targetKey: webhookEvent.targetKey,
       webhookEventId: input.webhookEventId,
     };
   }
@@ -83,8 +89,11 @@ export async function prepareIntegrationWebhookEvent(
       ) {
         return {
           automationRunIds: [],
+          externalDeliveryId: webhookEvent.externalDeliveryId,
           finalized: true,
+          integrationConnectionId: webhookEvent.integrationConnectionId,
           resourceSyncRequests: [],
+          targetKey: webhookEvent.targetKey,
           webhookEventId: input.webhookEventId,
         };
       }
@@ -127,8 +136,11 @@ export async function prepareIntegrationWebhookEvent(
 
       return {
         automationRunIds: [],
+        externalDeliveryId: webhookEvent.externalDeliveryId,
         finalized: true,
+        integrationConnectionId: webhookEvent.integrationConnectionId,
         resourceSyncRequests: [],
+        targetKey: webhookEvent.targetKey,
         webhookEventId: input.webhookEventId,
       };
     }
@@ -169,8 +181,11 @@ export async function prepareIntegrationWebhookEvent(
 
     return {
       automationRunIds: queuedAutomationRunIds,
+      externalDeliveryId: webhookEvent.externalDeliveryId,
       finalized: false,
+      integrationConnectionId: webhookEvent.integrationConnectionId,
       resourceSyncRequests,
+      targetKey: webhookEvent.targetKey,
       webhookEventId: input.webhookEventId,
     };
   } catch (error) {
