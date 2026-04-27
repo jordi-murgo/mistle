@@ -1,49 +1,51 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@mistle/ui";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
-export type SandboxProfileEditorSection = {
-  id: string;
+export type SandboxProfileEditorSection<TSectionId extends string = string> = {
+  id: TSectionId;
   label: string;
   sideLabel?: ReactNode;
   disabled?: boolean;
 };
 
-export function SandboxProfileEditorSections(input: {
-  sections: readonly SandboxProfileEditorSection[];
-  activeSectionId?: string;
-  initialSectionId?: string;
-  onActiveSectionIdChange?: (sectionId: string) => void;
-  renderPanel: (activeSectionId: string) => React.JSX.Element;
+export function SandboxProfileEditorSections<TSectionId extends string>(input: {
+  sections: readonly SandboxProfileEditorSection<TSectionId>[];
+  activeSectionId: TSectionId;
+  onActiveSectionIdChange: (sectionId: TSectionId) => void;
+  renderPanel: (activeSectionId: TSectionId) => React.JSX.Element;
 }): React.JSX.Element {
-  const [internalActiveSectionId, setInternalActiveSectionId] = useState(
-    input.initialSectionId ?? input.sections[0]?.id ?? "",
-  );
-  const activeSectionId = input.activeSectionId ?? internalActiveSectionId;
-  const activeSection = input.sections.find((section) => section.id === activeSectionId);
+  const activeSection = input.sections.find((section) => section.id === input.activeSectionId);
+  if (activeSection === undefined) {
+    throw new Error(
+      `Active sandbox profile editor section is not registered: ${input.activeSectionId}`,
+    );
+  }
 
-  function updateActiveSectionId(sectionId: string): void {
+  function updateActiveSectionId(sectionId: TSectionId): void {
     const nextSection = input.sections.find((section) => section.id === sectionId);
     if (nextSection?.disabled === true) {
       return;
     }
 
-    if (input.activeSectionId === undefined) {
-      setInternalActiveSectionId(sectionId);
-    }
-    input.onActiveSectionIdChange?.(sectionId);
+    input.onActiveSectionIdChange(sectionId);
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="md:hidden">
         <Select
-          onValueChange={(value) => updateActiveSectionId(value ?? "")}
-          value={activeSectionId}
+          onValueChange={(value) => {
+            const nextSection = input.sections.find((section) => section.id === value);
+            if (nextSection === undefined) {
+              return;
+            }
+
+            updateActiveSectionId(nextSection.id);
+          }}
+          value={input.activeSectionId}
         >
           <SelectTrigger aria-label="Select profile editor section" className="w-full">
-            <SelectValue placeholder="Select section">
-              {input.sections.find((section) => section.id === activeSectionId)?.label}
-            </SelectValue>
+            <SelectValue placeholder="Select section">{activeSection.label}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {input.sections.map((section) => (
@@ -61,10 +63,10 @@ export function SandboxProfileEditorSections(input: {
             <button
               aria-controls={`sandbox-profile-editor-panel-${section.id}`}
               aria-disabled={section.disabled === true}
-              aria-selected={section.id === activeSectionId}
+              aria-selected={section.id === input.activeSectionId}
               disabled={section.disabled === true}
               className={`flex w-full items-start border-l-2 py-3 pl-4 pr-3 text-left text-sm font-medium leading-tight transition-colors ${
-                section.id === activeSectionId
+                section.id === input.activeSectionId
                   ? "border-foreground text-foreground"
                   : section.disabled === true
                     ? "border-transparent text-muted-foreground/50"
@@ -76,7 +78,7 @@ export function SandboxProfileEditorSections(input: {
                 updateActiveSectionId(section.id);
               }}
               role="tab"
-              tabIndex={section.id === activeSectionId ? 0 : -1}
+              tabIndex={section.id === input.activeSectionId ? 0 : -1}
               type="button"
             >
               {section.sideLabel ?? section.label}
@@ -88,19 +90,11 @@ export function SandboxProfileEditorSections(input: {
 
         <div className="flex min-w-0 flex-1 flex-col gap-4 md:pl-8">
           <div
-            aria-labelledby={
-              activeSection === undefined
-                ? undefined
-                : `sandbox-profile-editor-tab-${activeSection.id}`
-            }
-            id={
-              activeSection === undefined
-                ? undefined
-                : `sandbox-profile-editor-panel-${activeSection.id}`
-            }
+            aria-labelledby={`sandbox-profile-editor-tab-${activeSection.id}`}
+            id={`sandbox-profile-editor-panel-${activeSection.id}`}
             role="tabpanel"
           >
-            {input.renderPanel(activeSectionId)}
+            {input.renderPanel(input.activeSectionId)}
           </div>
         </div>
       </div>

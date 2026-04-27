@@ -5,36 +5,28 @@ import { useState } from "react";
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { UnsavedChangesGuard } from "./unsaved-changes-guard.js";
+import { NavigationBlockerDialog } from "./navigation-blocker-dialog.js";
 
 afterEach(() => {
   cleanup();
 });
 
 function GuardHarness(): React.JSX.Element {
-  const [isDirty, setIsDirty] = useState(false);
+  const [isBlocking, setIsBlocking] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
   return (
     <div>
-      <UnsavedChangesGuard when={isDirty} />
+      <NavigationBlockerDialog enabled={isBlocking} />
       <p>Current route: {location.pathname}</p>
       <button
         onClick={() => {
-          setIsDirty(true);
+          setIsBlocking(true);
         }}
         type="button"
       >
-        Mark dirty
-      </button>
-      <button
-        onClick={() => {
-          setIsDirty(false);
-        }}
-        type="button"
-      >
-        Mark clean
+        Enable blocking
       </button>
       <button
         onClick={() => {
@@ -52,7 +44,7 @@ function NextPage(): React.JSX.Element {
   return <p>Next page</p>;
 }
 
-describe("UnsavedChangesGuard", () => {
+describe("NavigationBlockerDialog", () => {
   it("blocks in-app navigation until the user confirms discarding changes", async () => {
     const router = createMemoryRouter(
       [
@@ -72,7 +64,7 @@ describe("UnsavedChangesGuard", () => {
 
     render(<RouterProvider router={router} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark dirty" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable blocking" }));
     fireEvent.click(screen.getByRole("button", { name: "Navigate away" }));
 
     expect(screen.getByText("Discard unsaved changes?")).toBeDefined();
@@ -93,7 +85,7 @@ describe("UnsavedChangesGuard", () => {
     });
   });
 
-  it("registers a browser unload prompt only while there are unsaved changes", () => {
+  it("registers a browser unload prompt only while navigation blocking is enabled", () => {
     const router = createMemoryRouter(
       [
         {
@@ -108,16 +100,16 @@ describe("UnsavedChangesGuard", () => {
 
     render(<RouterProvider router={router} />);
 
-    const cleanEvent = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(cleanEvent);
-    expect(cleanEvent.defaultPrevented).toBe(false);
+    const unblockedEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unblockedEvent);
+    expect(unblockedEvent.defaultPrevented).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark dirty" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable blocking" }));
 
-    const dirtyEvent = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(dirtyEvent);
+    const blockedEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(blockedEvent);
 
-    expect(dirtyEvent.defaultPrevented).toBe(true);
+    expect(blockedEvent.defaultPrevented).toBe(true);
   });
 
   it("resets the blocked navigation when the dialog is dismissed with escape", async () => {
@@ -139,7 +131,7 @@ describe("UnsavedChangesGuard", () => {
 
     render(<RouterProvider router={router} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark dirty" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable blocking" }));
     fireEvent.click(screen.getByRole("button", { name: "Navigate away" }));
 
     expect(screen.getByText("Discard unsaved changes?")).toBeDefined();

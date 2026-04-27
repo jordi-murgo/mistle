@@ -30,7 +30,15 @@ import {
 } from "@mistle/ui";
 import { CheckCircleIcon, SpinnerGapIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type Key, type SyntheticEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Key,
+  type SyntheticEvent,
+} from "react";
 import {
   Navigate,
   Outlet,
@@ -38,13 +46,14 @@ import {
   useNavigate,
   useOutletContext,
   useParams,
+  type BlockerFunction,
 } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import { listWebhookAutomationsForSandboxProfile } from "../automations/webhook-automations-service.js";
 import type { WebhookAutomationSandboxProfileUsage } from "../automations/webhook-automations-types.js";
+import { NavigationBlockerDialog } from "../navigation/navigation-blocker-dialog.js";
 import { useAppPageMeta } from "../navigation/route-meta.js";
-import { UnsavedChangesGuard } from "../navigation/unsaved-changes-guard.js";
 import { SandboxProfilesApiError } from "../sandbox-profiles/sandbox-profiles-api-errors.js";
 import {
   sandboxProfileAutomationUsagesQueryKey,
@@ -151,19 +160,22 @@ type SnapshotPanelState =
       message: string;
     };
 type SandboxProfileEditorNavigationState = {
-  initialSectionId: SandboxProfileEditorSectionId | null;
   notice: "publish-success" | null;
 };
 type SandboxProfileDraftSectionState = {
   flushDraftChanges: () => Promise<boolean>;
-  hasUnsavedChanges: boolean;
+  hasUnpersistedChanges: boolean;
   isSaving: boolean;
 };
+type SandboxProfileIntegrationSetupSectionId = Extract<
+  SandboxProfileEditorSectionId,
+  "integrations" | "resources-and-tools"
+>;
 
 function createIdleSandboxProfileDraftSectionState(): SandboxProfileDraftSectionState {
   return {
     flushDraftChanges: async () => true,
-    hasUnsavedChanges: false,
+    hasUnpersistedChanges: false,
     isSaving: false,
   };
 }
@@ -276,9 +288,16 @@ const SandboxProfileEditorSectionIds = {
 } satisfies Record<string, SandboxProfileEditorSectionId>;
 
 const PublishSuccessNavigationState: SandboxProfileEditorNavigationState = {
-  initialSectionId: SandboxProfileEditorSectionIds.SNAPSHOT,
   notice: "publish-success",
 };
+
+function createSandboxProfileEditorPath(input: {
+  profileId: string;
+  view: SandboxProfileRouteView;
+  sectionId: SandboxProfileEditorSectionId;
+}): string {
+  return `/sandbox-profiles/${input.profileId}/${input.view}/${input.sectionId}`;
+}
 
 export function shouldPollSandboxProfileSnapshotJobs(
   versions: readonly SandboxProfileVersion[] | undefined,
@@ -351,18 +370,25 @@ function readSandboxProfileEditorNavigationState(
 ): SandboxProfileEditorNavigationState {
   if (typeof value !== "object" || value === null) {
     return {
-      initialSectionId: null,
       notice: null,
     };
   }
 
-  const initialSectionId = Reflect.get(value, "initialSectionId");
   const notice = Reflect.get(value, "notice");
 
   return {
-    initialSectionId: isSandboxProfileEditorSectionId(initialSectionId) ? initialSectionId : null,
     notice: notice === "publish-success" ? notice : null,
   };
+}
+
+function readSandboxProfileEditorRouteSectionId(
+  value: string | undefined,
+): SandboxProfileEditorSectionId | null {
+  if (isSandboxProfileEditorSectionId(value)) {
+    return value;
+  }
+
+  return null;
 }
 
 function isSandboxProfileEditorSectionId(value: unknown): value is SandboxProfileEditorSectionId {
@@ -372,6 +398,44 @@ function isSandboxProfileEditorSectionId(value: unknown): value is SandboxProfil
     value === SandboxProfileEditorSectionIds.CONFIGURATIONS ||
     value === SandboxProfileEditorSectionIds.SNAPSHOT
   );
+}
+
+function readSandboxProfileEditorSectionPathSegment(input: {
+  pathname: string;
+  profileId: string;
+  view: SandboxProfileRouteView;
+}): SandboxProfileEditorSectionId | null {
+  const prefix = `/sandbox-profiles/${input.profileId}/${input.view}/`;
+  if (!input.pathname.startsWith(prefix)) {
+    return null;
+  }
+
+  const sectionId = input.pathname.slice(prefix.length);
+  if (!isSandboxProfileEditorSectionId(sectionId)) {
+    return null;
+  }
+
+  return sectionId;
+}
+
+function shouldBlockSandboxProfileEditorUnpersistedChangesNavigation(input: {
+  profileId: string;
+  view: SandboxProfileRouteView;
+  currentPathname: string;
+  nextPathname: string;
+}): boolean {
+  const currentSectionId = readSandboxProfileEditorSectionPathSegment({
+    pathname: input.currentPathname,
+    profileId: input.profileId,
+    view: input.view,
+  });
+  const nextSectionId = readSandboxProfileEditorSectionPathSegment({
+    pathname: input.nextPathname,
+    profileId: input.profileId,
+    view: input.view,
+  });
+
+  return currentSectionId === null || nextSectionId === null;
 }
 
 function shouldRedirectPublishedSandboxProfileViewToDraft(input: {
@@ -661,7 +725,33 @@ export function SandboxProfileDefaultRedirect(): React.JSX.Element {
   const shellContext = useSandboxProfileEditorShellContext();
   const defaultView = shellContext.profile.activeVersion === null ? "draft" : "published";
 
-  return <Navigate replace to={`/sandbox-profiles/${shellContext.profileId}/${defaultView}`} />;
+  return (
+    <Navigate
+      replace
+      to={createSandboxProfileEditorPath({
+        profileId: shellContext.profileId,
+        view: defaultView,
+        sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+      })}
+    />
+  );
+}
+
+export function SandboxProfileSectionDefaultRedirect(input: {
+  view: SandboxProfileRouteView;
+}): React.JSX.Element {
+  const shellContext = useSandboxProfileEditorShellContext();
+
+  return (
+    <Navigate
+      replace
+      to={createSandboxProfileEditorPath({
+        profileId: shellContext.profileId,
+        view: input.view,
+        sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+      })}
+    />
+  );
 }
 
 function useSandboxProfileEditorShellContext(): SandboxProfileEditorShellContext {
@@ -671,24 +761,39 @@ function useSandboxProfileEditorShellContext(): SandboxProfileEditorShellContext
 function EditSandboxProfileEditorPage(input: { view: SandboxProfileRouteView }): React.JSX.Element {
   const shellContext = useSandboxProfileEditorShellContext();
   const location = useLocation();
-  const navigate = shellContext.navigate;
+  const params = useParams();
   const navigationState = readSandboxProfileEditorNavigationState(location.state);
+  const routeSectionId = readSandboxProfileEditorRouteSectionId(params["sectionId"]);
   const publishSuccessMessage = navigationState.notice === "publish-success";
-
-  useEffect(() => {
-    if (navigationState.notice !== "publish-success") {
-      return;
-    }
-
+  const navigate = shellContext.navigate;
+  const onPublishSuccessNavigationConsumed = useCallback(() => {
     void navigate(location.pathname + location.search, {
       replace: true,
       state: null,
     });
-  }, [location.pathname, location.search, navigate, navigationState.notice]);
+  }, [location.pathname, location.search, navigate]);
+
+  if (
+    routeSectionId === null ||
+    (input.view === "draft" && routeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT)
+  ) {
+    return (
+      <Navigate
+        replace
+        to={createSandboxProfileEditorPath({
+          profileId: shellContext.profileId,
+          view: input.view,
+          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+        })}
+      />
+    );
+  }
 
   return (
     <LoadedSandboxProfileEditorPage
-      initialSectionId={navigationState.initialSectionId}
+      routeSectionId={routeSectionId}
+      publishSuccessNavigationKey={publishSuccessMessage ? location.key : null}
+      onPublishSuccessNavigationConsumed={onPublishSuccessNavigationConsumed}
       publishSuccessMessage={publishSuccessMessage}
       view={input.view}
       navigate={shellContext.navigate}
@@ -706,7 +811,9 @@ function EditSandboxProfileEditorPage(input: { view: SandboxProfileRouteView }):
 
 type LoadedSandboxProfileEditorPageInput = {
   navigate: ReturnType<typeof useNavigate>;
-  initialSectionId: SandboxProfileEditorSectionId | null;
+  routeSectionId: SandboxProfileEditorSectionId;
+  publishSuccessNavigationKey: string | null;
+  onPublishSuccessNavigationConsumed: () => void;
   publishSuccessMessage: boolean;
   profileId: string;
   profile: SandboxProfile;
@@ -723,6 +830,7 @@ function LoadedSandboxProfileEditorPage(
   input: LoadedSandboxProfileEditorPageInput,
 ): React.JSX.Element {
   const queryClient = useQueryClient();
+  const pendingPublishedSectionIdRef = useRef<SandboxProfileEditorSectionId | null>(null);
   const [versionActionError, setVersionActionError] = useState<string | null>(null);
   const [isDeleteProfileDialogOpen, setIsDeleteProfileDialogOpen] = useState(false);
   const [deleteProfileError, setDeleteProfileError] = useState<string | null>(null);
@@ -748,7 +856,13 @@ function LoadedSandboxProfileEditorPage(
         input.invalidateSandboxProfiles(),
         input.invalidateProfileDetail(input.profileId),
       ]);
-      void input.navigate(`/sandbox-profiles/${input.profileId}/draft`);
+      void input.navigate(
+        createSandboxProfileEditorPath({
+          profileId: input.profileId,
+          view: "draft",
+          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+        }),
+      );
     },
     onError: (error: unknown) => {
       setVersionActionError(
@@ -778,6 +892,7 @@ function LoadedSandboxProfileEditorPage(
     },
     onSuccess: async (result) => {
       setVersionActionError(null);
+      pendingPublishedSectionIdRef.current = SandboxProfileEditorSectionIds.SNAPSHOT;
       queryClient.setQueryData<SandboxProfile | undefined>(
         sandboxProfileDetailQueryKey(input.profileId),
         (currentProfile) =>
@@ -797,9 +912,16 @@ function LoadedSandboxProfileEditorPage(
           return nextVersions === undefined ? currentVersions : { versions: nextVersions };
         },
       );
-      void input.navigate(`/sandbox-profiles/${input.profileId}/published`, {
-        state: PublishSuccessNavigationState,
-      });
+      void input.navigate(
+        createSandboxProfileEditorPath({
+          profileId: input.profileId,
+          view: "published",
+          sectionId: SandboxProfileEditorSectionIds.SNAPSHOT,
+        }),
+        {
+          state: PublishSuccessNavigationState,
+        },
+      );
 
       const invalidationPromises = [
         input.invalidateProfileVersions(input.profileId),
@@ -842,7 +964,13 @@ function LoadedSandboxProfileEditorPage(
         input.invalidateSandboxProfiles(),
         input.invalidateProfileDetail(input.profileId),
       ]);
-      void input.navigate(`/sandbox-profiles/${input.profileId}/published`);
+      void input.navigate(
+        createSandboxProfileEditorPath({
+          profileId: input.profileId,
+          view: "published",
+          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+        }),
+      );
     },
     onError: (error: unknown) => {
       setVersionActionError(
@@ -918,6 +1046,10 @@ function LoadedSandboxProfileEditorPage(
       );
     },
   });
+  const onPublishSuccessNavigationConsumed = useCallback(() => {
+    pendingPublishedSectionIdRef.current = null;
+    input.onPublishSuccessNavigationConsumed();
+  }, [input.onPublishSuccessNavigationConsumed]);
 
   if (
     input.view === "published" &&
@@ -926,7 +1058,16 @@ function LoadedSandboxProfileEditorPage(
       versions: input.versions,
     })
   ) {
-    return <Navigate replace to={`/sandbox-profiles/${input.profileId}/draft`} />;
+    return (
+      <Navigate
+        replace
+        to={createSandboxProfileEditorPath({
+          profileId: input.profileId,
+          view: "draft",
+          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+        })}
+      />
+    );
   }
 
   if (
@@ -935,7 +1076,18 @@ function LoadedSandboxProfileEditorPage(
       versions: input.versions,
     })
   ) {
-    return <Navigate replace to={`/sandbox-profiles/${input.profileId}/published`} />;
+    const pendingSectionId = pendingPublishedSectionIdRef.current;
+    return (
+      <Navigate
+        replace
+        state={pendingSectionId === null ? undefined : PublishSuccessNavigationState}
+        to={createSandboxProfileEditorPath({
+          profileId: input.profileId,
+          view: "published",
+          sectionId: pendingSectionId ?? SandboxProfileEditorSectionIds.INTEGRATIONS,
+        })}
+      />
+    );
   }
 
   const resolvedMode = resolveSandboxProfileEditorVersionMode({
@@ -971,15 +1123,30 @@ function LoadedSandboxProfileEditorPage(
       onRefreshSnapshot={(version) => {
         refreshSnapshotMutation.mutate(version);
       }}
-      initialSectionId={input.initialSectionId}
+      routeSectionId={input.routeSectionId}
+      publishSuccessNavigationKey={input.publishSuccessNavigationKey}
+      onPublishSuccessNavigationConsumed={onPublishSuccessNavigationConsumed}
       publishSuccessMessage={input.publishSuccessMessage}
+      routeView={input.view}
       onViewActive={() => {
         setVersionActionError(null);
-        void input.navigate(`/sandbox-profiles/${input.profileId}/published`);
+        void input.navigate(
+          createSandboxProfileEditorPath({
+            profileId: input.profileId,
+            view: "published",
+            sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+          }),
+        );
       }}
       onViewDraft={() => {
         setVersionActionError(null);
-        void input.navigate(`/sandbox-profiles/${input.profileId}/draft`);
+        void input.navigate(
+          createSandboxProfileEditorPath({
+            profileId: input.profileId,
+            view: "draft",
+            sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
+          }),
+        );
       }}
       profile={input.profile}
       profileId={input.profileId}
@@ -1033,8 +1200,11 @@ function ReadySandboxProfileEditorPage(input: {
   profile: SandboxProfile;
   mode: SandboxProfileEditorVersionMode;
   currentVersion: SandboxProfileVersion | null;
-  initialSectionId: SandboxProfileEditorSectionId | null;
+  routeSectionId: SandboxProfileEditorSectionId;
+  publishSuccessNavigationKey: string | null;
+  onPublishSuccessNavigationConsumed: () => void;
   publishSuccessMessage: boolean;
+  routeView: SandboxProfileRouteView;
   versionActionError: string | null;
   versionActionIsPending: boolean;
   deleteProfileAutomationUsages: readonly WebhookAutomationSandboxProfileUsage[];
@@ -1078,9 +1248,7 @@ function ReadySandboxProfileEditorPage(input: {
   const [showPublishSuccessMessage, setShowPublishSuccessMessage] = useState(
     input.publishSuccessMessage,
   );
-  const [activeSectionId, setActiveSectionId] = useState<SandboxProfileEditorSectionId>(
-    input.initialSectionId ?? SandboxProfileEditorSectionIds.INTEGRATIONS,
-  );
+  const activeSectionId = input.routeSectionId;
   const draftFieldsAreDisabled =
     input.mode.kind !== "draft" || isSavingDraftChanges || publishRequestIsPending;
   const snapshotPanelState = resolveSnapshotPanelState({
@@ -1098,22 +1266,38 @@ function ReadySandboxProfileEditorPage(input: {
     invalidateSandboxProfiles: input.invalidateSandboxProfiles,
     invalidateProfileDetail: input.invalidateProfileDetail,
   });
+  const shouldBlockUnpersistedChangesNavigation = useCallback<BlockerFunction>(
+    ({ currentLocation, nextLocation }) =>
+      shouldBlockSandboxProfileEditorUnpersistedChangesNavigation({
+        profileId: input.profileId,
+        view: input.routeView,
+        currentPathname: currentLocation.pathname,
+        nextPathname: nextLocation.pathname,
+      }),
+    [input.profileId, input.routeView],
+  );
 
   useEffect(() => {
-    if (
-      input.mode.kind === "draft" &&
-      activeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT
-    ) {
-      setActiveSectionId(SandboxProfileEditorSectionIds.INTEGRATIONS);
+    if (input.publishSuccessNavigationKey !== null) {
+      input.onPublishSuccessNavigationConsumed();
     }
-  }, [activeSectionId, input.mode.kind]);
+  }, [input.publishSuccessNavigationKey, input.onPublishSuccessNavigationConsumed]);
+
+  useEffect(() => {
+    if (!input.publishSuccessMessage) {
+      return;
+    }
+
+    setPublishSuccessNoticeKey((currentKey) => currentKey + 1);
+    setShowPublishSuccessMessage(true);
+  }, [input.publishSuccessMessage]);
 
   async function handlePublish(version: number): Promise<void> {
     setPublishFlushError(null);
     const shouldFlushDraft =
-      integrationDraftState.hasUnsavedChanges ||
+      integrationDraftState.hasUnpersistedChanges ||
       integrationDraftState.isSaving ||
-      setupScriptDraftState.hasUnsavedChanges ||
+      setupScriptDraftState.hasUnpersistedChanges ||
       setupScriptDraftState.isSaving;
 
     setPublishRequestIsPending(true);
@@ -1133,7 +1317,6 @@ function ReadySandboxProfileEditorPage(input: {
       await input.onPublish(version);
       setPublishSuccessNoticeKey((currentKey) => currentKey + 1);
       setShowPublishSuccessMessage(true);
-      setActiveSectionId(SandboxProfileEditorSectionIds.SNAPSHOT);
     } catch {
       return;
     } finally {
@@ -1148,19 +1331,17 @@ function ReadySandboxProfileEditorPage(input: {
       />
       <SandboxProfileEditorView
         activeSectionId={activeSectionId}
-        hasUnsavedIntegrationChanges={integrationDraftState.hasUnsavedChanges}
-        hasUnsavedSetupScriptChanges={setupScriptDraftState.hasUnsavedChanges}
+        hasUnpersistedIntegrationChanges={integrationDraftState.hasUnpersistedChanges}
+        hasUnpersistedSetupScriptChanges={setupScriptDraftState.hasUnpersistedChanges}
         isSavingProfileName={metaState.isUpdating}
         mode={input.mode}
+        shouldBlockUnpersistedChangesNavigation={shouldBlockUnpersistedChangesNavigation}
         deleteProfileAutomationUsages={input.deleteProfileAutomationUsages}
         deleteProfileAutomationUsagesError={input.deleteProfileAutomationUsagesError}
         deleteProfileAutomationUsagesIsPending={input.deleteProfileAutomationUsagesIsPending}
         deleteProfileError={input.deleteProfileError}
         deleteProfileIsPending={input.deleteProfileIsPending}
-        onMakeChanges={() => {
-          setActiveSectionId(SandboxProfileEditorSectionIds.INTEGRATIONS);
-          input.onMakeChanges();
-        }}
+        onMakeChanges={input.onMakeChanges}
         onConfirmDeleteProfile={input.onConfirmDeleteProfile}
         onDeleteProfileDialogOpenChange={input.onDeleteProfileDialogOpenChange}
         onDiscardChangesAndLeaveDraft={input.onDiscardChangesAndLeaveDraft}
@@ -1168,69 +1349,114 @@ function ReadySandboxProfileEditorPage(input: {
           void handlePublish(version);
         }}
         onActiveSectionIdChange={(sectionId) => {
-          if (isSandboxProfileEditorSectionId(sectionId)) {
-            setActiveSectionId(sectionId);
-          }
+          void input.navigate(
+            createSandboxProfileEditorPath({
+              profileId: input.profileId,
+              view: input.routeView,
+              sectionId,
+            }),
+          );
         }}
         onSaveProfileName={metaState.onProfileNameSave}
         onViewActive={input.onViewActive}
-        onViewDraft={() => {
-          setActiveSectionId(SandboxProfileEditorSectionIds.INTEGRATIONS);
-          input.onViewDraft();
-        }}
+        onViewDraft={input.onViewDraft}
         profileName={metaState.formState.displayName}
         profileNameFallback={metaState.pageTitle}
         publishRequestIsPending={publishRequestIsPending}
         versionActionError={publishFlushError ?? input.versionActionError}
         versionActionIsPending={input.versionActionIsPending}
         isDeleteProfileDialogOpen={input.isDeleteProfileDialogOpen}
-        renderSectionPanel={(sectionId) => {
-          if (sectionId === SandboxProfileEditorSectionIds.SNAPSHOT) {
-            return (
-              <SandboxProfileSnapshotPanel
-                isActionPending={input.versionActionIsPending}
-                onRefreshSnapshot={() => {
-                  input.onRefreshSnapshot(input.mode.version);
-                }}
-                onPublishSuccessMessageDismiss={() => {
-                  setShowPublishSuccessMessage(false);
-                }}
-                publishSuccessMessageKey={publishSuccessNoticeKey}
-                publishSuccessMessage={showPublishSuccessMessage}
-                state={snapshotPanelState}
-              />
-            );
-          }
-
-          if (sectionId === "configurations") {
-            return (
-              <LoadedSandboxProfileSetupScriptSection
-                disabled={draftFieldsAreDisabled}
-                key={`${input.profileId}:${String(input.mode.version)}`}
-                loader={setupScriptLoader}
-                profileId={input.profileId}
-                invalidateVersionSetupScript={input.invalidateVersionSetupScript}
-                onDraftStateChange={setSetupScriptDraftState}
-                version={input.mode.version}
-              />
-            );
-          }
-
-          return (
-            <LoadedSandboxProfileIntegrationSetupSection
-              key={`${input.profileId}:integration-setup`}
-              activeSectionId={sectionId}
-              loader={integrationsLoader}
-              onDraftStateChange={setIntegrationDraftState}
-              profileId={input.profileId}
-              disabled={draftFieldsAreDisabled}
-              version={input.mode.version}
-              invalidateVersionBindings={input.invalidateVersionBindings}
-            />
-          );
-        }}
+        renderSectionPanel={(sectionId) => (
+          <SandboxProfileEditorSectionPanels
+            activeSectionId={sectionId}
+            draftFieldsAreDisabled={draftFieldsAreDisabled}
+            integrationsLoader={integrationsLoader}
+            invalidateVersionBindings={input.invalidateVersionBindings}
+            invalidateVersionSetupScript={input.invalidateVersionSetupScript}
+            mode={input.mode}
+            onIntegrationDraftStateChange={setIntegrationDraftState}
+            onPublishSuccessMessageDismiss={() => {
+              setShowPublishSuccessMessage(false);
+            }}
+            onRefreshSnapshot={input.onRefreshSnapshot}
+            onSetupScriptDraftStateChange={setSetupScriptDraftState}
+            profileId={input.profileId}
+            publishSuccessMessage={showPublishSuccessMessage}
+            publishSuccessMessageKey={publishSuccessNoticeKey}
+            setupScriptLoader={setupScriptLoader}
+            snapshotPanelState={snapshotPanelState}
+            versionActionIsPending={input.versionActionIsPending}
+          />
+        )}
         sections={editorSections}
       />
+    </>
+  );
+}
+
+function SandboxProfileEditorSectionPanels(input: {
+  activeSectionId: SandboxProfileEditorSectionId;
+  draftFieldsAreDisabled: boolean;
+  integrationsLoader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
+  invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
+  invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
+  mode: SandboxProfileEditorVersionMode;
+  onIntegrationDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
+  onPublishSuccessMessageDismiss: () => void;
+  onRefreshSnapshot: (version: number) => void;
+  onSetupScriptDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
+  profileId: string;
+  publishSuccessMessage: boolean;
+  publishSuccessMessageKey: Key;
+  setupScriptLoader: ReturnType<typeof useSandboxProfileSetupScriptLoader>;
+  snapshotPanelState: SnapshotPanelState;
+  versionActionIsPending: boolean;
+}): React.JSX.Element {
+  const showIntegrationSetup =
+    input.activeSectionId === SandboxProfileEditorSectionIds.INTEGRATIONS ||
+    input.activeSectionId === SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS;
+  const integrationSetupSectionId =
+    input.activeSectionId === SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS
+      ? SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS
+      : SandboxProfileEditorSectionIds.INTEGRATIONS;
+
+  return (
+    <>
+      <div hidden={!showIntegrationSetup}>
+        <LoadedSandboxProfileIntegrationSetupSection
+          key={`${input.profileId}:integration-setup`}
+          activeSectionId={integrationSetupSectionId}
+          loader={input.integrationsLoader}
+          onDraftStateChange={input.onIntegrationDraftStateChange}
+          profileId={input.profileId}
+          disabled={input.draftFieldsAreDisabled}
+          version={input.mode.version}
+          invalidateVersionBindings={input.invalidateVersionBindings}
+        />
+      </div>
+      <div hidden={input.activeSectionId !== SandboxProfileEditorSectionIds.CONFIGURATIONS}>
+        <LoadedSandboxProfileSetupScriptSection
+          disabled={input.draftFieldsAreDisabled}
+          key={`${input.profileId}:${String(input.mode.version)}:setup-script`}
+          loader={input.setupScriptLoader}
+          profileId={input.profileId}
+          invalidateVersionSetupScript={input.invalidateVersionSetupScript}
+          onDraftStateChange={input.onSetupScriptDraftStateChange}
+          version={input.mode.version}
+        />
+      </div>
+      {input.activeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT ? (
+        <SandboxProfileSnapshotPanel
+          isActionPending={input.versionActionIsPending}
+          onRefreshSnapshot={() => {
+            input.onRefreshSnapshot(input.mode.version);
+          }}
+          onPublishSuccessMessageDismiss={input.onPublishSuccessMessageDismiss}
+          publishSuccessMessageKey={input.publishSuccessMessageKey}
+          publishSuccessMessage={input.publishSuccessMessage}
+          state={input.snapshotPanelState}
+        />
+      ) : null}
     </>
   );
 }
@@ -1252,12 +1478,12 @@ const SandboxProfileEditorTabs = [
     id: SandboxProfileEditorSectionIds.SNAPSHOT,
     label: "Snapshot",
   },
-] as const satisfies readonly SandboxProfileEditorSection[];
+] as const satisfies readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[];
 
 function createSandboxProfileEditorSections(input: {
   mode: SandboxProfileEditorVersionMode;
   snapshotState: SnapshotPanelState;
-}): readonly SandboxProfileEditorSection[] {
+}): readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[] {
   return SandboxProfileEditorTabs.map((section) =>
     section.id === SandboxProfileEditorSectionIds.SNAPSHOT
       ? {
@@ -1369,7 +1595,10 @@ function PublishSuccessSnapshotNotice(input: {
   useEffect(() => {
     if (input.visible) {
       setPresentedNoticeKey(input.noticeKey);
+      return;
     }
+
+    setPresentedNoticeKey(null);
   }, [input.noticeKey, input.visible]);
 
   if (presentedNoticeKey === null) {
@@ -1382,7 +1611,7 @@ function PublishSuccessSnapshotNotice(input: {
       dismissible
       onDismiss={input.onDismiss}
       resetKey={presentedNoticeKey}
-      title="Publish successful, creating a new snapshot"
+      title="Publish successful, creating a snapshot"
       variant="success"
     />
   );
@@ -1595,6 +1824,7 @@ export function SandboxProfileEditorView(input: {
   versionActionIsPending: boolean;
   publishRequestIsPending?: boolean;
   isDeleteProfileDialogOpen: boolean;
+  shouldBlockUnpersistedChangesNavigation?: BlockerFunction;
   onPublish: (version: number) => void;
   onConfirmDeleteProfile: () => void;
   onDiscardChangesAndLeaveDraft: (input: { draftVersion: number }) => void;
@@ -1602,27 +1832,27 @@ export function SandboxProfileEditorView(input: {
   onMakeChanges: () => void;
   onViewActive: () => void;
   onViewDraft: () => void;
-  sections: readonly SandboxProfileEditorSection[];
-  activeSectionId?: string;
-  onActiveSectionIdChange?: (sectionId: string) => void;
-  renderSectionPanel: (sectionId: SandboxProfileEditorSection["id"]) => React.JSX.Element;
+  sections: readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[];
+  activeSectionId: SandboxProfileEditorSectionId;
+  onActiveSectionIdChange: (sectionId: SandboxProfileEditorSectionId) => void;
+  renderSectionPanel: (sectionId: SandboxProfileEditorSectionId) => React.JSX.Element;
   versionStatusBadge?: React.JSX.Element;
   versionActions?: React.JSX.Element;
-  hasUnsavedIntegrationChanges?: boolean;
-  hasUnsavedSetupScriptChanges?: boolean;
+  hasUnpersistedIntegrationChanges?: boolean;
+  hasUnpersistedSetupScriptChanges?: boolean;
   isSavingProfileName?: boolean;
 }): React.JSX.Element {
-  const hasUnsavedDraftChanges =
+  const hasUnpersistedDraftChanges =
     input.mode.kind === "draft" &&
-    ((input.hasUnsavedIntegrationChanges ?? false) ||
-      (input.hasUnsavedSetupScriptChanges ?? false));
+    ((input.hasUnpersistedIntegrationChanges ?? false) ||
+      (input.hasUnpersistedSetupScriptChanges ?? false));
   const publishRequestIsPending = input.publishRequestIsPending === true;
   const versionActionIsDisabled = input.versionActionIsPending || publishRequestIsPending;
   const discardChangesInput = resolveDiscardDraftInput(input.mode);
   const discardChangesMenuItem =
     discardChangesInput === null ? null : (
       <DropdownMenuItem
-        disabled={hasUnsavedDraftChanges || versionActionIsDisabled}
+        disabled={hasUnpersistedDraftChanges || versionActionIsDisabled}
         onClick={() => {
           input.onDiscardChangesAndLeaveDraft(discardChangesInput);
         }}
@@ -1647,9 +1877,13 @@ export function SandboxProfileEditorView(input: {
 
   return (
     <div className="gap-4 flex flex-col">
-      <UnsavedChangesGuard
-        description="You have unsaved draft changes. If you leave this page, your changes will be discarded."
-        when={hasUnsavedDraftChanges}
+      <NavigationBlockerDialog
+        title="Leave before draft changes are saved?"
+        description="Some draft changes have not been saved yet. If you leave this page, those changes will be discarded."
+        {...(input.shouldBlockUnpersistedChangesNavigation === undefined
+          ? {}
+          : { shouldBlockNavigation: input.shouldBlockUnpersistedChangesNavigation })}
+        enabled={hasUnpersistedDraftChanges}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1739,11 +1973,9 @@ export function SandboxProfileEditorView(input: {
         profileName={input.profileName ?? input.profileNameFallback}
       />
 
-      <SandboxProfileEditorSections
-        {...(input.activeSectionId === undefined ? {} : { activeSectionId: input.activeSectionId })}
-        {...(input.onActiveSectionIdChange === undefined
-          ? {}
-          : { onActiveSectionIdChange: input.onActiveSectionIdChange })}
+      <SandboxProfileEditorSections<SandboxProfileEditorSectionId>
+        activeSectionId={input.activeSectionId}
+        onActiveSectionIdChange={input.onActiveSectionIdChange}
         renderPanel={input.renderSectionPanel}
         sections={input.sections}
       />
@@ -1770,7 +2002,7 @@ function resolveDiscardDraftInput(
 }
 
 function LoadedSandboxProfileIntegrationSetupSection(input: {
-  activeSectionId: string;
+  activeSectionId: SandboxProfileIntegrationSetupSectionId;
   profileId: string;
   version: number;
   disabled: boolean;
@@ -1825,7 +2057,7 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
 }
 
 export function SandboxProfileIntegrationsSetupUnavailableState(input: {
-  activeSectionId: SandboxProfileEditorSection["id"];
+  activeSectionId: SandboxProfileIntegrationSetupSectionId;
   integrationBindingsError: unknown;
   integrationDirectoryError: unknown;
   isPending: boolean;
@@ -1863,7 +2095,7 @@ export function SandboxProfileIntegrationsSetupUnavailableState(input: {
 }
 
 function ReadySandboxProfileIntegrationSetupSection(input: {
-  activeSectionId: string;
+  activeSectionId: SandboxProfileIntegrationSetupSectionId;
   profileId: string;
   version: number;
   initialRows: readonly SandboxProfileBindingEditorRow[];
@@ -1889,7 +2121,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
   useEffect(() => {
     onDraftStateChange?.({
       flushDraftChanges: integrationsState.flushDraftChanges,
-      hasUnsavedChanges: integrationsState.hasUnsavedChanges,
+      hasUnpersistedChanges: integrationsState.hasUnsavedChanges,
       isSaving: integrationsState.isSubmittingIntegrationBindings,
     });
   }, [
@@ -1987,7 +2219,7 @@ function ReadySandboxProfileSetupScriptSection(input: {
   useEffect(() => {
     onDraftStateChange?.({
       flushDraftChanges: setupScriptState.flushDraftChanges,
-      hasUnsavedChanges: setupScriptState.hasUnsavedChanges,
+      hasUnpersistedChanges: setupScriptState.hasUnsavedChanges,
       isSaving: setupScriptState.isSaving,
     });
   }, [
