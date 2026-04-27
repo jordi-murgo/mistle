@@ -1,4 +1,5 @@
 import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
+import { SlackConnectionMethodId } from "@mistle/integrations-definitions/browser";
 import {
   Button,
   Field,
@@ -112,14 +113,22 @@ function renderAuthCreateHelper(method: IntegrationConnectionMethod | null) {
   return <Notice>{method.ui.create.helperText}</Notice>;
 }
 
-function shouldSkipCreateTimeGitHubAppFields(input: {
+function shouldSkipCreateTimeSetupFields(input: {
   editor: IntegrationConnectionEditorState;
   method: IntegrationConnectionMethod | null;
 }): boolean {
-  return (
+  if (
     input.editor.mode === "create" &&
     input.editor.targetFamilyId === "github" &&
     input.method?.id === IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
+  ) {
+    return true;
+  }
+
+  return (
+    input.editor.mode === "create" &&
+    input.editor.targetFamilyId === "slack" &&
+    input.method?.id === SlackConnectionMethodId
   );
 }
 
@@ -181,16 +190,15 @@ function renderConnectionEditorFields(props: IntegrationConnectionEditorProps) {
     methodId: props.methodId,
   });
   const showMethodPicker = editor.mode === "create" && editor.methods.length > 1;
-  const skipCreateTimeGitHubAppFields = shouldSkipCreateTimeGitHubAppFields({
+  const skipCreateTimeSetupFields = shouldSkipCreateTimeSetupFields({
     editor,
     method: selectedMethod,
   });
   const showsConfigForm =
-    skipCreateTimeGitHubAppFields === false &&
+    skipCreateTimeSetupFields === false &&
     props.configForm.mode === "form" &&
     props.configForm.visiblePropertyKeys.length > 0;
-  const showsSecretInput =
-    skipCreateTimeGitHubAppFields === false && selectedMethod?.kind === "form";
+  const showsSecretInput = skipCreateTimeSetupFields === false && selectedMethod?.kind === "form";
   const selectedMethodLabel = selectedMethod
     ? formatIntegrationConnectionMethodLabel(selectedMethod)
     : undefined;

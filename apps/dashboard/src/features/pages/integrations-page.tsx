@@ -1,4 +1,6 @@
 import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
+import { SlackConnectionMethodId } from "@mistle/integrations-definitions/browser";
+import { Notice } from "@mistle/ui";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { getDashboardConfig } from "../../config.js";
@@ -8,6 +10,7 @@ import { IntegrationConnectionApiKeyDialog } from "../integrations/integration-c
 import { IntegrationConnectionDetailView } from "../integrations/integration-connection-detail-view.js";
 import { useRequiredOrganizationId } from "../shell/require-auth.js";
 import { GitHubAppSetupPane } from "./integration-connection-github-app-setup-page.js";
+import { SlackAppSetupPane } from "./integration-connection-slack-app-setup-page.js";
 import {
   buildIntegrationConnectionDetailItems,
   resolveIntegrationConnectionDetailWebhookPolicy,
@@ -37,6 +40,17 @@ function isUninstalledGitHubAppConnection(input: {
         : null;
 
   return installationId === null;
+}
+
+function isIncompleteSlackAppConnection(input: {
+  connectionMethodId: string | undefined;
+  configuredSecretNames: readonly string[] | undefined;
+}): boolean {
+  return (
+    input.connectionMethodId === SlackConnectionMethodId &&
+    (!(input.configuredSecretNames?.includes("botToken") ?? false) ||
+      !(input.configuredSecretNames?.includes("signingSecret") ?? false))
+  );
 }
 
 export function IntegrationsPage() {
@@ -99,6 +113,11 @@ export function IntegrationsPage() {
     directoryState.selectedDetailConnections.find(
       (connection) => connection.id === directoryState.activeDetailConnectionId,
     ) ?? directoryState.selectedDetailConnections[0];
+  const shouldShowSlackInstallSuccessNotice =
+    searchParams.get("slackApp") === "installed" &&
+    detailConnectionId !== null &&
+    selectedDetailConnection?.id === detailConnectionId &&
+    selectedDetailConnection.connectionMethodId === SlackConnectionMethodId;
 
   const detailSurface =
     detailTargetKey === null || directoryState.selectedDetailCard === null ? null : (
@@ -162,6 +181,22 @@ export function IntegrationsPage() {
               connection={selectedDetailConnection}
               key={selectedDetailConnection.id}
             />
+          ) : selectedDetailConnection !== undefined &&
+            isIncompleteSlackAppConnection({
+              connectionMethodId: selectedDetailConnection.connectionMethodId,
+              configuredSecretNames: selectedDetailConnection.configuredSecretNames,
+            }) ? (
+            <SlackAppSetupPane
+              connection={selectedDetailConnection}
+              key={selectedDetailConnection.id}
+            />
+          ) : undefined
+        }
+        selectedConnectionNotice={
+          shouldShowSlackInstallSuccessNotice ? (
+            <Notice title="Slack app installed and connected" variant="success">
+              The Slack app was created in Slack and connected to Mistle.
+            </Notice>
           ) : undefined
         }
         webhookSourceStateByConnectionId={webhookSourceState.webhookSourceStateByConnectionId}
