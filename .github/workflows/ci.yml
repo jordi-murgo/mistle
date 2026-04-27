@@ -87,7 +87,7 @@ jobs:
   static-ts:
     name: TS Static
     # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
@@ -135,10 +135,10 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Generate integration config
-        run: nix develop --command bash -lc "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
+        run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Run TS static checks in Nix shell
-        run: nix develop --command bash -lc "pnpm format:check && pnpm exec oxlint --type-aware --deny-warnings --threads=1 apps packages tests && pnpm lint:openapi && pnpm lint:docs && pnpm lint:sql && pnpm typecheck:ts"
+        run: nix develop --command bash -c "pnpm format:check && pnpm exec oxlint --type-aware --deny-warnings --threads=1 apps packages tests && pnpm lint:openapi && pnpm lint:docs && pnpm lint:sql && pnpm typecheck:ts"
 
       - name: Save Turbo local cache
         if: ${{ always() && !cancelled() && steps.static-ts-turbo-cache.outputs.cache-hit != 'true' }}
@@ -149,7 +149,7 @@ jobs:
 
   build-ts:
     name: TS Build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
@@ -197,10 +197,10 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Generate integration config
-        run: nix develop --command bash -lc "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
+        run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Build TS workspace in Nix shell
-        run: nix develop --command bash -lc "MISTLE_CONFIG_FORMAT=next MISTLE_CONFIG_PATH=$GITHUB_WORKSPACE/config/config.integration.docker.toml pnpm build:ts"
+        run: nix develop --command bash -c "MISTLE_CONFIG_FORMAT=next MISTLE_CONFIG_PATH=$GITHUB_WORKSPACE/config/config.integration.docker.toml pnpm build:ts"
 
       - name: Save Turbo local cache
         if: ${{ always() && !cancelled() && steps.build-ts-turbo-cache.outputs.cache-hit != 'true' }}
@@ -212,7 +212,7 @@ jobs:
   static-rust:
     name: Rust Static
     # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
@@ -270,14 +270,14 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Generate integration config
-        run: nix develop --command bash -lc "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
+        run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Build workspace in Nix shell
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: nix develop --command bash -lc "MISTLE_CONFIG_FORMAT=next MISTLE_CONFIG_PATH=$GITHUB_WORKSPACE/config/config.integration.docker.toml pnpm turbo run build --filter=@mistle/sandboxd"
+        run: nix develop --command bash -c "MISTLE_CONFIG_FORMAT=next MISTLE_CONFIG_PATH=$GITHUB_WORKSPACE/config/config.integration.docker.toml pnpm turbo run build --filter=@mistle/sandboxd"
 
       - name: Run Rust static checks in Nix shell
-        run: nix develop --command bash -lc "pnpm lint:rust && pnpm typecheck:rust"
+        run: nix develop --command bash -c "pnpm lint:rust && pnpm typecheck:rust"
 
       - name: Save Turbo local cache
         if: ${{ always() && !cancelled() && steps.static-rust-turbo-cache.outputs.cache-hit != 'true' }}
@@ -317,7 +317,7 @@ jobs:
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Generate integration config
-        run: nix develop --command bash -lc "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
+        run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Run knip in Nix shell
         run: nix develop --command pnpm lint:knip
@@ -325,7 +325,7 @@ jobs:
   test-ts:
     name: TS Test
     # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
@@ -373,7 +373,7 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Generate integration config
-        run: nix develop --command bash -lc "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
+        run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Run TS tests in Nix shell
         run: >-
@@ -390,7 +390,7 @@ jobs:
   test-commit-sign:
     name: Commit Sign Test
     # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
@@ -401,8 +401,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -436,14 +436,12 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Build commit-sign test runner image
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: packages/commit-sign/Dockerfile.test
           tags: mistle/commit-sign-test-runner:ci
           load: true
-          cache-from: type=gha,scope=commit-sign-test-runner
-          cache-to: type=gha,mode=max,scope=commit-sign-test-runner
 
       - name: Run commit-sign tests in Nix shell
         env:
@@ -461,7 +459,7 @@ jobs:
   test-sandboxd:
     name: Sandboxd Test
     # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
@@ -473,8 +471,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -508,17 +506,15 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Generate integration config
-        run: nix develop --command bash -lc "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
+        run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Build sandboxd test runner image
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: packages/sandboxd/Dockerfile.test
           tags: mistle/sandboxd-test-runner:ci
           load: true
-          cache-from: type=gha,scope=sandboxd-test-runner
-          cache-to: type=gha,mode=max,scope=sandboxd-test-runner
 
       - name: Run sandboxd tests in Nix shell
         env:
@@ -547,7 +543,7 @@ jobs:
 
   sandbox-base-linux:
     name: Sandbox Base Image (Linux)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 90
     needs:
       - changes
