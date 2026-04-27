@@ -31,7 +31,7 @@ import {
   SandboxProfileEditorShell,
   SandboxProfileEditorView,
   shouldRedirectDraftSandboxProfileViewToPublished,
-  shouldPollSandboxProfileSnapshotPreparation,
+  shouldPollSandboxProfileSnapshotJobs,
 } from "./sandbox-profile-editor-page.js";
 
 afterEach(() => {
@@ -68,6 +68,173 @@ function createSandboxProfileVersionFixture(input: {
   };
 }
 
+type SandboxProfileEditorTestVersionState =
+  | "draft"
+  | "draft-with-published"
+  | "published"
+  | "published-with-draft"
+  | "published-manual-refresh-no-snapshot"
+  | "published-no-snapshot"
+  | "published-pending"
+  | "published-failed";
+
+type SandboxProfileEditorTestRouteView = "published" | "draft" | "default";
+
+function createRunningSnapshotJobFixture(input: {
+  id: string;
+  trigger: "publish" | "manual_refresh";
+}): NonNullable<SandboxProfileVersion["latestSnapshotJob"]> {
+  return {
+    id: input.id,
+    trigger: input.trigger,
+    state: "running",
+    errorCode: null,
+    errorMessage: null,
+    createdAt: "2026-04-23T00:01:00.000Z",
+    startedAt: "2026-04-23T00:01:05.000Z",
+    finishedAt: null,
+  };
+}
+
+function createFailedSnapshotJobFixture(): NonNullable<SandboxProfileVersion["latestSnapshotJob"]> {
+  return {
+    id: "ssj_failed_initial_materialization",
+    trigger: "publish",
+    state: "failed",
+    errorCode: "snapshot_materialization_failed",
+    errorMessage: "Snapshot materialization failed.",
+    createdAt: "2026-04-23T00:01:00.000Z",
+    startedAt: "2026-04-23T00:01:05.000Z",
+    finishedAt: "2026-04-23T00:01:30.000Z",
+  };
+}
+
+function createSandboxProfileVersionsForTest(input: {
+  profileId: string;
+  version: number;
+  versionState: SandboxProfileEditorTestVersionState;
+}): SandboxProfileVersion[] {
+  function createVersion(versionInput: {
+    state: SandboxProfileVersion["state"];
+    isActive?: boolean;
+    latestSnapshotJob?: SandboxProfileVersion["latestSnapshotJob"];
+    usable?: boolean;
+    version?: number;
+  }): SandboxProfileVersion {
+    const versionFixture = createSandboxProfileVersionFixture({
+      sandboxProfileId: input.profileId,
+      version: versionInput.version ?? input.version,
+      state: versionInput.state,
+      isActive: versionInput.isActive ?? false,
+    });
+
+    return {
+      ...versionFixture,
+      ...(versionInput.latestSnapshotJob === undefined
+        ? {}
+        : { latestSnapshotJob: versionInput.latestSnapshotJob }),
+      ...(versionInput.usable === undefined ? {} : { usable: versionInput.usable }),
+    };
+  }
+
+  switch (input.versionState) {
+    case "draft-with-published":
+      return [
+        createVersion({
+          version: input.version - 1,
+          state: "published",
+          isActive: true,
+        }),
+        createVersion({
+          state: "draft",
+        }),
+      ];
+    case "published-with-draft":
+      return [
+        createVersion({
+          state: "published",
+          isActive: true,
+        }),
+        createVersion({
+          version: input.version + 1,
+          state: "draft",
+        }),
+      ];
+    case "published-manual-refresh-no-snapshot":
+      return [
+        createVersion({
+          state: "published",
+          usable: false,
+          latestSnapshotJob: createRunningSnapshotJobFixture({
+            id: "ssj_manual_refresh_initial_materialization",
+            trigger: "manual_refresh",
+          }),
+        }),
+      ];
+    case "published-no-snapshot":
+      return [
+        createVersion({
+          state: "published",
+          usable: false,
+        }),
+      ];
+    case "published-pending":
+      return [
+        createVersion({
+          state: "published",
+          usable: false,
+          latestSnapshotJob: createRunningSnapshotJobFixture({
+            id: "ssj_pending_initial_materialization",
+            trigger: "publish",
+          }),
+        }),
+      ];
+    case "published-failed":
+      return [
+        createVersion({
+          state: "published",
+          usable: false,
+          latestSnapshotJob: createFailedSnapshotJobFixture(),
+        }),
+      ];
+    case "published":
+      return [
+        createVersion({
+          state: "published",
+          isActive: true,
+        }),
+      ];
+    case "draft":
+      return [
+        createVersion({
+          state: "draft",
+        }),
+      ];
+  }
+}
+
+function resolveSandboxProfileEditorTestRouteView(input: {
+  versionState: SandboxProfileEditorTestVersionState;
+  view: SandboxProfileEditorTestRouteView | undefined;
+}): SandboxProfileEditorTestRouteView {
+  if (input.view !== undefined) {
+    return input.view;
+  }
+
+  switch (input.versionState) {
+    case "published":
+    case "published-with-draft":
+    case "published-manual-refresh-no-snapshot":
+    case "published-no-snapshot":
+    case "published-pending":
+    case "published-failed":
+      return "published";
+    case "draft":
+    case "draft-with-published":
+      return "draft";
+  }
+}
+
 function renderSandboxProfileEditor(input?: {
   bindings?: readonly {
     id: string;
@@ -94,14 +261,9 @@ function renderSandboxProfileEditor(input?: {
     };
   }[];
   integrationsLoading?: boolean;
-  view?: "published" | "draft" | "default";
-  versionState?:
-    | "draft"
-    | "draft-with-published"
-    | "published"
-    | "published-with-draft"
-    | "published-pending"
-    | "published-failed";
+  routeState?: unknown;
+  view?: SandboxProfileEditorTestRouteView;
+  versionState?: SandboxProfileEditorTestVersionState;
 }): void {
   const queryClient = createTestQueryClient({
     refetchOnMount: false,
@@ -117,95 +279,15 @@ function renderSandboxProfileEditor(input?: {
         ? version - 1
         : null;
   const resolvedVersionState = input?.versionState ?? "draft";
-  const resolvedRouteView =
-    input?.view ??
-    (resolvedVersionState === "published" ||
-    resolvedVersionState === "published-with-draft" ||
-    resolvedVersionState === "published-pending" ||
-    resolvedVersionState === "published-failed"
-      ? "published"
-      : "draft");
-  const singleVersionState: SandboxProfileVersion["state"] =
-    resolvedVersionState === "published" ? "published" : "draft";
-  const versions: SandboxProfileVersion[] =
-    resolvedVersionState === "draft-with-published"
-      ? [
-          createSandboxProfileVersionFixture({
-            sandboxProfileId: profileId,
-            version: version - 1,
-            state: "published",
-            isActive: true,
-          }),
-          createSandboxProfileVersionFixture({
-            sandboxProfileId: profileId,
-            version,
-            state: "draft",
-            isActive: false,
-          }),
-        ]
-      : resolvedVersionState === "published-with-draft"
-        ? [
-            createSandboxProfileVersionFixture({
-              sandboxProfileId: profileId,
-              version,
-              state: "published",
-              isActive: true,
-            }),
-            createSandboxProfileVersionFixture({
-              sandboxProfileId: profileId,
-              version: version + 1,
-              state: "draft",
-              isActive: false,
-            }),
-          ]
-        : resolvedVersionState === "published-pending"
-          ? [
-              createSandboxProfileVersionFixture({
-                sandboxProfileId: profileId,
-                version,
-                state: "published",
-                isActive: false,
-                usable: false,
-                latestSnapshotJob: {
-                  id: "ssj_pending_initial_materialization",
-                  trigger: "publish",
-                  state: "running",
-                  errorCode: null,
-                  errorMessage: null,
-                  createdAt: "2026-04-23T00:01:00.000Z",
-                  startedAt: "2026-04-23T00:01:05.000Z",
-                  finishedAt: null,
-                },
-              }),
-            ]
-          : resolvedVersionState === "published-failed"
-            ? [
-                createSandboxProfileVersionFixture({
-                  sandboxProfileId: profileId,
-                  version,
-                  state: "published",
-                  isActive: false,
-                  usable: false,
-                  latestSnapshotJob: {
-                    id: "ssj_failed_initial_materialization",
-                    trigger: "publish",
-                    state: "failed",
-                    errorCode: "snapshot_materialization_failed",
-                    errorMessage: "Snapshot materialization failed.",
-                    createdAt: "2026-04-23T00:01:00.000Z",
-                    startedAt: "2026-04-23T00:01:05.000Z",
-                    finishedAt: "2026-04-23T00:01:30.000Z",
-                  },
-                }),
-              ]
-            : [
-                createSandboxProfileVersionFixture({
-                  sandboxProfileId: profileId,
-                  version,
-                  state: singleVersionState,
-                  isActive: resolvedVersionState === "published",
-                }),
-              ];
+  const resolvedRouteView = resolveSandboxProfileEditorTestRouteView({
+    versionState: resolvedVersionState,
+    view: input?.view,
+  });
+  const versions = createSandboxProfileVersionsForTest({
+    profileId,
+    version,
+    versionState: resolvedVersionState,
+  });
 
   queryClient.setQueryData(sandboxProfileDetailQueryKey(profileId), {
     id: profileId,
@@ -266,6 +348,10 @@ function renderSandboxProfileEditor(input?: {
         input?.setupScript === undefined ? "pnpm install\npnpm dev:bootstrap" : input.setupScript,
     },
   );
+  const initialPath =
+    resolvedRouteView === "default"
+      ? `/sandbox-profiles/${profileId}`
+      : `/sandbox-profiles/${profileId}/${resolvedRouteView}`;
   const router = createMemoryRouter(
     createRoutesFromElements(
       <Route element={<Outlet />} path="/">
@@ -280,11 +366,15 @@ function renderSandboxProfileEditor(input?: {
       </Route>,
     ),
     {
-      initialEntries: [
-        resolvedRouteView === "default"
-          ? `/sandbox-profiles/${profileId}`
-          : `/sandbox-profiles/${profileId}/${resolvedRouteView}`,
-      ],
+      initialEntries:
+        input?.routeState === undefined
+          ? [initialPath]
+          : [
+              {
+                pathname: initialPath,
+                state: input.routeState,
+              },
+            ],
     },
   );
 
@@ -323,13 +413,11 @@ function DeleteProfileDialogHarness(input: {
         hasDraft: false,
         draftVersion: null,
       }}
-      snapshotPreparationStatus={null}
       onConfirmDeleteProfile={() => {}}
       onDeleteProfileDialogOpenChange={setIsOpen}
       onDiscardChangesAndLeaveDraft={() => {}}
       onMakeChanges={() => {}}
       onPublish={() => {}}
-      onRefreshSnapshot={() => {}}
       onSaveProfileName={async () => {}}
       onViewActive={() => {}}
       onViewDraft={() => {}}
@@ -369,7 +457,6 @@ function DraftActionsHarness(input: {
         activeVersion: 1,
         hasDraft: true,
       }}
-      snapshotPreparationStatus={null}
       onConfirmDeleteProfile={() => {}}
       onDeleteProfileDialogOpenChange={() => {}}
       onDiscardChangesAndLeaveDraft={() => {
@@ -377,7 +464,6 @@ function DraftActionsHarness(input: {
       }}
       onMakeChanges={() => {}}
       onPublish={() => {}}
-      onRefreshSnapshot={() => {}}
       onSaveProfileName={async () => {}}
       onViewActive={() => {}}
       onViewDraft={() => {}}
@@ -415,7 +501,6 @@ function PublishedWithDraftActionsHarness(): JSX.Element {
         hasDraft: true,
         draftVersion: 2,
       }}
-      snapshotPreparationStatus={null}
       onConfirmDeleteProfile={() => {}}
       onDeleteProfileDialogOpenChange={() => {}}
       onDiscardChangesAndLeaveDraft={() => {
@@ -423,7 +508,6 @@ function PublishedWithDraftActionsHarness(): JSX.Element {
       }}
       onMakeChanges={() => {}}
       onPublish={() => {}}
-      onRefreshSnapshot={() => {}}
       onSaveProfileName={async () => {}}
       onViewActive={() => {}}
       onViewDraft={() => {}}
@@ -633,12 +717,25 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByRole("tab", { name: "Configurations" })).toBeDefined();
   });
 
-  it("shows snapshot preparation feedback while initial materialization is running", () => {
+  it("shows snapshot creation feedback while initial materialization is running", () => {
     renderSandboxProfileEditor({
       versionState: "published-pending",
     });
 
-    expect(screen.getByText("Preparing snapshot")).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "Snapshot" }));
+
+    expect(screen.getByText("Creating snapshot")).toBeDefined();
+  });
+
+  it("shows creating while the first snapshot is materializing from a manual job", () => {
+    renderSandboxProfileEditor({
+      versionState: "published-manual-refresh-no-snapshot",
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Snapshot" }));
+
+    expect(screen.getByText("Creating snapshot")).toBeDefined();
+    expect(screen.queryByText("Refreshing")).toBeNull();
   });
 
   it("shows snapshot failure feedback when initial materialization fails", () => {
@@ -646,76 +743,119 @@ describe("SandboxProfileEditorPage", () => {
       versionState: "published-failed",
     });
 
+    fireEvent.click(screen.getByRole("tab", { name: "Snapshot" }));
+
     expect(screen.getByText("Snapshot failed")).toBeDefined();
-    expect(screen.getByText("Snapshot preparation failed")).toBeDefined();
     expect(screen.getByText("Snapshot materialization failed.")).toBeDefined();
   });
 
-  it("shows a refresh snapshot action for published versions", () => {
+  it("asks users to create a snapshot when a published version has no snapshot", () => {
+    renderSandboxProfileEditor({
+      versionState: "published-no-snapshot",
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Snapshot" }));
+
+    expect(
+      screen.getByText("Create a snapshot to start sessions from this profile."),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Create snapshot" })).toBeDefined();
+  });
+
+  it("does not show a refresh snapshot action in the published version menu", () => {
     renderPublishedWithDraftActionsHarness();
 
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
 
-    expect(screen.getByRole("menuitem", { name: "Refresh snapshot" })).toBeDefined();
+    expect(screen.queryByRole("menuitem", { name: "Refresh snapshot" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Discard draft" })).toBeDefined();
+  });
+
+  it("returns to integrations when leaving the snapshot tab for an existing draft", () => {
+    renderSandboxProfileEditor({
+      versionState: "published-with-draft",
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Snapshot" }));
+    expect(screen.getByRole("tab", { name: "Snapshot" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume editing" }));
+
+    expect(screen.getByRole("tab", { name: "Integrations" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+  });
+
+  it("does not show the publish success notice again after it is dismissed and the panel remounts", () => {
+    renderSandboxProfileEditor({
+      routeState: {
+        initialSectionId: "snapshot",
+        notice: "publish-success",
+      },
+      versionState: "published-pending",
+    });
+
+    expect(screen.getByText("Publish successful, creating a new snapshot")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Integrations" }));
+    expect(screen.getByRole("tab", { name: "Integrations" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Snapshot" }));
+
+    expect(screen.queryByText("Publish successful, creating a new snapshot")).toBeNull();
   });
 
   it("polls while a published version is waiting on initial snapshot materialization", () => {
     expect(
-      shouldPollSandboxProfileSnapshotPreparation({
-        profile: {
-          id: "sbp_test",
-          organizationId: "org_test",
-          displayName: "Prototype Profile",
-          activeVersion: null,
-          status: "active",
-          createdAt: "2026-04-23T00:00:00.000Z",
-          updatedAt: "2026-04-23T00:00:00.000Z",
-        },
-        versions: [
-          createSandboxProfileVersionFixture({
-            sandboxProfileId: "sbp_test",
-            version: 1,
-            state: "published",
-            isActive: false,
-            usable: false,
-            latestSnapshotJob: {
-              id: "ssj_pending_initial_materialization",
-              trigger: "publish",
-              state: "running",
-              errorCode: null,
-              errorMessage: null,
-              createdAt: "2026-04-23T00:01:00.000Z",
-              startedAt: "2026-04-23T00:01:05.000Z",
-              finishedAt: null,
-            },
+      shouldPollSandboxProfileSnapshotJobs([
+        createSandboxProfileVersionFixture({
+          sandboxProfileId: "sbp_test",
+          version: 1,
+          state: "published",
+          isActive: false,
+          usable: false,
+          latestSnapshotJob: createRunningSnapshotJobFixture({
+            id: "ssj_pending_initial_materialization",
+            trigger: "publish",
           }),
-        ],
-      }),
+        }),
+      ]),
     ).toBe(true);
   });
 
   it("does not poll once a published version has become active", () => {
     expect(
-      shouldPollSandboxProfileSnapshotPreparation({
-        profile: {
-          id: "sbp_test",
-          organizationId: "org_test",
-          displayName: "Prototype Profile",
-          activeVersion: 1,
-          status: "active",
-          createdAt: "2026-04-23T00:00:00.000Z",
-          updatedAt: "2026-04-23T00:00:00.000Z",
-        },
-        versions: [
-          createSandboxProfileVersionFixture({
-            sandboxProfileId: "sbp_test",
-            version: 1,
-            state: "published",
-            isActive: true,
-          }),
-        ],
-      }),
+      shouldPollSandboxProfileSnapshotJobs([
+        createSandboxProfileVersionFixture({
+          sandboxProfileId: "sbp_test",
+          version: 1,
+          state: "published",
+          isActive: true,
+        }),
+      ]),
     ).toBe(false);
+  });
+
+  it("polls while a published version has an in-progress snapshot job", () => {
+    expect(
+      shouldPollSandboxProfileSnapshotJobs([
+        createSandboxProfileVersionFixture({
+          sandboxProfileId: "sbp_test",
+          version: 1,
+          state: "published",
+          isActive: true,
+          usable: true,
+          latestSnapshotJob: createRunningSnapshotJobFixture({
+            id: "ssj_refresh_materialization",
+            trigger: "manual_refresh",
+          }),
+        }),
+      ]),
+    ).toBe(true);
   });
 
   it("redirects the draft route to published when the draft is gone but a published version exists", () => {

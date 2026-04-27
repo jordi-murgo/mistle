@@ -1,4 +1,6 @@
 import { systemScheduler, type TimerHandle } from "@mistle/time";
+import { Button, DefinitionList, Notice, NoticeAutoHideDurationsMs } from "@mistle/ui";
+import { WarningCircleIcon } from "@phosphor-icons/react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +12,7 @@ import {
   clearPendingStatusTimeouts,
   scheduleSavedStateReset,
 } from "../shared/auto-save-behavior.js";
+import { ActivityStatus } from "./activity-status.js";
 import {
   createIntegrationsEditorSectionStoryQueryClient,
   seedStoryIntegrationResources,
@@ -43,7 +46,16 @@ type SandboxProfileEditorPageStoryArgs = {
   displayName: string;
   availableConnections?: readonly IntegrationConnectionSummary[];
   availableTargets?: readonly IntegrationTargetSummary[];
+  initialSectionId?: string;
   lifecycleState?: "draft" | "draft-with-published" | "published" | "published-with-draft";
+  publishSuccessMessage?: boolean;
+  snapshotState?:
+    | "draft-unavailable"
+    | "no-snapshot"
+    | "creating-snapshot"
+    | "snapshot-ready"
+    | "snapshot-failed"
+    | "refresh-failed";
   integrationsSectionState?: {
     bindingsErrorMessage?: string;
     directoryErrorMessage?: string;
@@ -75,7 +87,47 @@ const StorySections = [
     id: "configurations",
     label: "Configurations",
   },
+  {
+    id: "snapshot",
+    label: "Snapshot",
+  },
 ] as const satisfies readonly SandboxProfileEditorSection[];
+
+function createStorySections(input: {
+  snapshotDisabled: boolean;
+  showMissingSnapshotAlert: boolean;
+}): readonly SandboxProfileEditorSection[] {
+  return StorySections.map((section) =>
+    section.id === "snapshot"
+      ? {
+          ...section,
+          disabled: input.snapshotDisabled,
+          sideLabel: (
+            <span className="inline-flex items-center gap-1.5">
+              <span>Snapshot</span>
+              {input.showMissingSnapshotAlert ? (
+                <WarningCircleIcon
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-destructive"
+                />
+              ) : null}
+            </span>
+          ),
+        }
+      : section,
+  );
+}
+
+function shouldShowMissingSnapshotAlert(input: {
+  mode: SandboxProfileEditorVersionMode;
+  snapshotStatus: SnapshotStoryStatus;
+}): boolean {
+  return input.mode.kind === "active" && input.snapshotStatus === "no-snapshot";
+}
+
+type SandboxProfileEditorVersionMode = React.ComponentProps<
+  typeof SandboxProfileEditorView
+>["mode"];
 
 const StoryBindings = [
   {
@@ -139,6 +191,146 @@ const StoryBindings = [
   },
 ] as const;
 
+type SnapshotStoryStatus = NonNullable<SandboxProfileEditorPageStoryArgs["snapshotState"]>;
+
+type SnapshotStoryState = {
+  activityLabel: string | null;
+  bodyActionLabel: string | null;
+  latestSnapshotCreatedAt: string | null;
+  notice: {
+    title: string;
+    variant: React.ComponentProps<typeof Notice>["variant"];
+  } | null;
+};
+
+const SnapshotStoryStates: Record<SnapshotStoryStatus, SnapshotStoryState> = {
+  "draft-unavailable": {
+    activityLabel: null,
+    bodyActionLabel: null,
+    latestSnapshotCreatedAt: null,
+    notice: {
+      title: "Snapshots are available after publishing",
+      variant: "default",
+    },
+  },
+  "no-snapshot": {
+    activityLabel: null,
+    bodyActionLabel: "Create snapshot",
+    latestSnapshotCreatedAt: null,
+    notice: {
+      title: "Create a snapshot to start sessions from this profile.",
+      variant: "alert",
+    },
+  },
+  "creating-snapshot": {
+    activityLabel: "Creating snapshot",
+    bodyActionLabel: null,
+    latestSnapshotCreatedAt: null,
+    notice: null,
+  },
+  "snapshot-ready": {
+    activityLabel: null,
+    bodyActionLabel: "Refresh snapshot",
+    latestSnapshotCreatedAt: "Apr 27, 2026, 10:21 AM",
+    notice: null,
+  },
+  "snapshot-failed": {
+    activityLabel: null,
+    bodyActionLabel: "Create snapshot",
+    latestSnapshotCreatedAt: null,
+    notice: {
+      title: "Snapshot failed",
+      variant: "alert",
+    },
+  },
+  "refresh-failed": {
+    activityLabel: null,
+    bodyActionLabel: "Refresh snapshot",
+    latestSnapshotCreatedAt: "Apr 27, 2026, 10:21 AM",
+    notice: {
+      title: "Refresh failed",
+      variant: "alert",
+    },
+  },
+};
+
+function resolveSnapshotStoryStatus(input: {
+  lifecycleState: SandboxProfileEditorPageStoryArgs["lifecycleState"];
+  snapshotState: SandboxProfileEditorPageStoryArgs["snapshotState"];
+}): SnapshotStoryStatus {
+  if (input.snapshotState !== undefined) {
+    return input.snapshotState;
+  }
+
+  if (
+    input.lifecycleState === undefined ||
+    input.lifecycleState === "draft" ||
+    input.lifecycleState === "draft-with-published"
+  ) {
+    return "draft-unavailable";
+  }
+
+  return "snapshot-ready";
+}
+
+function SandboxProfileSnapshotStoryPanel(input: {
+  publishSuccessMessage: boolean;
+  status: SnapshotStoryStatus;
+}): React.JSX.Element {
+  const state = SnapshotStoryStates[input.status];
+
+  return (
+    <div className="flex max-w-3xl flex-col gap-4">
+      {input.publishSuccessMessage ? (
+        <Notice
+          autoHideAfterMs={NoticeAutoHideDurationsMs.MEDIUM}
+          dismissible
+          title="Publish successful, creating a new snapshot"
+          variant="success"
+        />
+      ) : null}
+
+      {state.notice === null ? null : (
+        <Notice title={state.notice.title} variant={state.notice.variant} />
+      )}
+
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold leading-6">About snapshots</h2>
+        <p className="text-sm text-muted-foreground">
+          A snapshot is the prepared sandbox image created from this published profile version and
+          its setup script. New sessions can only start after a snapshot is ready.
+        </p>
+      </div>
+
+      {state.bodyActionLabel === null ? null : (
+        <div>
+          <Button type="button">{state.bodyActionLabel}</Button>
+        </div>
+      )}
+
+      {state.activityLabel === null ? null : (
+        <ActivityStatus
+          className="justify-start text-muted-foreground"
+          label={state.activityLabel}
+          labelKey={input.status}
+        />
+      )}
+
+      {state.latestSnapshotCreatedAt === null ? null : (
+        <DefinitionList
+          items={[
+            {
+              id: "snapshot-created",
+              label: "Latest snapshot",
+              value: state.latestSnapshotCreatedAt,
+            },
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
 function renderUnavailableIntegrationsSectionPanel(input: {
   sectionId: SandboxProfileEditorSection["id"];
   state: IntegrationsSectionState;
@@ -181,6 +373,9 @@ function SandboxProfileEditorPageStoryView(
   const [setupScriptSaveStatus, setSetupScriptSaveStatus] = useState<
     "idle" | "saving" | "saved" | "saved-fading"
   >("idle");
+  const [activeSectionId, setActiveSectionId] = useState<string>(
+    input.initialSectionId ?? StorySections[0]?.id ?? "",
+  );
   const fadeStartTimeoutRef = useRef<TimerHandle | null>(null);
   const fadeEndTimeoutRef = useRef<TimerHandle | null>(null);
 
@@ -245,10 +440,22 @@ function SandboxProfileEditorPageStoryView(
           activeVersion: input.lifecycleState === "draft-with-published" ? 1 : null,
           hasDraft: true as const,
         };
+  const snapshotStatus = resolveSnapshotStoryStatus({
+    lifecycleState: input.lifecycleState,
+    snapshotState: input.snapshotState,
+  });
+  const storySections = createStorySections({
+    snapshotDisabled: mode.kind === "draft",
+    showMissingSnapshotAlert: shouldShowMissingSnapshotAlert({
+      mode,
+      snapshotStatus,
+    }),
+  });
 
   return (
     <QueryClientProvider client={queryClient}>
       <SandboxProfileEditorView
+        activeSectionId={activeSectionId}
         deleteProfileAutomationUsages={[]}
         deleteProfileAutomationUsagesError={null}
         deleteProfileAutomationUsagesIsPending={false}
@@ -256,14 +463,13 @@ function SandboxProfileEditorPageStoryView(
         deleteProfileIsPending={false}
         isDeleteProfileDialogOpen={false}
         mode={mode}
-        snapshotPreparationStatus={null}
         onConfirmDeleteProfile={() => {}}
         onDeleteProfileDialogOpenChange={() => {}}
         onMakeChanges={() => {}}
         onDiscardChangesAndLeaveDraft={() => {}}
         onPublish={() => {}}
-        onRefreshSnapshot={() => {}}
         onSaveProfileName={handleProfileNameSave}
+        onActiveSectionIdChange={setActiveSectionId}
         onViewActive={() => {}}
         onViewDraft={() => {}}
         profileName={profileName}
@@ -345,6 +551,15 @@ function SandboxProfileEditorPageStoryView(
             );
           }
 
+          if (sectionId === "snapshot") {
+            return (
+              <SandboxProfileSnapshotStoryPanel
+                publishSuccessMessage={input.publishSuccessMessage === true}
+                status={snapshotStatus}
+              />
+            );
+          }
+
           return (
             <SandboxProfileSetupScriptPanel
               onBlur={handleSetupScriptBlur}
@@ -355,7 +570,7 @@ function SandboxProfileEditorPageStoryView(
             />
           );
         }}
-        sections={StorySections}
+        sections={storySections}
       />
     </QueryClientProvider>
   );
@@ -407,9 +622,52 @@ export const Published: Story = {
   },
 };
 
-export const DraftWithPublishedVersion: Story = {
+export const SnapshotNoSnapshot: Story = {
   args: {
-    lifecycleState: "draft-with-published",
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotState: "no-snapshot",
+  },
+};
+
+export const SnapshotCreating: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotState: "creating-snapshot",
+  },
+};
+
+export const PublishSuccessfulCreatingSnapshot: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    publishSuccessMessage: true,
+    snapshotState: "creating-snapshot",
+  },
+};
+
+export const SnapshotReady: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const SnapshotFailed: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotState: "snapshot-failed",
+  },
+};
+
+export const SnapshotRefreshFailed: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotState: "refresh-failed",
   },
 };
 
