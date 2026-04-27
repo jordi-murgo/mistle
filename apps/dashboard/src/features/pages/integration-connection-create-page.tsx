@@ -162,17 +162,11 @@ function LoadedIntegrationConnectionCreatePage(input: {
           connectionId,
         });
 
-        if (managedWebhookSetup.status === "failed") {
-          detailSearchParams.set("managedWebhookSetup", "failed");
-          await navigate(`/integrations/${editor.targetKey}?${detailSearchParams.toString()}`, {
-            state: {
-              managedWebhookSetupMessage: managedWebhookSetup.message,
-            },
-          });
-          return;
-        }
-
-        await navigate(`/integrations/${editor.targetKey}?${detailSearchParams.toString()}`);
+        await navigate(`/integrations/${editor.targetKey}?${detailSearchParams.toString()}`, {
+          state: {
+            managedWebhookSetup,
+          },
+        });
         return;
       }
 

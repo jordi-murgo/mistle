@@ -1,6 +1,7 @@
 import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
 import { SlackConnectionMethodId } from "@mistle/integrations-definitions/browser";
 import { Notice, NoticeAutoHideDurationsMs } from "@mistle/ui";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { getDashboardConfig } from "../../config.js";
@@ -8,6 +9,10 @@ import { resolveApiErrorMessage } from "../api/error-message.js";
 import { DeleteIntegrationConnectionDialog } from "../integrations/delete-integration-connection-dialog.js";
 import { IntegrationConnectionApiKeyDialog } from "../integrations/integration-connection-api-key-dialog.js";
 import { IntegrationConnectionDetailView } from "../integrations/integration-connection-detail-view.js";
+import {
+  ManagedWebhookSetupResultSchema,
+  type ManagedWebhookSetupResult,
+} from "../integrations/integrations-service-shared.js";
 import type { IntegrationConnection } from "../integrations/integrations-service.js";
 import { useRequiredOrganizationId } from "../shell/require-auth.js";
 import { GitHubAppSetupPane } from "./integration-connection-github-app-setup-page.js";
@@ -61,10 +66,12 @@ type GitHubAppInstallationState = {
 
 type GitHubAppInstallationStateEntry = [string, GitHubAppInstallationState];
 
-type InstalledAppSuccessNotice = {
+type ConnectionNotice = {
+  connectionId: string;
   message?: string;
   resetKey: string;
   title: string;
+  variant: "alert" | "success";
 };
 
 function buildGitHubAppInstallationStateByConnectionId(input: {
@@ -89,11 +96,17 @@ function buildGitHubAppInstallationStateByConnectionId(input: {
   );
 }
 
-function resolveInstalledAppSuccessNotice(input: {
+function clearUrlConnectionNoticeParams(searchParams: URLSearchParams): URLSearchParams {
+  const nextSearchParams = new URLSearchParams(searchParams);
+  nextSearchParams.delete("connectionNotice");
+  return nextSearchParams;
+}
+
+function resolveUrlConnectionNotice(input: {
   detailConnectionId: string | null;
   searchParams: URLSearchParams;
   selectedConnection: Pick<IntegrationConnection, "connectionMethodId" | "id"> | undefined;
-}): InstalledAppSuccessNotice | null {
+}): ConnectionNotice | null {
   if (
     input.detailConnectionId === null ||
     input.selectedConnection?.id !== input.detailConnectionId
@@ -101,45 +114,84 @@ function resolveInstalledAppSuccessNotice(input: {
     return null;
   }
 
-  if (
-    input.searchParams.get("slackApp") === "installed" &&
-    input.selectedConnection.connectionMethodId === SlackConnectionMethodId
-  ) {
+  if (input.searchParams.get("connectionNotice") !== "installed") {
+    return null;
+  }
+
+  if (input.selectedConnection.connectionMethodId === SlackConnectionMethodId) {
     return {
-      message: "The Slack app was created in Slack and connected to Mistle.",
-      resetKey: input.detailConnectionId,
-      title: "Slack app installed and connected",
+      connectionId: input.detailConnectionId,
+      resetKey: `slack-installed:${input.detailConnectionId}`,
+      title: "The Slack app was created and connected to Mistle successfully",
+      variant: "success",
     };
   }
 
   if (
-    input.searchParams.get("githubApp") === "installed" &&
     input.selectedConnection.connectionMethodId ===
-      IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
+    IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
   ) {
     return {
-      resetKey: input.detailConnectionId,
+      connectionId: input.detailConnectionId,
+      resetKey: `github-installed:${input.detailConnectionId}`,
       title: "GitHub App connected to Mistle successfully",
+      variant: "success",
     };
   }
 
   return null;
 }
 
-function resolveManagedWebhookSetupMessage(state: unknown): string | null {
-  if (typeof state !== "object" || state === null || !("managedWebhookSetupMessage" in state)) {
+function resolveRouteStateConnectionNotice(input: {
+  detailConnectionId: string | null;
+  locationState: unknown;
+  selectedConnection: Pick<IntegrationConnection, "id" | "targetKey"> | undefined;
+}): ConnectionNotice | null {
+  if (
+    input.detailConnectionId === null ||
+    input.selectedConnection?.id !== input.detailConnectionId
+  ) {
     return null;
   }
 
-  const message = state.managedWebhookSetupMessage;
-  return typeof message === "string" && message.trim().length > 0 ? message : null;
+  const managedWebhookSetup = resolveManagedWebhookSetupState(input.locationState);
+  if (managedWebhookSetup === null || input.selectedConnection.targetKey !== "jira-default") {
+    return null;
+  }
+
+  if (managedWebhookSetup.status === "created") {
+    return {
+      connectionId: input.detailConnectionId,
+      resetKey: `jira-webhook-created:${input.detailConnectionId}`,
+      title: "Jira connection and webhook created successfully",
+      variant: "success",
+    };
+  }
+
+  return {
+    connectionId: input.detailConnectionId,
+    message: managedWebhookSetup.message,
+    resetKey: `jira-webhook-failed:${input.detailConnectionId}`,
+    title: "Connection created, webhook setup failed",
+    variant: "alert",
+  };
+}
+
+function resolveManagedWebhookSetupState(state: unknown): ManagedWebhookSetupResult | null {
+  if (typeof state !== "object" || state === null || !("managedWebhookSetup" in state)) {
+    return null;
+  }
+
+  const parsed = ManagedWebhookSetupResultSchema.safeParse(state.managedWebhookSetup);
+  return parsed.success ? parsed.data : null;
 }
 
 export function IntegrationsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [urlConnectionNotice, setUrlConnectionNotice] = useState<ConnectionNotice | null>(null);
   useRequiredOrganizationId();
   const detailTargetKey = params["targetKey"] ?? null;
   const detailConnectionId = searchParams.get("connectionId");
@@ -182,17 +234,31 @@ export function IntegrationsPage() {
     directoryState.selectedDetailConnections.find(
       (connection) => connection.id === directoryState.activeDetailConnectionId,
     ) ?? directoryState.selectedDetailConnections[0];
-  const installedAppSuccessNotice = resolveInstalledAppSuccessNotice({
+  const routeStateConnectionNotice = resolveRouteStateConnectionNotice({
     detailConnectionId,
-    searchParams,
+    locationState: location.state,
     selectedConnection: selectedDetailConnection,
   });
-  const managedWebhookSetupMessage = resolveManagedWebhookSetupMessage(location.state);
-  const shouldShowManagedWebhookSetupFailureNotice =
-    searchParams.get("managedWebhookSetup") === "failed" &&
-    managedWebhookSetupMessage !== null &&
-    detailConnectionId !== null &&
-    selectedDetailConnection?.id === detailConnectionId;
+  const connectionNotice =
+    routeStateConnectionNotice ??
+    (urlConnectionNotice?.connectionId === selectedDetailConnection?.id
+      ? urlConnectionNotice
+      : null);
+
+  useEffect(() => {
+    const resolvedUrlNotice = resolveUrlConnectionNotice({
+      detailConnectionId,
+      searchParams,
+      selectedConnection: selectedDetailConnection,
+    });
+
+    if (resolvedUrlNotice === null) {
+      return;
+    }
+
+    setUrlConnectionNotice(resolvedUrlNotice);
+    setSearchParams(clearUrlConnectionNoticeParams(searchParams), { replace: true });
+  }, [detailConnectionId, searchParams, selectedDetailConnection, setSearchParams]);
 
   if (directoryState.integrationsQuery.isPending) {
     return null;
@@ -273,19 +339,15 @@ export function IntegrationsPage() {
           ) : undefined
         }
         selectedConnectionNotice={
-          installedAppSuccessNotice !== null ? (
+          connectionNotice !== null ? (
             <Notice
               autoHideAfterMs={NoticeAutoHideDurationsMs.LONG}
               dismissible
-              resetKey={installedAppSuccessNotice.resetKey}
-              title={installedAppSuccessNotice.title}
-              variant="success"
+              resetKey={connectionNotice.resetKey}
+              title={connectionNotice.title}
+              variant={connectionNotice.variant}
             >
-              {installedAppSuccessNotice.message ?? null}
-            </Notice>
-          ) : shouldShowManagedWebhookSetupFailureNotice ? (
-            <Notice title="Connection created, webhook setup failed" variant="alert">
-              {managedWebhookSetupMessage}
+              {connectionNotice.message ?? null}
             </Notice>
           ) : undefined
         }

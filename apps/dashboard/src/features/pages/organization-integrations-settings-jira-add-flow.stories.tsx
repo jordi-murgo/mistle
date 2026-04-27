@@ -30,6 +30,14 @@ import { SETTINGS_INTEGRATIONS_QUERY_KEY } from "./use-integrations-directory-st
 const IntegrationRegistry = createBrowserIntegrationRegistry();
 const StoryControlPlaneApiOrigin = "https://control-plane.example.com";
 const StoryNow = "2026-04-27T00:00:00.000Z";
+const StoryJiraWebhookCreatedSetup = {
+  status: "created",
+  webhookSourceId: "iws_jira_story",
+} satisfies ManagedWebhookSetupResult;
+const StoryJiraWebhookFailureSetup = {
+  status: "failed",
+  message: "Jira admin webhook creation failed (403): Forbidden",
+} satisfies ManagedWebhookSetupResult;
 
 type JiraAddFlowInitialEntry =
   | string
@@ -37,7 +45,7 @@ type JiraAddFlowInitialEntry =
       pathname: string;
       search: string;
       state: {
-        managedWebhookSetupMessage: string;
+        managedWebhookSetup: ManagedWebhookSetupResult;
       };
     };
 
@@ -348,6 +356,18 @@ function JiraAddFlowStory(input: {
   );
 }
 
+function createJiraResultInitialEntry(
+  managedWebhookSetup: ManagedWebhookSetupResult,
+): Exclude<JiraAddFlowInitialEntry, string> {
+  return {
+    pathname: "/integrations/jira-default",
+    search: "?connectionId=icn_jira_story",
+    state: {
+      managedWebhookSetup,
+    },
+  };
+}
+
 const pageMeta = {
   title: "Dashboard/Integrations/Jira Add Flow",
   decorators: [withDashboardPageStory],
@@ -362,10 +382,7 @@ export const AddConnection: PageStory = {
     return (
       <JiraAddFlowStory
         initialEntry="/integrations/jira-default/add"
-        managedWebhookSetup={{
-          status: "created",
-          webhookSourceId: "iws_jira_story",
-        }}
+        managedWebhookSetup={StoryJiraWebhookCreatedSetup}
       />
     );
   },
@@ -376,11 +393,8 @@ export const WebhookCreatedResult: PageStory = {
     return (
       <JiraAddFlowStory
         connections={[createJiraConnection()]}
-        initialEntry="/integrations/jira-default?connectionId=icn_jira_story"
-        managedWebhookSetup={{
-          status: "created",
-          webhookSourceId: "iws_jira_story",
-        }}
+        initialEntry={createJiraResultInitialEntry(StoryJiraWebhookCreatedSetup)}
+        managedWebhookSetup={StoryJiraWebhookCreatedSetup}
         webhookSources={[createJiraWebhookSource()]}
       />
     );
@@ -392,17 +406,8 @@ export const WebhookFailedResult: PageStory = {
     return (
       <JiraAddFlowStory
         connections={[createJiraConnection()]}
-        initialEntry={{
-          pathname: "/integrations/jira-default",
-          search: "?connectionId=icn_jira_story&managedWebhookSetup=failed",
-          state: {
-            managedWebhookSetupMessage: "Jira admin webhook creation failed (403): Forbidden",
-          },
-        }}
-        managedWebhookSetup={{
-          status: "failed",
-          message: "Jira admin webhook creation failed (403): Forbidden",
-        }}
+        initialEntry={createJiraResultInitialEntry(StoryJiraWebhookFailureSetup)}
+        managedWebhookSetup={StoryJiraWebhookFailureSetup}
       />
     );
   },

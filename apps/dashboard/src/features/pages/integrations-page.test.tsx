@@ -2,9 +2,10 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { MemoryRouter, type MemoryRouterProps, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resetDashboardConfigForTest } from "../../config.js";
@@ -104,26 +105,15 @@ async function startControlPlaneTestServer(input: { handler: ServerHandler }): P
 
 describe("IntegrationsPage", () => {
   afterEach(() => {
+    cleanup();
     globalThis.__MISTLE_RUNTIME_CONFIG__ = undefined;
     resetDashboardConfigForTest();
   });
 
   it("selects the route-requested connection after a stale directory response refreshes", async () => {
-    globalThis.__MISTLE_RUNTIME_CONFIG__ = {
-      controlPlaneApiOrigin: "https://control-plane.example.com",
-    };
-    resetDashboardConfigForTest();
+    configureDashboardRuntimeForTest("https://control-plane.example.com");
 
-    const queryClient = createTestQueryClient({
-      refetchOnMount: false,
-      staleTime: Number.POSITIVE_INFINITY,
-    });
-    queryClient.setQueryData(SESSION_QUERY_KEY, {
-      session: {
-        activeOrganizationId: "org_mistle",
-      },
-    });
-    queryClient.setQueryData(SETTINGS_INTEGRATIONS_QUERY_KEY, {
+    const queryClient = createLoadedIntegrationsQueryClient({
       targets: [createGitHubTarget()],
       connections: [
         createGitHubConnection({
@@ -134,17 +124,10 @@ describe("IntegrationsPage", () => {
       ],
     });
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter
-          initialEntries={["/integrations/github-cloud?connectionId=icn_newly_installed"]}
-        >
-          <Routes>
-            <Route element={<IntegrationsPage />} path="/integrations/:targetKey" />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    renderIntegrationsPage({
+      initialEntries: ["/integrations/github-cloud?connectionId=icn_newly_installed"],
+      queryClient,
+    });
 
     expect(
       screen
@@ -184,22 +167,10 @@ describe("IntegrationsPage", () => {
     ).toBe(false);
   });
 
-  it("shows Slack install success on the selected connection detail route", () => {
-    globalThis.__MISTLE_RUNTIME_CONFIG__ = {
-      controlPlaneApiOrigin: "https://control-plane.example.com",
-    };
-    resetDashboardConfigForTest();
+  it("shows Slack install success on the selected connection detail route", async () => {
+    configureDashboardRuntimeForTest("https://control-plane.example.com");
 
-    const queryClient = createTestQueryClient({
-      refetchOnMount: false,
-      staleTime: Number.POSITIVE_INFINITY,
-    });
-    queryClient.setQueryData(SESSION_QUERY_KEY, {
-      session: {
-        activeOrganizationId: "org_mistle",
-      },
-    });
-    queryClient.setQueryData(SETTINGS_INTEGRATIONS_QUERY_KEY, {
+    const queryClient = createLoadedIntegrationsQueryClient({
       targets: [createSlackTarget()],
       connections: [
         createSlackConnection({
@@ -209,56 +180,38 @@ describe("IntegrationsPage", () => {
       ],
     });
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter
-          initialEntries={[
-            "/integrations/slack-default?connectionId=icn_slack_installed&slackApp=installed",
-          ]}
-        >
-          <Routes>
-            <Route element={<IntegrationsPage />} path="/integrations/:targetKey" />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    renderIntegrationsPage({
+      element: <IntegrationsPageWithLocationSearch />,
+      initialEntries: [
+        "/integrations/slack-default?connectionId=icn_slack_installed&connectionNotice=installed",
+      ],
+      queryClient,
+    });
 
-    const successNoticeTitle = screen.getByText("Slack app installed and connected");
+    const successNoticeTitle = screen.getByText(
+      "The Slack app was created and connected to Mistle successfully",
+    );
     expect(successNoticeTitle).toBeTruthy();
     expect(
-      screen.getByText("The Slack app was created in Slack and connected to Mistle."),
-    ).toBeTruthy();
-    const successNoticeSection = successNoticeTitle.closest("section");
-    const selectedConnectionTitleSection = screen
-      .getByRole("textbox", { name: "Connection name" })
-      .closest("section");
-    if (successNoticeSection === null || selectedConnectionTitleSection === null) {
-      throw new Error("Expected Slack success notice to render inside the selected detail pane.");
-    }
-    expect(successNoticeSection).toBe(selectedConnectionTitleSection);
+      screen.queryByText("The Slack app was created in Slack and connected to Mistle."),
+    ).toBeNull();
+    expectNoticeInsideSelectedDetailPane(successNoticeTitle, "Slack");
     expect(
       screen
         .getByRole("button", { name: "Select connection Engineering Slack" })
         .getAttribute("aria-current"),
     ).toBe("true");
+    await waitFor(() => {
+      expect(screen.getByTestId("location-search").textContent).toBe(
+        "?connectionId=icn_slack_installed",
+      );
+    });
   });
 
-  it("shows GitHub App install success on the selected connection detail route", () => {
-    globalThis.__MISTLE_RUNTIME_CONFIG__ = {
-      controlPlaneApiOrigin: "https://control-plane.example.com",
-    };
-    resetDashboardConfigForTest();
+  it("shows GitHub App install success on the selected connection detail route", async () => {
+    configureDashboardRuntimeForTest("https://control-plane.example.com");
 
-    const queryClient = createTestQueryClient({
-      refetchOnMount: false,
-      staleTime: Number.POSITIVE_INFINITY,
-    });
-    queryClient.setQueryData(SESSION_QUERY_KEY, {
-      session: {
-        activeOrganizationId: "org_mistle",
-      },
-    });
-    queryClient.setQueryData(SETTINGS_INTEGRATIONS_QUERY_KEY, {
+    const queryClient = createLoadedIntegrationsQueryClient({
       targets: [createGitHubTarget()],
       connections: [
         createGitHubConnection({
@@ -269,36 +222,108 @@ describe("IntegrationsPage", () => {
       ],
     });
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter
-          initialEntries={[
-            "/integrations/github-cloud?connectionId=icn_github_installed&githubApp=installed",
-          ]}
-        >
-          <Routes>
-            <Route element={<IntegrationsPage />} path="/integrations/:targetKey" />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    renderIntegrationsPage({
+      element: <IntegrationsPageWithLocationSearch />,
+      initialEntries: [
+        "/integrations/github-cloud?connectionId=icn_github_installed&connectionNotice=installed",
+      ],
+      queryClient,
+    });
 
     const successNoticeTitle = screen.getByText("GitHub App connected to Mistle successfully");
     expect(successNoticeTitle).toBeTruthy();
     expect(
       screen.queryByText("Mistle is now connected to this GitHub App installation."),
     ).toBeNull();
-    const successNoticeSection = successNoticeTitle.closest("section");
-    const selectedConnectionTitleSection = screen
-      .getByRole("textbox", { name: "Connection name" })
-      .closest("section");
-    if (successNoticeSection === null || selectedConnectionTitleSection === null) {
-      throw new Error("Expected GitHub success notice to render inside the selected detail pane.");
-    }
-    expect(successNoticeSection).toBe(selectedConnectionTitleSection);
+    expectNoticeInsideSelectedDetailPane(successNoticeTitle, "GitHub");
     expect(
       screen
         .getByRole("button", { name: "Select connection Engineering GitHub" })
+        .getAttribute("aria-current"),
+    ).toBe("true");
+    await waitFor(() => {
+      expect(screen.getByTestId("location-search").textContent).toBe(
+        "?connectionId=icn_github_installed",
+      );
+    });
+  });
+
+  it("shows Jira webhook setup success on the selected connection detail route", () => {
+    configureDashboardRuntimeForTest("https://control-plane.example.com");
+
+    const queryClient = createLoadedIntegrationsQueryClient({
+      targets: [createJiraTarget()],
+      connections: [
+        createJiraConnection({
+          id: "icn_jira_created",
+          displayName: "Engineering Jira",
+        }),
+      ],
+    });
+
+    renderIntegrationsPage({
+      initialEntries: [
+        {
+          pathname: "/integrations/jira-default",
+          search: "?connectionId=icn_jira_created",
+          state: {
+            managedWebhookSetup: {
+              status: "created",
+              webhookSourceId: "iws_jira_created",
+            },
+          },
+        },
+      ],
+      queryClient,
+    });
+
+    const successNoticeTitle = screen.getByText("Jira connection and webhook created successfully");
+    expect(successNoticeTitle).toBeTruthy();
+    expectNoticeInsideSelectedDetailPane(successNoticeTitle, "Jira success");
+    expect(
+      screen
+        .getByRole("button", { name: "Select connection Engineering Jira" })
+        .getAttribute("aria-current"),
+    ).toBe("true");
+  });
+
+  it("shows Jira webhook setup failure from route state on the selected connection detail route", () => {
+    configureDashboardRuntimeForTest("https://control-plane.example.com");
+    const webhookSetupFailureMessage = "Jira admin webhook creation failed (403): Forbidden";
+
+    const queryClient = createLoadedIntegrationsQueryClient({
+      targets: [createJiraTarget()],
+      connections: [
+        createJiraConnection({
+          id: "icn_jira_created",
+          displayName: "Engineering Jira",
+        }),
+      ],
+    });
+
+    renderIntegrationsPage({
+      initialEntries: [
+        {
+          pathname: "/integrations/jira-default",
+          search: "?connectionId=icn_jira_created",
+          state: {
+            managedWebhookSetup: {
+              status: "failed",
+              message: webhookSetupFailureMessage,
+            },
+          },
+        },
+      ],
+      queryClient,
+    });
+
+    const failureNoticeTitle = screen.getByText("Connection created, webhook setup failed");
+    expect(failureNoticeTitle).toBeTruthy();
+    expect(screen.getByText(webhookSetupFailureMessage)).toBeTruthy();
+    expectNoticeInsideSelectedDetailPane(failureNoticeTitle, "Jira failure");
+    expect(
+      screen
+        .getByRole("button", { name: "Select connection Engineering Jira" })
         .getAttribute("aria-current"),
     ).toBe("true");
   });
@@ -338,21 +363,9 @@ describe("IntegrationsPage", () => {
     });
 
     try {
-      globalThis.__MISTLE_RUNTIME_CONFIG__ = {
-        controlPlaneApiOrigin: server.origin,
-      };
-      resetDashboardConfigForTest();
+      configureDashboardRuntimeForTest(server.origin);
 
-      const queryClient = createTestQueryClient({
-        refetchOnMount: false,
-        staleTime: Number.POSITIVE_INFINITY,
-      });
-      queryClient.setQueryData(SESSION_QUERY_KEY, {
-        session: {
-          activeOrganizationId: "org_mistle",
-        },
-      });
-      queryClient.setQueryData(SETTINGS_INTEGRATIONS_QUERY_KEY, {
+      const queryClient = createLoadedIntegrationsQueryClient({
         targets: [createGitHubTarget()],
         connections: [
           createGitHubConnection({
@@ -371,17 +384,10 @@ describe("IntegrationsPage", () => {
         ],
       });
 
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter
-            initialEntries={["/integrations/github-cloud?connectionId=icn_newly_installed"]}
-          >
-            <Routes>
-              <Route element={<IntegrationsPage />} path="/integrations/:targetKey" />
-            </Routes>
-          </MemoryRouter>
-        </QueryClientProvider>,
-      );
+      renderIntegrationsPage({
+        initialEntries: ["/integrations/github-cloud?connectionId=icn_newly_installed"],
+        queryClient,
+      });
 
       await waitFor(() => {
         expect(
@@ -404,6 +410,71 @@ describe("IntegrationsPage", () => {
     }
   });
 });
+
+function IntegrationsPageWithLocationSearch() {
+  const location = useLocation();
+
+  return (
+    <>
+      <IntegrationsPage />
+      <span data-testid="location-search">{location.search}</span>
+    </>
+  );
+}
+
+function renderIntegrationsPage(input: {
+  element?: ReactNode;
+  initialEntries: NonNullable<MemoryRouterProps["initialEntries"]>;
+  queryClient: QueryClient;
+}): void {
+  render(
+    <QueryClientProvider client={input.queryClient}>
+      <MemoryRouter initialEntries={input.initialEntries}>
+        <Routes>
+          <Route element={input.element ?? <IntegrationsPage />} path="/integrations/:targetKey" />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function configureDashboardRuntimeForTest(controlPlaneApiOrigin: string): void {
+  globalThis.__MISTLE_RUNTIME_CONFIG__ = {
+    controlPlaneApiOrigin,
+  };
+  resetDashboardConfigForTest();
+}
+
+function createLoadedIntegrationsQueryClient(input: {
+  targets: readonly IntegrationTarget[];
+  connections: readonly IntegrationConnection[];
+}): QueryClient {
+  const queryClient = createTestQueryClient({
+    refetchOnMount: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  queryClient.setQueryData(SESSION_QUERY_KEY, {
+    session: {
+      activeOrganizationId: "org_mistle",
+    },
+  });
+  queryClient.setQueryData(SETTINGS_INTEGRATIONS_QUERY_KEY, {
+    targets: input.targets,
+    connections: input.connections,
+  });
+  return queryClient;
+}
+
+function expectNoticeInsideSelectedDetailPane(noticeTitle: HTMLElement, noticeName: string): void {
+  const noticeSection = noticeTitle.closest("section");
+  const selectedConnectionTitleSection = screen
+    .getByRole("textbox", { name: "Connection name" })
+    .closest("section");
+  if (noticeSection === null || selectedConnectionTitleSection === null) {
+    throw new Error(`Expected ${noticeName} notice to render inside the selected detail pane.`);
+  }
+  expect(noticeSection).toBe(selectedConnectionTitleSection);
+}
 
 function createGitHubTarget(): IntegrationTarget {
   return {
@@ -515,5 +586,56 @@ function createSlackConnection(input: { id: string; displayName: string }): Inte
     resources: [],
     createdAt: "2026-04-26T00:00:00.000Z",
     updatedAt: "2026-04-26T00:00:00.000Z",
+  };
+}
+
+function createJiraTarget(): IntegrationTarget {
+  return {
+    targetKey: "jira-default",
+    familyId: "jira",
+    variantId: "jira-default",
+    enabled: true,
+    config: {},
+    displayName: "Jira",
+    description: "Jira Cloud",
+    targetHealth: {
+      configStatus: "valid",
+    },
+    connectionMethods: [
+      {
+        id: "jira-personal-api-token",
+        label: "Personal API token",
+        kind: "form",
+        secretFields: [
+          {
+            name: "apiKey",
+            label: "API token",
+            inputType: "password",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function createJiraConnection(input: { id: string; displayName: string }): IntegrationConnection {
+  return {
+    id: input.id,
+    targetKey: "jira-default",
+    displayName: input.displayName,
+    status: "active",
+    bindingCount: 0,
+    connectionMethodId: "jira-personal-api-token",
+    connectionMethodLabel: "Personal API token",
+    externalSubjectId: "https://engineering.atlassian.net",
+    configuredSecretNames: ["apiKey"],
+    config: {
+      connection_method: "jira-personal-api-token",
+      site_url: "https://engineering.atlassian.net",
+      email: "ops@example.com",
+    },
+    resources: [],
+    createdAt: "2026-04-27T00:00:00.000Z",
+    updatedAt: "2026-04-27T00:00:00.000Z",
   };
 }
