@@ -6,6 +6,10 @@ import {
   type TimerHandle,
 } from "@mistle/time";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
   Button,
   ButtonGroup,
   Card,
@@ -20,10 +24,12 @@ import {
   DropdownMenuItem,
   Field,
   FieldContent,
+  FieldDescription,
   FieldHeader,
   FieldLabel,
-  FieldLabelWithTooltip,
+  InlineCode,
   Input,
+  Label,
   MoreActionsMenu,
   Notice,
   NoticeAutoHideDurationsMs,
@@ -81,6 +87,11 @@ import { ActivityStatus } from "../shared/activity-status.js";
 import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
 import { FormPageFrame, PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
 import { useAppShellHeaderActions } from "../shell/app-shell-header-actions.js";
+import {
+  createSandboxBaseSetupScriptContextFromGeneratedInventory,
+  resolveSandboxBaseRepositoryHandles,
+  SetupScriptTimingDescription,
+} from "./sandbox-base-inventory-copy.js";
 import type {
   IntegrationConnectionSummary,
   IntegrationTargetSummary,
@@ -165,6 +176,7 @@ type SandboxProfileEditorNavigationState = {
 type SandboxProfileDraftSectionState = {
   flushDraftChanges: () => Promise<boolean>;
   hasUnpersistedChanges: boolean;
+  integrationRows?: readonly SandboxProfileBindingEditorRow[] | null;
   isSaving: boolean;
 };
 type SandboxProfileIntegrationSetupSectionId = Extract<
@@ -1370,6 +1382,7 @@ function ReadySandboxProfileEditorPage(input: {
           <SandboxProfileEditorSectionPanels
             activeSectionId={sectionId}
             draftFieldsAreDisabled={draftFieldsAreDisabled}
+            integrationDraftState={integrationDraftState}
             integrationsLoader={integrationsLoader}
             invalidateVersionBindings={input.invalidateVersionBindings}
             invalidateVersionSetupScript={input.invalidateVersionSetupScript}
@@ -1397,6 +1410,7 @@ function ReadySandboxProfileEditorPage(input: {
 function SandboxProfileEditorSectionPanels(input: {
   activeSectionId: SandboxProfileEditorSectionId;
   draftFieldsAreDisabled: boolean;
+  integrationDraftState: SandboxProfileDraftSectionState;
   integrationsLoader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
   invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
@@ -1438,6 +1452,10 @@ function SandboxProfileEditorSectionPanels(input: {
         <LoadedSandboxProfileSetupScriptSection
           disabled={input.draftFieldsAreDisabled}
           key={`${input.profileId}:${String(input.mode.version)}:setup-script`}
+          integrationRows={resolveSandboxProfileSetupScriptIntegrationRows(
+            input.integrationsLoader.initialRows,
+            input.integrationDraftState.integrationRows,
+          )}
           loader={input.setupScriptLoader}
           profileId={input.profileId}
           invalidateVersionSetupScript={input.invalidateVersionSetupScript}
@@ -1459,6 +1477,13 @@ function SandboxProfileEditorSectionPanels(input: {
       ) : null}
     </>
   );
+}
+
+export function resolveSandboxProfileSetupScriptIntegrationRows(
+  initialRows: readonly SandboxProfileBindingEditorRow[] | null,
+  draftRows: readonly SandboxProfileBindingEditorRow[] | null | undefined,
+): readonly SandboxProfileBindingEditorRow[] | null {
+  return draftRows ?? initialRows;
 }
 
 const SandboxProfileEditorTabs = [
@@ -2122,12 +2147,14 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
     onDraftStateChange?.({
       flushDraftChanges: integrationsState.flushDraftChanges,
       hasUnpersistedChanges: integrationsState.hasUnsavedChanges,
+      integrationRows: integrationsState.integrationRows,
       isSaving: integrationsState.isSubmittingIntegrationBindings,
     });
   }, [
     onDraftStateChange,
     integrationsState.flushDraftChanges,
     integrationsState.hasUnsavedChanges,
+    integrationsState.integrationRows,
     integrationsState.isSubmittingIntegrationBindings,
   ]);
 
@@ -2164,6 +2191,7 @@ function LoadedSandboxProfileSetupScriptSection(input: {
   profileId: string;
   version: number;
   disabled: boolean;
+  integrationRows: readonly SandboxProfileBindingEditorRow[] | null;
   loader: ReturnType<typeof useSandboxProfileSetupScriptLoader>;
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
@@ -2191,6 +2219,7 @@ function LoadedSandboxProfileSetupScriptSection(input: {
       invalidateVersionSetupScript={input.invalidateVersionSetupScript}
       profileId={input.profileId}
       disabled={input.disabled}
+      integrationRows={input.integrationRows}
       setupScript={input.loader.setupScript}
       version={input.version}
       {...(input.onDraftStateChange === undefined
@@ -2204,6 +2233,7 @@ function ReadySandboxProfileSetupScriptSection(input: {
   profileId: string;
   version: number;
   disabled: boolean;
+  integrationRows: readonly SandboxProfileBindingEditorRow[] | null;
   setupScript: string | null;
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
@@ -2238,7 +2268,34 @@ function ReadySandboxProfileSetupScriptSection(input: {
       saveStatus={setupScriptState.saveStatus}
       value={setupScriptState.draftValue}
       disabled={input.disabled}
+      repositoryHandles={resolveSandboxBaseRepositoryHandles(input.integrationRows)}
     />
+  );
+}
+
+type SetupScriptContextGroup = ReturnType<
+  typeof createSandboxBaseSetupScriptContextFromGeneratedInventory
+>["environmentAndToolGroups"][number];
+
+function SetupScriptContextGroupRows(input: { group: SetupScriptContextGroup }): React.JSX.Element {
+  return (
+    <section className="gap-2 flex flex-col">
+      <Label>{input.group.title}</Label>
+      <div className="flex flex-col pl-3 text-sm">
+        {input.group.rows.map((row) => (
+          <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-x-4 py-0.5" key={row.id}>
+            <span className="text-muted-foreground break-words">{row.label}</span>
+            <span
+              className={`text-muted-foreground text-left ${
+                row.valueKind === "version" ? "tabular-nums" : ""
+              }`}
+            >
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -2250,6 +2307,7 @@ export function SandboxProfileSetupScriptPanel(input: {
   errorMessage?: string | null;
   onChange?: (nextValue: string) => void;
   onBlur?: () => void;
+  repositoryHandles?: readonly string[];
 }): React.JSX.Element {
   const liveMessage =
     input.errorMessage !== null && input.errorMessage !== undefined
@@ -2257,18 +2315,15 @@ export function SandboxProfileSetupScriptPanel(input: {
       : input.saveStatus === "saved" || input.saveStatus === "saved-fading"
         ? "Saved"
         : "";
+  const setupScriptContext = createSandboxBaseSetupScriptContextFromGeneratedInventory(
+    input.repositoryHandles,
+  );
 
   return (
     <div className="max-w-5xl">
       <Field>
         <FieldHeader>
-          <FieldLabelWithTooltip
-            id="sandbox-setup-script-label"
-            tooltip="Runs once during sandbox setup after repositories, resources, and CLI tools are ready. Use it for project bootstrap steps such as dependency install, local config generation, or repo-specific setup commands."
-            tooltipLabel="Explain setup script"
-          >
-            Setup script
-          </FieldLabelWithTooltip>
+          <FieldLabel id="sandbox-setup-script-label">Setup script</FieldLabel>
         </FieldHeader>
         <FieldContent>
           <p aria-live="polite" className="sr-only" role="status">
@@ -2285,6 +2340,58 @@ export function SandboxProfileSetupScriptPanel(input: {
               value={input.value}
               {...(input.onBlur === undefined ? {} : { onBlur: input.onBlur })}
             />
+            <div className="flex flex-col pt-1">
+              <Accordion className="border-border/70 w-full border-y" multiple>
+                <AccordionItem className="border-border/70" value="how-setup-script-works">
+                  <AccordionTrigger className="rounded-none border-0 px-0 py-2.5 text-sm font-medium hover:no-underline focus-visible:border-transparent focus-visible:ring-1">
+                    Setup script behavior
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-3">
+                    <div className="gap-3 flex flex-col">
+                      <div className="gap-1 flex flex-col">
+                        <FieldDescription>{SetupScriptTimingDescription}</FieldDescription>
+                        <FieldDescription>
+                          Repositories are cloned under the working directory, using their
+                          <InlineCode variant="muted">owner/repository</InlineCode> path.
+                        </FieldDescription>
+                        {setupScriptContext.repositoryLocationGroup === null ? (
+                          <FieldDescription>
+                            For example,{" "}
+                            <InlineCode variant="muted">
+                              {setupScriptContext.repositoryLocationExample.handle}
+                            </InlineCode>{" "}
+                            is available at{" "}
+                            <InlineCode variant="muted">
+                              {setupScriptContext.repositoryLocationExample.path}
+                            </InlineCode>
+                            .
+                          </FieldDescription>
+                        ) : null}
+                      </div>
+
+                      {setupScriptContext.repositoryLocationGroup === null ? null : (
+                        <SetupScriptContextGroupRows
+                          group={setupScriptContext.repositoryLocationGroup}
+                        />
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem className="border-border/70" value="environment-and-tools">
+                  <AccordionTrigger className="rounded-none border-0 px-0 py-2.5 text-sm font-medium hover:no-underline focus-visible:border-transparent focus-visible:ring-1">
+                    Environment and installed tools
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-3">
+                    <div className="gap-5 flex flex-col">
+                      {setupScriptContext.environmentAndToolGroups.map((group) => (
+                        <SetupScriptContextGroupRows group={group} key={group.id} />
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
 
             {input.errorMessage ? (
               <div aria-live="polite" className="text-destructive text-xs" role="status">

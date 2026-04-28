@@ -23,9 +23,11 @@ import {
 } from "../sandbox-profiles/sandbox-profiles-query-keys.js";
 import type { SandboxProfileVersion } from "../sandbox-profiles/sandbox-profiles-types.js";
 import { AppShellHeaderActionsContext } from "../shell/app-shell-header-actions.js";
+import type { SandboxProfileBindingEditorRow } from "./sandbox-profile-binding-config-editor.js";
 import {
   applyPublishedSandboxProfileVersionToProfile,
   applyPublishedSandboxProfileVersionToVersions,
+  resolveSandboxProfileSetupScriptIntegrationRows,
   resolveSandboxProfileEditorVersionMode,
   SandboxProfileDefaultRedirect,
   SandboxProfileEditorPage,
@@ -1258,6 +1260,81 @@ describe("SandboxProfileEditorPage", () => {
 
     expect(editor.textContent).toContain("pnpm install");
     expect(editor.textContent).toContain("pnpm dev:bootstrap");
+    const setupScriptBehaviorTrigger = within(configurationsPanel).getByRole("button", {
+      name: "Setup script behavior",
+    });
+    const environmentAndToolsTrigger = within(configurationsPanel).getByRole("button", {
+      name: "Environment and installed tools",
+    });
+
+    expect(setupScriptBehaviorTrigger.getAttribute("aria-expanded")).toBe("false");
+    expect(environmentAndToolsTrigger.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(setupScriptBehaviorTrigger);
+    fireEvent.click(environmentAndToolsTrigger);
+
+    expect(configurationsPanel.textContent).toContain(
+      "Repositories are cloned under the working directory",
+    );
+    expect(configurationsPanel.textContent).toContain("For example, acme/web is available at");
+    expect(configurationsPanel.textContent).toContain("Execution environment");
+    expect(configurationsPanel.textContent).toContain("Package manager");
+  });
+
+  it("shows selected repository locations in the setup script context", () => {
+    renderSandboxProfileEditor({
+      routeSection: "configurations",
+      bindings: [
+        {
+          id: "binding-git",
+          connectionId: "connection-github",
+          kind: "git",
+          config: {
+            repositories: ["mistlehq/mistle"],
+          },
+        },
+      ],
+    });
+
+    const configurationsPanel = screen.getByRole("tabpanel", {
+      name: "Configurations",
+      hidden: false,
+    });
+
+    fireEvent.click(
+      within(configurationsPanel).getByRole("button", {
+        name: "Setup script behavior",
+      }),
+    );
+
+    expect(configurationsPanel.textContent).toContain("Repository locations");
+    expect(configurationsPanel.textContent).toContain("mistlehq/mistle");
+    expect(configurationsPanel.textContent).not.toContain("For example");
+  });
+
+  it("uses draft integration rows for setup script repository context", () => {
+    const initialRows: SandboxProfileBindingEditorRow[] = [
+      {
+        clientId: "initial-git-row",
+        connectionId: "connection-github",
+        kind: "git",
+        config: {
+          repositories: ["mistlehq/mistle"],
+        },
+      },
+    ];
+    const draftRows: SandboxProfileBindingEditorRow[] = [
+      {
+        clientId: "draft-git-row",
+        connectionId: "connection-github",
+        kind: "git",
+        config: {
+          repositories: ["mistlehq/dashboard"],
+        },
+      },
+    ];
+
+    expect(resolveSandboxProfileSetupScriptIntegrationRows(initialRows, draftRows)).toBe(draftRows);
   });
 
   it("renders an empty setup script editor when no script is configured", () => {
