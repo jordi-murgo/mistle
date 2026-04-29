@@ -102,6 +102,72 @@ function resolveRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((leftItem, index) => jsonValuesEqual(leftItem, right[index]));
+  }
+
+  if (!isRecord(left) || !isRecord(right)) {
+    return false;
+  }
+
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+
+  return leftKeys.every((leftKey, index) => {
+    const rightKey = rightKeys[index];
+    return rightKey === leftKey && jsonValuesEqual(left[leftKey], right[rightKey]);
+  });
+}
+
+function sandboxProfileBindingEditorRowsEqual(
+  left: SandboxProfileBindingEditorRow,
+  right: SandboxProfileBindingEditorRow,
+): boolean {
+  return (
+    left.clientId === right.clientId &&
+    left.id === right.id &&
+    left.connectionId === right.connectionId &&
+    left.kind === right.kind &&
+    jsonValuesEqual(left.config, right.config)
+  );
+}
+
+export function applySandboxProfileBindingEditorRowChanges(input: {
+  rows: readonly SandboxProfileBindingEditorRow[];
+  clientId: string;
+  changes: Partial<Omit<SandboxProfileBindingEditorRow, "clientId">>;
+}): SandboxProfileBindingEditorRow[] | null {
+  const rowIndex = input.rows.findIndex((row) => row.clientId === input.clientId);
+  const currentRow = input.rows[rowIndex];
+  if (currentRow === undefined) {
+    throw new Error(`Sandbox profile integration row '${input.clientId}' was not found.`);
+  }
+
+  const nextRow = {
+    ...currentRow,
+    ...input.changes,
+  };
+  if (sandboxProfileBindingEditorRowsEqual(currentRow, nextRow)) {
+    return null;
+  }
+
+  const nextRows = [...input.rows];
+  nextRows[rowIndex] = nextRow;
+  return nextRows;
+}
+
 export function useSandboxProfileIntegrationsLoader(input: {
   profileId: string;
   version: number;
@@ -407,14 +473,15 @@ export function useLoadedSandboxProfileIntegrationsState(input: {
     clientId: string,
     changes: Partial<Omit<SandboxProfileBindingEditorRow, "clientId">>,
   ): void {
-    const nextRows = integrationRows.map((row) =>
-      row.clientId === clientId
-        ? {
-            ...row,
-            ...changes,
-          }
-        : row,
-    );
+    const nextRows = applySandboxProfileBindingEditorRowChanges({
+      rows: integrationRows,
+      clientId,
+      changes,
+    });
+    if (nextRows === null) {
+      return;
+    }
+
     setIntegrationRows(nextRows);
     markIntegrationDirty({ clientId });
     void persistIntegrationRows(nextRows);
