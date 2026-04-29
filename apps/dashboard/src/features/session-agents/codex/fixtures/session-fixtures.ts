@@ -81,17 +81,18 @@ export const SessionComposerFixtureProps: ChatComposerViewModel = {
   onSecondarySubmit: function onSecondarySubmit() {},
   onModelChange: function onModelChange() {},
   onReasoningEffortChange: function onReasoningEffortChange() {},
-  onPendingImageFilesAdded: function onPendingImageFilesAdded() {},
+  onPendingFilesAdded: function onPendingFilesAdded() {},
   onClearPendingDiffComments: function onClearPendingDiffComments() {},
   onRemovePendingAttachment: function onRemovePendingAttachment() {},
 };
 
-export const SessionComposerFixturePropsWithPendingImageAttachments: ChatComposerViewModel = {
+export const SessionComposerFixturePropsWithPendingAttachments: ChatComposerViewModel = {
   ...SessionComposerFixtureProps,
-  composerText: "Compare the attached screenshots and summarize the UI differences.",
+  composerText: "Compare the screenshot with the attached implementation notes.",
   pendingAttachments: [
     { id: "attachment-1", name: "session-workbench-overview.png" },
-    { id: "attachment-2", name: "terminal-panel-empty-state.webp" },
+    { id: "attachment-2", name: "deployment-notes.md" },
+    { id: "attachment-3", name: "requirements.pdf" },
   ],
 };
 
@@ -111,15 +112,15 @@ export const SessionComposerFixturePropsWithPendingDiffComments: ChatComposerVie
   },
 };
 
-export const SessionComposerFixturePropsUploadingImageAttachments: ChatComposerViewModel = {
-  ...SessionComposerFixturePropsWithPendingImageAttachments,
+export const SessionComposerFixturePropsUploadingAttachments: ChatComposerViewModel = {
+  ...SessionComposerFixturePropsWithPendingAttachments,
   isUploadingAttachments: true,
   submitDisabled: true,
   submitLabel: "Uploading...",
 };
 
 export const SessionComposerFixturePropsForNonImageCapableModel: ChatComposerViewModel = {
-  ...SessionComposerFixturePropsWithPendingImageAttachments,
+  ...SessionComposerFixturePropsWithPendingAttachments,
   selectedModel: "gpt-5.3-codex-spark",
 };
 
@@ -132,7 +133,7 @@ export const SessionComposerFixtureStatusMessageForNonImageCapableModel: ChatCom
   };
 
 export const SessionComposerFixturePropsForUnavailableModel: ChatComposerViewModel = {
-  ...SessionComposerFixturePropsWithPendingImageAttachments,
+  ...SessionComposerFixturePropsWithPendingAttachments,
   selectedModel: "gpt-legacy-preview",
 };
 
@@ -142,7 +143,7 @@ export const SessionComposerFixtureStatusMessageForUnavailableModel: ChatCompose
 };
 
 export const SessionComposerFixturePropsForLoadingModel: ChatComposerViewModel = {
-  ...SessionComposerFixturePropsWithPendingImageAttachments,
+  ...SessionComposerFixturePropsWithPendingAttachments,
   submitDisabled: true,
   selectedModel: "gpt-5.4",
 };

@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import type React from "react";
 
 import {
+  CodexFixtureChatThreadEntriesWithFileAttachment,
+  CodexFixtureChatThreadEntriesWithMixedAttachments,
   CodexFixtureChatThreadEntriesWithSequentialActionGroups,
   CodexFixtureChatThreadEntriesWithStructuredPlan,
   CodexFixtureChatThreadEntriesWithThinkingGroup,
@@ -11,8 +13,8 @@ import {
   SessionComposerFixturePropsForNonImageCapableModel,
   SessionComposerFixtureStatusMessageForLoadingModel,
   SessionComposerFixtureStatusMessageForNonImageCapableModel,
-  SessionComposerFixturePropsUploadingImageAttachments,
-  SessionComposerFixturePropsWithPendingImageAttachments,
+  SessionComposerFixturePropsUploadingAttachments,
+  SessionComposerFixturePropsWithPendingAttachments,
   CodexFixtureSessionEntriesWithExploringGroup,
 } from "../session-agents/codex/fixtures/session-fixtures.js";
 import {
@@ -98,15 +100,27 @@ export const WithStructuredPlan: Story = {
   },
 };
 
-export const WithPendingImageAttachments: Story = {
+export const WithFileAttachment: Story = {
   args: {
-    composerViewModel: SessionComposerFixturePropsWithPendingImageAttachments,
+    chatEntries: CodexFixtureChatThreadEntriesWithFileAttachment,
   },
 };
 
-export const UploadingImageAttachments: Story = {
+export const WithMixedAttachments: Story = {
   args: {
-    composerViewModel: SessionComposerFixturePropsUploadingImageAttachments,
+    chatEntries: CodexFixtureChatThreadEntriesWithMixedAttachments,
+  },
+};
+
+export const WithPendingAttachments: Story = {
+  args: {
+    composerViewModel: SessionComposerFixturePropsWithPendingAttachments,
+  },
+};
+
+export const UploadingAttachments: Story = {
+  args: {
+    composerViewModel: SessionComposerFixturePropsUploadingAttachments,
     statusMessage: {
       message: "Uploading attachments...",
       variant: "default",

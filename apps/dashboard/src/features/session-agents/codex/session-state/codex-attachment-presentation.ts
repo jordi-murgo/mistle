@@ -1,5 +1,7 @@
 import type { CodexTurnInputLocalImageItem } from "@mistle/integrations-definitions/agent-runtimes/codex/client";
 
+import type { ChatAttachment } from "../../../chat/chat-types.js";
+
 export const AttachedImagesHeader = "Attached images:";
 export const AttachedFilesHeader = "Attached files:";
 
@@ -39,13 +41,6 @@ export function buildAttachedAttachmentPathsText(input: AttachmentPromptParts): 
   return sections.join("\n\n");
 }
 
-export function buildAttachedImagePathsText(paths: readonly string[]): string {
-  return buildAttachedAttachmentPathsText({
-    imageAttachments: paths.map((path) => ({ path })),
-    fileAttachments: [],
-  });
-}
-
 export function buildPromptWithAttachedAttachmentPaths(
   input: {
     prompt: string;
@@ -66,17 +61,6 @@ export function buildPromptWithAttachedAttachmentPaths(
   }
 
   return `${trimmedPrompt}\n\n${attachedPathsText}`;
-}
-
-export function buildPromptWithAttachedImagePaths(input: {
-  prompt: string;
-  attachmentPaths: readonly string[];
-}): string {
-  return buildPromptWithAttachedAttachmentPaths({
-    prompt: input.prompt,
-    imageAttachments: input.attachmentPaths.map((path) => ({ path })),
-    fileAttachments: [],
-  });
 }
 
 function splitUploadedAttachments(input: {
@@ -130,6 +114,14 @@ function toLocalImageAttachments(
   });
 }
 
+function toDisplayAttachment(attachment: UploadedComposerAttachment): ChatAttachment {
+  return {
+    kind: attachment.kind,
+    path: attachment.path,
+    name: attachment.originalFilename,
+  };
+}
+
 export function buildMixedAttachmentTurnPrompt(input: {
   prompt: string;
   uploadedAttachments: readonly UploadedComposerAttachment[];
@@ -151,7 +143,7 @@ export function resolveMixedAttachmentTurnRepresentation(input: {
 }): {
   prompt: string;
   submittedAttachments: readonly CodexTurnInputLocalImageItem[];
-  displayAttachments: readonly CodexTurnInputLocalImageItem[];
+  displayAttachments: readonly ChatAttachment[];
 } {
   const imageAttachments = toLocalImageAttachments(input.uploadedAttachments);
 
@@ -162,42 +154,8 @@ export function resolveMixedAttachmentTurnRepresentation(input: {
       supportsImageInspection: input.supportsImageInspection,
     }),
     submittedAttachments: input.supportsImageInspection ? imageAttachments : [],
-    displayAttachments: imageAttachments,
-  };
-}
-
-export function buildTurnPrompt(input: {
-  prompt: string;
-  attachmentPaths: readonly string[];
-  supportsImageInspection: boolean;
-}): string {
-  if (input.supportsImageInspection) {
-    return input.prompt.trim();
-  }
-
-  return buildPromptWithAttachedImagePaths({
-    prompt: input.prompt,
-    attachmentPaths: input.attachmentPaths,
-  });
-}
-
-export function resolveTurnRepresentation(input: {
-  prompt: string;
-  attachmentPaths: readonly string[];
-  uploadedAttachments: readonly CodexTurnInputLocalImageItem[];
-  supportsImageInspection: boolean;
-}): {
-  prompt: string;
-  submittedAttachments: readonly CodexTurnInputLocalImageItem[];
-  displayAttachments: readonly CodexTurnInputLocalImageItem[];
-} {
-  return {
-    prompt: buildTurnPrompt({
-      prompt: input.prompt,
-      attachmentPaths: input.attachmentPaths,
-      supportsImageInspection: input.supportsImageInspection,
-    }),
-    submittedAttachments: input.supportsImageInspection ? input.uploadedAttachments : [],
-    displayAttachments: input.uploadedAttachments,
+    displayAttachments: input.uploadedAttachments.map((attachment) =>
+      toDisplayAttachment(attachment),
+    ),
   };
 }

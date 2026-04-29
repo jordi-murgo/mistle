@@ -317,7 +317,35 @@ describe("ChatThread", () => {
       />,
     );
 
-    expect(screen.getByText("Image attached: screenshot.png")).toBeTruthy();
+    expect(screen.getByText("Image: screenshot.png")).toBeTruthy();
+  });
+
+  it("renders user file attachments as attachment rows", () => {
+    render(
+      <ChatThread
+        entries={[
+          {
+            id: "user_1",
+            turnId: "turn_1",
+            kind: "user-message",
+            text: "Check this file",
+            attachments: [
+              {
+                kind: "file",
+                path: "/root/.local/attachments/thread_1/requirements.pdf",
+                name: "requirements.pdf",
+              },
+            ],
+            status: "completed",
+          },
+        ]}
+        isRespondingToServerRequest={false}
+        onRespondToServerRequest={() => {}}
+        pendingServerRequests={[]}
+      />,
+    );
+
+    expect(screen.getByText("File: requirements.pdf")).toBeTruthy();
   });
 
   it("renders trailing user actions and routes their action id", () => {
