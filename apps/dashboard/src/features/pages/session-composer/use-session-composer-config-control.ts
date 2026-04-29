@@ -1,8 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 
-import type { CodexSessionConfigState } from "../../session-agents/codex/session-state/session-bootstrap/index.js";
-import type { SessionBootstrapResult } from "../../session-agents/codex/session-state/session-bootstrap/index.js";
+import type {
+  CodexSessionConfigState,
+  SessionBootstrapResult,
+} from "../../session-agents/codex/session-state/session-bootstrap/index.js";
 import type { ComposerConfigSnapshot } from "./session-composer-config.js";
+import { resolveActiveComposerModel } from "./session-composer-model-readiness.js";
 
 export type SessionComposerConfigControl = {
   selectedModel: string | null;
@@ -23,6 +26,7 @@ export function useSessionComposerConfigControl(input: {
   clearSessionErrorMessage: () => void;
   codexConfig: CodexSessionConfigState;
 }): SessionComposerConfigControl {
+  const { availableModels, configSnapshot } = input.bootstrap.establishedSnapshot;
   const { batchWriteConfig, isBatchWritingConfig, isWritingConfigValue, writeConfigValue } =
     input.codexConfig;
   const [composerConfigOverrides, setComposerConfigOverrides] = useState<ComposerConfigSnapshot>({
@@ -31,27 +35,44 @@ export function useSessionComposerConfigControl(input: {
   });
 
   const selectedModel = useMemo(
-    () => composerConfigOverrides.model ?? input.bootstrap.establishedSnapshot.configSnapshot.model,
-    [composerConfigOverrides.model, input.bootstrap.establishedSnapshot.configSnapshot.model],
+    () =>
+      composerConfigOverrides.model ??
+      configSnapshot.model ??
+      resolveActiveComposerModel({
+        availableModels,
+        selectedModel: null,
+      })?.model ??
+      null,
+    [availableModels, composerConfigOverrides.model, configSnapshot.model],
   );
 
-  const selectedReasoningEffort = useMemo(
-    () =>
-      composerConfigOverrides.modelReasoningEffort ??
-      input.bootstrap.establishedSnapshot.configSnapshot.modelReasoningEffort,
-    [
-      composerConfigOverrides.modelReasoningEffort,
-      input.bootstrap.establishedSnapshot.configSnapshot.modelReasoningEffort,
-    ],
-  );
+  const selectedReasoningEffort = useMemo(() => {
+    const explicitReasoningEffort =
+      composerConfigOverrides.modelReasoningEffort ?? configSnapshot.modelReasoningEffort;
+    if (explicitReasoningEffort !== null) {
+      return explicitReasoningEffort;
+    }
+
+    return (
+      resolveActiveComposerModel({
+        availableModels,
+        selectedModel,
+      })?.defaultReasoningEffort ?? null
+    );
+  }, [
+    availableModels,
+    composerConfigOverrides.modelReasoningEffort,
+    configSnapshot.modelReasoningEffort,
+    selectedModel,
+  ]);
 
   const modelOptions = useMemo(
     () =>
-      input.bootstrap.establishedSnapshot.availableModels.map((model) => ({
+      availableModels.map((model) => ({
         value: model.model,
         label: model.displayName,
       })),
-    [input.bootstrap.establishedSnapshot.availableModels],
+    [availableModels],
   );
 
   const setModel = useCallback(
