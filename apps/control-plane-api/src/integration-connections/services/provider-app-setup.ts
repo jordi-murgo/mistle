@@ -42,6 +42,7 @@ const UnknownRecordSchema = z.record(z.string(), z.unknown());
 const StringRecordSchema = z.record(z.string(), z.string());
 
 type CompletedProviderAppSetup = {
+  callbackRouteKey: string;
   id: string;
   targetKey: string;
   routeSegment: string;
@@ -54,9 +55,7 @@ type ProviderAppSetupStartInvalidInputCode =
   | typeof IntegrationConnectionsBadRequestCodes.INVALID_UPDATE_CONNECTION_INPUT;
 
 type ProviderAppSetupCompleteInvalidInputCode =
-  | typeof IntegrationConnectionsBadRequestCodes.INVALID_GITHUB_APP_INSTALLATION_COMPLETE_INPUT
-  | typeof IntegrationConnectionsBadRequestCodes.INVALID_GITHUB_APP_MANIFEST_COMPLETE_INPUT
-  | typeof IntegrationConnectionsBadRequestCodes.INVALID_SLACK_APP_INSTALLATION_COMPLETE_INPUT
+  | typeof IntegrationConnectionsBadRequestCodes.INVALID_PROVIDER_APP_SETUP_COMPLETE_INPUT
   | typeof IntegrationConnectionsBadRequestCodes.INVALID_UPDATE_CONNECTION_INPUT;
 
 function resolveSetupFlowOrThrow(input: {
@@ -99,6 +98,27 @@ function assertConnectionMethodMatchesSetupFlow(input: {
   throw new BadRequestError(
     IntegrationConnectionsBadRequestCodes.FORM_CONNECTION_METHOD_NOT_SUPPORTED,
     `Integration setup flow '${input.routeSegment}' requires connection method '${input.methodId}', received '${receivedMethod}'.`,
+  );
+}
+
+function assertCallbackRouteKeyMatchesSetupFlow(input: {
+  callbackRouteKey: string;
+  flow: IntegrationProviderAppSetupFlowCapability;
+  invalidInputCode: ProviderAppSetupCompleteInvalidInputCode;
+  routeSegment: string;
+}): void {
+  const acceptedCallbackRouteKeys = [
+    input.flow.callbackRouteKey,
+    ...(input.flow.additionalCallbackRouteKeys ?? []),
+  ];
+
+  if (acceptedCallbackRouteKeys.includes(input.callbackRouteKey)) {
+    return;
+  }
+
+  throw new BadRequestError(
+    input.invalidInputCode,
+    `Provider app setup callback route key '${input.callbackRouteKey}' does not match setup flow '${input.routeSegment}'.`,
   );
 }
 
@@ -377,6 +397,7 @@ export async function completeProviderAppSetup(
     controlPlaneBaseUrl: string;
   },
   input: {
+    callbackRouteKey: string;
     query: Record<string, string>;
     invalidInputCode: ProviderAppSetupCompleteInvalidInputCode;
   },
@@ -426,6 +447,12 @@ export async function completeProviderAppSetup(
     flows: definition.providerAppSetup.flows,
     routeSegment: stateMetadata.routeSegment,
   });
+  assertCallbackRouteKeyMatchesSetupFlow({
+    callbackRouteKey: input.callbackRouteKey,
+    flow,
+    invalidInputCode: input.invalidInputCode,
+    routeSegment: stateMetadata.routeSegment,
+  });
   if (flow.complete === undefined) {
     throw new BadRequestError(
       IntegrationConnectionsBadRequestCodes.FORM_CONNECTION_METHOD_NOT_SUPPORTED,
@@ -459,6 +486,7 @@ export async function completeProviderAppSetup(
   let setupResult;
   try {
     setupResult = await flow.complete({
+      callbackRouteKey: input.callbackRouteKey,
       connection: {
         id: connection.id,
         status: connection.status,
@@ -531,6 +559,7 @@ export async function completeProviderAppSetup(
 
   return {
     ...completedConnection,
+    callbackRouteKey: input.callbackRouteKey,
     routeSegment: stateMetadata.routeSegment,
   };
 }
