@@ -1,6 +1,8 @@
 import type {
   IntegrationConnectionMethodDetailFieldSource,
   IntegrationConnectionMethodDetailMetadata,
+  IntegrationFormConnectionMethodPostCreateMetadata,
+  IntegrationManagedWebhookSourcePostCreateMetadata,
 } from "@mistle/integrations-core";
 import { z } from "zod";
 
@@ -95,6 +97,20 @@ const IntegrationConnectionMethodDetailSchema: z.ZodType<IntegrationConnectionMe
     })
     .strict();
 
+const IntegrationFormConnectionMethodPostCreateSchema: z.ZodType<IntegrationFormConnectionMethodPostCreateMetadata> =
+  z
+    .object({
+      managedWebhookSource: z
+        .object({
+          autoCreate: z.boolean().optional(),
+          failureNoticeTitle: z.string().min(1),
+          successNoticeTitle: z.string().min(1),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict();
+
 const IntegrationSetupConnectionExternalSubjectRequirementSchema = z
   .object({
     kind: z.literal("connection-external-subject"),
@@ -183,6 +199,7 @@ export const IntegrationTargetSchema = z
               kind: z.literal("form"),
               connectionDetail: IntegrationConnectionMethodDetailSchema.optional(),
               createBehavior: z.enum(["single-step", "draft-then-setup"]).optional(),
+              postCreate: IntegrationFormConnectionMethodPostCreateSchema.optional(),
               setupFlow: z
                 .object({
                   completionRequirements: IntegrationSetupCompletionRequirementSchema.optional(),
@@ -600,6 +617,8 @@ export type IntegrationTarget = z.infer<typeof IntegrationTargetSchema>;
 export type IntegrationConnectionMethod = NonNullable<
   IntegrationTarget["connectionMethods"]
 >[number];
+export type IntegrationManagedWebhookSourcePostCreate =
+  IntegrationManagedWebhookSourcePostCreateMetadata;
 export type IntegrationConnection = z.infer<typeof IntegrationConnectionSchema>;
 export type IntegrationConnectionResourceSummary = NonNullable<
   IntegrationConnection["resources"]

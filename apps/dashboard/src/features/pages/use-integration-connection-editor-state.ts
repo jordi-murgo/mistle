@@ -1,5 +1,4 @@
 import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
-import { JiraConnectionMethodIds } from "@mistle/integrations-definitions/browser";
 import { systemScheduler, type Scheduler, type TimerHandle } from "@mistle/time";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -10,9 +9,11 @@ import type {
   IntegrationConnectionEditorState,
   IntegrationConnectionMethodId,
 } from "../integrations/integration-connection-editor.js";
+import { resolveFormConnectionMethodManagedWebhookSourcePostCreate } from "../integrations/integration-connection-method-metadata.js";
 import { resolveSelectedConnectionMethod } from "../integrations/integration-connection-method-selection.js";
 import type {
   IntegrationConnectionMethod,
+  IntegrationManagedWebhookSourcePostCreate,
   ManagedWebhookSetupResult,
 } from "../integrations/integrations-service-shared.js";
 import {
@@ -568,13 +569,14 @@ export function useIntegrationConnectionEditorState(
   };
 }
 
-export function isJiraPersonalApiTokenCreateResult(input: {
+export function resolveManagedWebhookSourcePostCreate(input: {
   editor: IntegrationConnectionEditorState;
   methodId: IntegrationConnectionMethodId;
-}): boolean {
-  return (
-    input.editor.mode === "create" &&
-    input.editor.targetFamilyId === "jira" &&
-    input.methodId === JiraConnectionMethodIds.PERSONAL_API_TOKEN
-  );
+}): IntegrationManagedWebhookSourcePostCreate | null {
+  if (input.editor.mode !== "create") {
+    return null;
+  }
+
+  const method = input.editor.methods.find((candidate) => candidate.id === input.methodId) ?? null;
+  return resolveFormConnectionMethodManagedWebhookSourcePostCreate(method);
 }
