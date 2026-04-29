@@ -147,16 +147,13 @@ export const SteeringTurn: Story = {
   },
 };
 
-export const WithGitBranch: Story = {
+export const WithRepositoryStatusAndContextUsage: Story = {
   args: {
-    composerText: "Summarize the current dashboard regression.",
-    gitBranchLabel: "feature/show-session-branch",
-  },
-};
-
-export const WithGitBranchAndPullRequest: Story = {
-  args: {
-    composerText: "Summarize the current dashboard regression.",
+    composerText: "Summarize the remaining implementation risk.",
+    contextUsage: {
+      label: "Context 82% left",
+      title: "42,000 used of 200,000 window",
+    },
     gitBranchLabel: "feature/show-session-branch",
     pullRequest: {
       isDraft: false,

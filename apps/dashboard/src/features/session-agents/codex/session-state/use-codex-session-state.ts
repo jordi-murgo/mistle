@@ -25,7 +25,12 @@ import {
   reduceCodexApprovalRequestsState,
   type CodexApprovalRequestEntry,
 } from "../approvals/codex-approval-requests-state.js";
-import { type ConnectedCodexSession, type StartSessionStep } from "./codex-session-types.js";
+import { parseThreadTokenUsageSnapshot } from "./codex-session-events.js";
+import {
+  type CodexThreadTokenUsageSnapshot,
+  type ConnectedCodexSession,
+  type StartSessionStep,
+} from "./codex-session-types.js";
 import { readCodexThreadState } from "./codex-thread-read-state.js";
 import { resolvePrimaryRepositoryThreadSwitchAction } from "./primary-repository-thread-switch.js";
 import {
@@ -123,6 +128,7 @@ type CodexSessionMessageState = {
 export type UseCodexSessionStateResult = {
   lifecycle: CodexSessionConnectionLifecycleState;
   repositoryStatusRefreshEpoch: number;
+  threadTokenUsageSnapshot: CodexThreadTokenUsageSnapshot | null;
   threadAuthority: {
     providerThreadId: string | null;
     resolveCliLaunchTarget: () => Promise<CodexCliLaunchTarget>;
@@ -153,6 +159,8 @@ export function useCodexSessionState(input: {
   const [repositoryStatusRefreshEpoch, setRepositoryStatusRefreshEpoch] = useState(0);
   const [lifecycleErrorMessage, setLifecycleErrorMessage] = useState<string | null>(null);
   const [sessionErrorMessage, setSessionErrorMessage] = useState<string | null>(null);
+  const [threadTokenUsageSnapshot, setThreadTokenUsageSnapshot] =
+    useState<CodexThreadTokenUsageSnapshot | null>(null);
 
   const [serverRequestsState, dispatchServerRequestsAction] = useReducer(
     reduceCodexApprovalRequestsState,
@@ -234,10 +242,22 @@ export function useCodexSessionState(input: {
     });
   }, []);
 
+  const handleSessionNotificationReceived = useCallback(
+    (notification: CodexJsonRpcNotification): void => {
+      const tokenUsageSnapshot = parseThreadTokenUsageSnapshot(notification);
+      if (tokenUsageSnapshot !== null) {
+        setThreadTokenUsageSnapshot(tokenUsageSnapshot);
+      }
+
+      handleNotificationReceived(notification);
+    },
+    [handleNotificationReceived],
+  );
+
   const { lifecycle, updateActiveThread } = useCodexSessionConnection({
     connectionGenerationRef,
     ensureCurrentGeneration,
-    handleChatNotificationReceived: handleNotificationReceived,
+    handleChatNotificationReceived: handleSessionNotificationReceived,
     onTurnCompleted: () => {
       setRepositoryStatusRefreshEpoch((currentEpoch) => currentEpoch + 1);
     },
@@ -914,6 +934,7 @@ export function useCodexSessionState(input: {
   return {
     lifecycle,
     repositoryStatusRefreshEpoch,
+    threadTokenUsageSnapshot,
     threadAuthority,
     threads,
     chat,

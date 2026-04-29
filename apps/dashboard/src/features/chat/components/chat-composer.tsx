@@ -12,11 +12,15 @@ import {
   SelectValue,
   Textarea,
   TextLink,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@mistle/ui";
 import {
   ArrowCircleUpIcon,
   ChatCircleTextIcon,
   CircleNotchIcon,
+  GaugeIcon,
   GitBranchIcon,
   GitPullRequestIcon,
   PlusIcon,
@@ -71,6 +75,10 @@ export type ChatComposerViewModel = {
     title: string;
     url: string;
   } | null;
+  contextUsage: {
+    label: string;
+    title: string;
+  } | null;
   pendingDiffCommentSummary: {
     count: number;
     label: string;
@@ -113,6 +121,7 @@ export function ChatComposer({
   composerText,
   gitBranchLabel,
   pullRequest,
+  contextUsage,
   pendingDiffCommentSummary,
   pendingAttachments,
   modelOptions,
@@ -403,28 +412,49 @@ export function ChatComposer({
           )}
         </div>
       </div>
-      {gitBranchLabel === null && pullRequest === null ? null : (
-        <div className="text-muted-foreground flex items-center gap-4 px-1.5 pt-2 text-sm">
-          {gitBranchLabel === null ? null : (
-            <div className="flex items-center gap-1.5" data-repository-branch-state="present">
-              <GitBranchIcon aria-hidden="true" className="size-4" />
-              <span>{gitBranchLabel}</span>
-            </div>
-          )}
-          {pullRequest === null ? null : (
-            <TextLink
-              className="items-center gap-1.5"
-              href={pullRequest.url}
-              opensInNewWindow
-              title={pullRequest.title}
-              variant="subtle"
-            >
-              <GitPullRequestIcon aria-hidden="true" className="size-4 shrink-0" />
-              <span className="truncate">
-                PR #{String(pullRequest.number)}
-                {pullRequest.isDraft ? " Draft" : ""}
-              </span>
-            </TextLink>
+      {gitBranchLabel === null && pullRequest === null && contextUsage === null ? null : (
+        <div className="text-muted-foreground flex items-center justify-between gap-4 px-1.5 pt-2 text-sm">
+          <div className="flex min-w-0 items-center gap-4">
+            {gitBranchLabel === null ? null : (
+              <div
+                className="flex min-w-0 items-center gap-1.5"
+                data-repository-branch-state="present"
+              >
+                <GitBranchIcon aria-hidden="true" className="size-4 shrink-0" />
+                <span className="truncate">{gitBranchLabel}</span>
+              </div>
+            )}
+            {pullRequest === null ? null : (
+              <TextLink
+                className="min-w-0 items-center gap-1.5 [&_[data-icon=inline-end]]:translate-y-0"
+                href={pullRequest.url}
+                opensInNewWindow
+                title={pullRequest.title}
+                variant="subtle"
+              >
+                <GitPullRequestIcon aria-hidden="true" className="size-4 shrink-0" />
+                <span className="truncate">
+                  PR #{String(pullRequest.number)}
+                  {pullRequest.isDraft ? " Draft" : ""}
+                </span>
+              </TextLink>
+            )}
+          </div>
+          {contextUsage === null ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    className="ml-auto flex shrink-0 cursor-default items-center gap-1.5 outline-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    tabIndex={0}
+                  />
+                }
+              >
+                <GaugeIcon aria-hidden="true" className="size-4" />
+                <span>{contextUsage.label}</span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{contextUsage.title}</TooltipContent>
+            </Tooltip>
           )}
         </div>
       )}
