@@ -2,7 +2,11 @@ import { buildUrlWithPath } from "@mistle/http";
 import { z } from "zod";
 
 import { SlackConnectionMethodId } from "./auth.js";
-import { SlackAppManifestBotEvents, SlackAppManifestBotScopes } from "./manifest.js";
+import {
+  SlackAppManifestBotEvents,
+  SlackAppManifestBotScopes,
+  SlackAppManifestTemplate,
+} from "./manifest.js";
 
 const SlackOAuthAccessSuccessResponseSchema = z
   .object({
@@ -74,7 +78,17 @@ export type SlackManifestCreateErrorResponse = z.output<
   typeof SlackManifestCreateErrorResponseSchema
 >;
 
+const SlackAppManifestTemplateRedirectUrls = new Set(
+  SlackAppManifestTemplate.oauth_config.redirect_urls,
+);
+
+const MistleOwnedSlackRedirectUrlPaths = new Set([
+  "/p/integration/callbacks/setup/slack-app-installation",
+  "/p/identity-linking/callbacks/slack",
+]);
+
 function mergeUniqueStrings(input: {
+  excludedValues?: ReadonlySet<string>;
   existing: unknown;
   requiredValues: ReadonlyArray<string>;
 }): string[] {
@@ -82,7 +96,17 @@ function mergeUniqueStrings(input: {
     Array.isArray(input.existing) && input.existing.every((entry) => typeof entry === "string")
       ? input.existing
       : [];
-  return [...new Set([...values, ...input.requiredValues])];
+  const excludedValues = input.excludedValues;
+  const retainedValues =
+    excludedValues === undefined ? values : values.filter((value) => !excludedValues.has(value));
+  return [...new Set([...retainedValues, ...input.requiredValues])];
+}
+
+function removeMistleOwnedSlackRedirectUrls(values: readonly string[]): string[] {
+  return values.filter(
+    (value) =>
+      !URL.canParse(value) || !MistleOwnedSlackRedirectUrlPaths.has(new URL(value).pathname),
+  );
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -193,7 +217,12 @@ export function buildSlackAppManifest(input: {
     oauth_config: {
       ...oauthConfig,
       redirect_urls: mergeUniqueStrings({
-        existing: oauthConfig["redirect_urls"],
+        excludedValues: SlackAppManifestTemplateRedirectUrls,
+        existing:
+          Array.isArray(oauthConfig["redirect_urls"]) &&
+          oauthConfig["redirect_urls"].every((entry) => typeof entry === "string")
+            ? removeMistleOwnedSlackRedirectUrls(oauthConfig["redirect_urls"])
+            : oauthConfig["redirect_urls"],
         requiredValues: [
           redirectUrl,
           buildUrlWithPath(input.controlPlaneBaseUrl, "/p/identity-linking/callbacks/slack"),
@@ -208,4 +237,15 @@ export function buildSlackAppManifest(input: {
       },
     },
   };
+}
+
+export function buildSlackAppManifestDraft(input: {
+  controlPlaneBaseUrl: string;
+  webhookCallbackUrl: string;
+}): Record<string, unknown> {
+  return buildSlackAppManifest({
+    controlPlaneBaseUrl: input.controlPlaneBaseUrl,
+    manifest: SlackAppManifestTemplate,
+    webhookCallbackUrl: input.webhookCallbackUrl,
+  });
 }

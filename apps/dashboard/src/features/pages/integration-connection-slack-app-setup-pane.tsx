@@ -1,7 +1,4 @@
-import {
-  SlackAppManifestTemplate,
-  SlackConnectionMethodId,
-} from "@mistle/integrations-definitions/browser";
+import { SlackConnectionMethodId } from "@mistle/integrations-definitions/browser";
 import { systemScheduler } from "@mistle/time";
 import {
   Button,
@@ -28,8 +25,8 @@ import {
   updateFormIntegrationConnection,
 } from "../integrations/integrations-service.js";
 import type { IntegrationConnection } from "../integrations/integrations-service.js";
+import { ManifestCallbackJsonEditor } from "../integrations/manifest-callback-json-editor.js";
 import {
-  ManifestJsonEditor,
   type ManifestJsonValidation,
   createManifestJsonDraft,
   parseManifestJsonObject,
@@ -53,6 +50,10 @@ import {
   IntegrationConnectionSetupWebhookCallbackValue,
   type IntegrationConnectionSetupMode,
 } from "./integration-connection-setup-flow.js";
+import {
+  type IntegrationSetupAppManifestDraftBuilder,
+  resolveManifestDraftControlPlaneBaseUrl,
+} from "./integration-connection-setup-manifest-draft.js";
 import {
   hasConfiguredSetupSecretField,
   resolveConfiguredSetupSecretFieldKeys,
@@ -91,8 +92,6 @@ const SlackRequiredExistingAppSecretFieldKeys = [
   "botToken",
   "signingSecret",
 ] satisfies readonly SlackExistingAppSecretFieldKey[];
-
-const SlackDraftManifest = createManifestJsonDraft(SlackAppManifestTemplate);
 
 function normalizeInputValue(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -232,6 +231,7 @@ function resolveSlackExistingAppSetupSavedFieldKeys(
 
 function SlackManifestSetupPanel(input: {
   appConfigToken: string;
+  manifestCallbackState: ManifestWebhookCallbackState;
   manifestValue: string;
   manifestValidation: ManifestJsonValidation;
   onAppConfigTokenChange: (value: string) => void;
@@ -272,7 +272,8 @@ function SlackManifestSetupPanel(input: {
             Slack.
           </p>
         </div>
-        <ManifestJsonEditor
+        <ManifestCallbackJsonEditor
+          callbackState={input.manifestCallbackState}
           id="slack-app-manifest-editor"
           onChange={input.onManifestChange}
           validation={input.manifestValidation}
@@ -402,13 +403,17 @@ function SlackSetupUrls(input: {
   );
 }
 
-export function SlackAppSetupPane(input: { connection: IntegrationConnection }): React.JSX.Element {
+export function SlackAppSetupPane(input: {
+  connection: IntegrationConnection;
+  manifestDraftBuilder: IntegrationSetupAppManifestDraftBuilder;
+}): React.JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [setupMode, setSetupMode] = useState<SlackSetupMode>(() =>
     isSlackAppInstalled(input.connection) ? "existing-app" : "manifest",
   );
-  const [manifestValue, setManifestValue] = useState(SlackDraftManifest);
+  const [manifestValue, setManifestValue] = useState("");
+  const [hasEditedManifest, setHasEditedManifest] = useState(false);
   const [appConfigToken, setAppConfigToken] = useState("");
   const [existingAppDraft, setExistingAppDraft] = useState(() =>
     createInitialExistingAppDraft(input.connection),
@@ -428,15 +433,28 @@ export function SlackAppSetupPane(input: { connection: IntegrationConnection }):
     }),
   );
   const webhookCallbackState = useManifestWebhookCallbackState({
-    enabled: setupMode === "existing-app",
+    enabled: true,
     connectionId: input.connection.id,
   });
+  const webhookCallbackUrl =
+    webhookCallbackState.kind === "ready" ? webhookCallbackState.value : null;
+  const resolvedManifestValue =
+    webhookCallbackUrl === null || hasEditedManifest
+      ? manifestValue
+      : createManifestJsonDraft(
+          input.manifestDraftBuilder({
+            controlPlaneBaseUrl: resolveManifestDraftControlPlaneBaseUrl({
+              webhookCallbackUrl,
+            }),
+            webhookCallbackUrl,
+          }),
+        );
 
   const startManifestMutation = useMutation({
     mutationFn: async () =>
       startSlackAppManifestCreation({
         connectionId: input.connection.id,
-        manifest: parseManifestJsonObject(manifestValue),
+        manifest: parseManifestJsonObject(resolvedManifestValue),
         appConfigToken,
       }),
   });
@@ -645,9 +663,11 @@ export function SlackAppSetupPane(input: { connection: IntegrationConnection }):
     resetFieldFeedback(fieldKey);
   }
 
-  const manifestValidation = validateManifestJsonObject(manifestValue);
+  const manifestValidation = validateManifestJsonObject(resolvedManifestValue);
   const canCreateManifest =
-    manifestValidation.status === "valid" && appConfigToken.trim().length > 0;
+    manifestValidation.status === "valid" &&
+    webhookCallbackState.kind === "ready" &&
+    appConfigToken.trim().length > 0;
   const requiredSecretsReady = SlackRequiredExistingAppSecretFieldKeys.every((fieldKey) =>
     isSlackExistingAppRequiredSecretReady({
       fieldKey,
@@ -725,10 +745,14 @@ export function SlackAppSetupPane(input: { connection: IntegrationConnection }):
         manifestContent={
           <SlackManifestSetupPanel
             appConfigToken={appConfigToken}
+            manifestCallbackState={webhookCallbackState}
             manifestValidation={manifestValidation}
-            manifestValue={manifestValue}
+            manifestValue={resolvedManifestValue}
             onAppConfigTokenChange={setAppConfigToken}
-            onManifestChange={setManifestValue}
+            onManifestChange={(nextValue) => {
+              setHasEditedManifest(true);
+              setManifestValue(nextValue);
+            }}
           />
         }
         onModeChange={setSetupMode}

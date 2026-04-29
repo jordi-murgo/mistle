@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSlackAppManifestCreateUrl,
   buildSlackAppManifest,
+  buildSlackAppManifestDraft,
   buildSlackOAuthAccessConnectionSecrets,
   buildSlackOAuthAccessUrl,
   buildSlackManifestConnectionConfig,
@@ -67,13 +68,13 @@ describe("buildSlackAppManifest", () => {
           },
         },
         oauth_config: {
+          redirect_urls: SlackAppManifestTemplate.oauth_config.redirect_urls,
           scopes: {
             bot: ["chat:write"],
           },
         },
       },
     });
-
     expect(manifest).toMatchObject({
       settings: {
         socket_mode_enabled: false,
@@ -102,6 +103,73 @@ describe("buildSlackAppManifest", () => {
             "reactions:read",
           ]),
         },
+      },
+    });
+    expect(manifest).not.toMatchObject({
+      oauth_config: {
+        redirect_urls: expect.arrayContaining(SlackAppManifestTemplate.oauth_config.redirect_urls),
+      },
+    });
+  });
+
+  it("replaces generated Mistle redirect URLs while preserving custom redirect URLs", () => {
+    const manifest = buildSlackAppManifest({
+      controlPlaneBaseUrl: "https://public-control-plane.example.com",
+      webhookCallbackUrl:
+        "https://public-control-plane.example.com/p/integration/webhooks/slack-default/eps_123",
+      manifest: {
+        oauth_config: {
+          redirect_urls: [
+            "http://localhost:3000/p/integration/callbacks/setup/slack-app-installation",
+            "https://private-dashboard.example.com/p/identity-linking/callbacks/slack",
+            "https://customer.example.com/slack/oauth/callback",
+          ],
+        },
+      },
+    });
+
+    expect(manifest).toMatchObject({
+      oauth_config: {
+        redirect_urls: [
+          "https://customer.example.com/slack/oauth/callback",
+          "https://public-control-plane.example.com/p/integration/callbacks/setup/slack-app-installation",
+          "https://public-control-plane.example.com/p/identity-linking/callbacks/slack",
+        ],
+      },
+    });
+  });
+});
+
+describe("buildSlackAppManifestDraft", () => {
+  it("builds the default Slack app manifest with real Mistle callback URLs", () => {
+    const manifest = buildSlackAppManifestDraft({
+      controlPlaneBaseUrl: "https://control-plane.example.com",
+      webhookCallbackUrl:
+        "https://control-plane.example.com/p/integration/webhooks/slack-default/eps_123",
+    });
+
+    expect(manifest).toMatchObject({
+      settings: {
+        event_subscriptions: {
+          request_url:
+            "https://control-plane.example.com/p/integration/webhooks/slack-default/eps_123",
+        },
+      },
+      oauth_config: {
+        redirect_urls: expect.arrayContaining([
+          "https://control-plane.example.com/p/integration/callbacks/setup/slack-app-installation",
+          "https://control-plane.example.com/p/identity-linking/callbacks/slack",
+        ]),
+      },
+    });
+    expect(manifest).not.toMatchObject({
+      settings: {
+        event_subscriptions: {
+          request_url: "https://mistle.example.com/api/integrations/slack/webhook",
+        },
+      },
+      oauth_config: {
+        redirect_urls: expect.arrayContaining(SlackAppManifestTemplate.oauth_config.redirect_urls),
       },
     });
   });

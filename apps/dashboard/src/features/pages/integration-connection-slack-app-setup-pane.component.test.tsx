@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 
-import { SlackAppManifestTemplate } from "@mistle/integrations-definitions/browser";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { resetDashboardConfigForTest } from "../../config.js";
 import { createTestQueryClient } from "../../test-support/query-client.js";
 import type {
   IntegrationConnection,
   IntegrationWebhookSource,
 } from "../integrations/integrations-service.js";
+import { resolveIntegrationSetupAppManifestDraftBuilderOrThrow } from "./integration-connection-setup-manifest-draft.js";
 import { SlackAppSetupPane } from "./integration-connection-slack-app-setup-pane.js";
 
 function createSlackConnection(input?: {
@@ -43,8 +44,16 @@ function CurrentPath(): React.JSX.Element {
 
 function renderSlackAppSetupPane(input?: {
   connection?: IntegrationConnection;
+  controlPlaneApiOrigin?: string;
+  webhookCallbackUrl?: string;
   webhookSource?: IntegrationWebhookSource | null;
 }) {
+  Object.assign(import.meta.env, {
+    VITE_CONTROL_PLANE_API_ORIGIN:
+      input?.controlPlaneApiOrigin ?? "https://control-plane.example.com",
+  });
+  resetDashboardConfigForTest();
+
   const queryClient = createTestQueryClient({
     refetchOnMount: false,
     staleTime: Number.POSITIVE_INFINITY,
@@ -57,6 +66,7 @@ function renderSlackAppSetupPane(input?: {
     displayName: "Slack Events API webhook",
     endpointKey: "eps_slack_app_setup",
     callbackUrl:
+      input?.webhookCallbackUrl ??
       "https://control-plane.example.com/p/integration/webhooks/slack-default/eps_slack_app_setup",
     status: "active",
     providerMetadata: {},
@@ -75,7 +85,16 @@ function renderSlackAppSetupPane(input?: {
       initialEntries={[`/integrations/${connection.targetKey}/${connection.id}/slack-app/setup`]}
     >
       <QueryClientProvider client={queryClient}>
-        <SlackAppSetupPane connection={connection} />
+        <SlackAppSetupPane
+          connection={connection}
+          manifestDraftBuilder={resolveIntegrationSetupAppManifestDraftBuilderOrThrow({
+            connection,
+            setupRoute: {
+              methodId: "slack-bot-token",
+              routeSegment: "slack-app",
+            },
+          })}
+        />
         <CurrentPath />
       </QueryClientProvider>
     </MemoryRouter>,
@@ -83,8 +102,15 @@ function renderSlackAppSetupPane(input?: {
 }
 
 describe("SlackAppSetupPane", () => {
-  it("defaults an incomplete Slack connection to manifest setup", () => {
-    renderSlackAppSetupPane();
+  afterEach(() => {
+    Object.assign(import.meta.env, {
+      VITE_CONTROL_PLANE_API_ORIGIN: "http://localhost:3000",
+    });
+    resetDashboardConfigForTest();
+  });
+
+  it("defaults an incomplete Slack connection to manifest setup", async () => {
+    const rendered = renderSlackAppSetupPane();
 
     expect(screen.getByRole("tab", { name: "Create from manifest", selected: true })).toBeTruthy();
     expect(screen.getByText("App configuration token")).toBeTruthy();
@@ -94,36 +120,44 @@ describe("SlackAppSetupPane", () => {
         "Create a Slack app from a basic manifest. You can still change the settings later in Slack.",
       ),
     ).toBeTruthy();
+    await waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "https://control-plane.example.com/p/integration/webhooks/slack-default/eps_slack_app_setup",
+      );
+    });
+    expect(rendered.container.textContent).toContain(
+      "https://control-plane.example.com/p/integration/callbacks/setup/slack-app-installation",
+    );
+    expect(rendered.container.textContent).toContain(
+      "https://control-plane.example.com/p/identity-linking/callbacks/slack",
+    );
+    expect(rendered.container.textContent).not.toContain("mistle.example.com");
     expect(
       screen.getByRole("button", { name: "Create and connect Slack app" }).hasAttribute("disabled"),
     ).toBe(true);
   });
 
-  it("includes the Slack app permissions and event subscriptions in the default manifest", () => {
-    expect(SlackAppManifestTemplate.settings.event_subscriptions.request_url).toBe(
-      "https://mistle.example.com/api/integrations/slack/webhook",
+  it("uses the provider-facing webhook callback origin for generated redirect URLs", async () => {
+    const rendered = renderSlackAppSetupPane({
+      controlPlaneApiOrigin: "http://localhost:3000",
+      webhookCallbackUrl:
+        "https://public-control-plane.example.com/p/integration/webhooks/slack-default/eps_public",
+    });
+
+    await waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "https://public-control-plane.example.com/p/integration/webhooks/slack-default/eps_public",
+      );
+    });
+    expect(rendered.container.textContent).toContain(
+      "https://public-control-plane.example.com/p/integration/callbacks/setup/slack-app-installation",
     );
-    expect(SlackAppManifestTemplate.settings.event_subscriptions.bot_events).toEqual([
-      "app_mention",
-      "message.channels",
-      "message.groups",
-      "reaction_added",
-      "reaction_removed",
-    ]);
-    expect(SlackAppManifestTemplate.oauth_config.redirect_urls).toEqual([
-      "https://mistle.example.com/api/integrations/slack/install/callback",
-      "https://mistle.example.com/api/identity-linking/slack/callback",
-    ]);
-    expect(SlackAppManifestTemplate.oauth_config.scopes.bot).toEqual([
-      "app_mentions:read",
-      "channels:history",
-      "channels:read",
-      "chat:write",
-      "groups:history",
-      "groups:read",
-      "reactions:read",
-      "users:read",
-    ]);
+    expect(rendered.container.textContent).toContain(
+      "https://public-control-plane.example.com/p/identity-linking/callbacks/slack",
+    );
+    expect(rendered.container.textContent).not.toContain(
+      "http://localhost:3000/p/integration/callbacks/setup/slack-app-installation",
+    );
   });
 
   it("defaults a configured Slack connection to the existing app setup", () => {

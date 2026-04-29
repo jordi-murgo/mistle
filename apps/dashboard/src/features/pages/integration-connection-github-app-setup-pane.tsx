@@ -1,5 +1,4 @@
 import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
-import { GitHubAppManifestTemplate } from "@mistle/integrations-definitions/browser";
 import { systemScheduler } from "@mistle/time";
 import {
   Button,
@@ -30,8 +29,8 @@ import {
   updateFormIntegrationConnection,
 } from "../integrations/integrations-service.js";
 import type { IntegrationConnection } from "../integrations/integrations-service.js";
+import { ManifestCallbackJsonEditor } from "../integrations/manifest-callback-json-editor.js";
 import {
-  ManifestJsonEditor,
   type ManifestJsonValidation,
   createManifestJsonDraft,
   parseManifestJsonObject,
@@ -56,6 +55,10 @@ import {
   IntegrationConnectionSetupWebhookCallbackValue,
   type IntegrationConnectionSetupMode,
 } from "./integration-connection-setup-flow.js";
+import {
+  type IntegrationSetupAppManifestDraftBuilder,
+  resolveManifestDraftControlPlaneBaseUrl,
+} from "./integration-connection-setup-manifest-draft.js";
 import { resolveConfiguredSetupSecretFieldKeys } from "./integration-connection-setup-secret-fields.js";
 import { SETTINGS_INTEGRATIONS_QUERY_KEY } from "./use-integrations-directory-state.js";
 
@@ -105,8 +108,6 @@ const GitHubExistingAppSetupSecretFieldKeys = [
 ] satisfies readonly GitHubExistingAppSetupFieldKey[];
 
 type GitHubExistingAppSetupSecretFieldKey = (typeof GitHubExistingAppSetupSecretFieldKeys)[number];
-
-const GitHubDraftManifest = createManifestJsonDraft(GitHubAppManifestTemplate);
 
 function isGitHubExistingAppSetupSecretFieldKey(
   fieldKey: string,
@@ -323,6 +324,7 @@ function submitGitHubAppManifestForm(input: {
 
 function GitHubManifestSetupPanel(input: {
   appOwnerKind: GitHubManifestAppOwnerKind | null;
+  manifestCallbackState: ManifestWebhookCallbackState;
   manifestValue: string;
   manifestValidation: ManifestJsonValidation;
   onAppOwnerKindChange: (value: GitHubManifestAppOwnerKind) => void;
@@ -336,7 +338,8 @@ function GitHubManifestSetupPanel(input: {
         description="Create a GitHub App from a basic manifest. You can still change the settings later in GitHub."
         title="GitHub App Manifest"
       />
-      <ManifestJsonEditor
+      <ManifestCallbackJsonEditor
+        callbackState={input.manifestCallbackState}
         id="github-app-manifest-editor"
         onChange={input.onManifestChange}
         validation={input.manifestValidation}
@@ -594,6 +597,7 @@ function GitHubAppSetupActions(input: {
 
 export function GitHubAppSetupPane(input: {
   connection: IntegrationConnection;
+  manifestDraftBuilder: IntegrationSetupAppManifestDraftBuilder;
   manifestCreationSucceeded?: boolean;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
@@ -602,7 +606,8 @@ export function GitHubAppSetupPane(input: {
   const [setupMode, setSetupMode] = useState<GitHubAppSetupMode>(() =>
     resolveInitialGitHubAppSetupMode(input.connection),
   );
-  const [manifestValue, setManifestValue] = useState(GitHubDraftManifest);
+  const [manifestValue, setManifestValue] = useState("");
+  const [hasEditedManifest, setHasEditedManifest] = useState(false);
   const [manifestAppOwnerKind, setManifestAppOwnerKind] =
     useState<GitHubManifestAppOwnerKind | null>(null);
   const [manifestOrganizationSlug, setManifestOrganizationSlug] = useState("");
@@ -619,9 +624,22 @@ export function GitHubAppSetupPane(input: {
     }),
   );
   const webhookCallbackState = useManifestWebhookCallbackState({
-    enabled: setupMode === "existing-app",
+    enabled: true,
     connectionId: input.connection.id,
   });
+  const webhookCallbackUrl =
+    webhookCallbackState.kind === "ready" ? webhookCallbackState.value : null;
+  const resolvedManifestValue =
+    webhookCallbackUrl === null || hasEditedManifest
+      ? manifestValue
+      : createManifestJsonDraft(
+          input.manifestDraftBuilder({
+            controlPlaneBaseUrl: resolveManifestDraftControlPlaneBaseUrl({
+              webhookCallbackUrl,
+            }),
+            webhookCallbackUrl,
+          }),
+        );
 
   const startInstallationMutation = useMutation({
     mutationFn: async () =>
@@ -639,7 +657,7 @@ export function GitHubAppSetupPane(input: {
 
       return startGitHubAppManifestCreation({
         connectionId: input.connection.id,
-        manifest: parseManifestJsonObject(manifestValue),
+        manifest: parseManifestJsonObject(resolvedManifestValue),
         owner:
           manifestAppOwnerKind === "personal"
             ? { kind: "personal" }
@@ -930,9 +948,10 @@ export function GitHubAppSetupPane(input: {
     }),
   );
   const canInstall = (requiredConfigReady && requiredSecretsReady) || isInstalled;
-  const manifestValidation = validateManifestJsonObject(manifestValue);
+  const manifestValidation = validateManifestJsonObject(resolvedManifestValue);
   const canCreateManifest =
     manifestValidation.status === "valid" &&
+    webhookCallbackState.kind === "ready" &&
     (manifestAppOwnerKind === "personal" ||
       (manifestAppOwnerKind === "organization" && manifestOrganizationSlug.trim().length > 0));
 
@@ -1027,10 +1046,14 @@ export function GitHubAppSetupPane(input: {
         manifestContent={
           <GitHubManifestSetupPanel
             appOwnerKind={manifestAppOwnerKind}
+            manifestCallbackState={webhookCallbackState}
             manifestValidation={manifestValidation}
-            manifestValue={manifestValue}
+            manifestValue={resolvedManifestValue}
             onAppOwnerKindChange={setManifestAppOwnerKind}
-            onManifestChange={setManifestValue}
+            onManifestChange={(nextValue) => {
+              setHasEditedManifest(true);
+              setManifestValue(nextValue);
+            }}
             onOrganizationSlugChange={setManifestOrganizationSlug}
             organizationSlug={manifestOrganizationSlug}
           />

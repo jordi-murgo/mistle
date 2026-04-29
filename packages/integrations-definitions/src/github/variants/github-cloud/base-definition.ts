@@ -5,6 +5,7 @@ import {
   type IntegrationDefinition,
 } from "@mistle/integrations-core";
 
+import { buildGitHubAppManifestDraft } from "../../shared/app-manifest.js";
 import {
   type GitHubConnectionConfig,
   GitHubApiKeyConnectionConfigSchema,
@@ -108,6 +109,9 @@ export const GitHubCloudBaseDefinition: GitHubCloudBaseIntegrationDefinition = {
       },
       createBehavior: IntegrationFormConnectionMethodCreateBehaviors.DRAFT_THEN_SETUP,
       setupFlow: {
+        appManifestDraft: {
+          build: buildGitHubAppManifestDraft,
+        },
         completionRequirements: {
           kind: "any-of",
           anyOf: [
