@@ -1,4 +1,8 @@
 import type { IntegrationWebhookEventDefinition } from "@mistle/integrations-core";
+import {
+  isWebhookTriggerSupportedByCapabilities,
+  parseWebhookTriggerCapabilitiesProviderMetadata,
+} from "@mistle/integrations-core";
 
 import type {
   IntegrationConnection,
@@ -118,6 +122,9 @@ export function createWebhookAutomationEventOption(input: {
             }),
           ),
         }),
+    ...(input.eventDefinition.requirements === undefined
+      ? {}
+      : { requirements: input.eventDefinition.requirements }),
     ...(category === undefined ? {} : { category }),
     ...(input.eventDefinition.parameters === undefined
       ? {}
@@ -345,7 +352,20 @@ function buildSelectableWebhookAutomationEventOptions(input: {
     }
 
     for (const source of connectionWebhookSources) {
+      const webhookTriggerCapabilities = parseWebhookTriggerCapabilitiesProviderMetadata(
+        source.providerMetadata,
+      );
+
       for (const eventDefinition of target.supportedWebhookEvents ?? []) {
+        if (
+          !isWebhookTriggerSupportedByCapabilities({
+            capabilities: webhookTriggerCapabilities,
+            requirements: eventDefinition.requirements,
+          })
+        ) {
+          continue;
+        }
+
         supportedEventOptions.push(
           createWebhookAutomationEventOption({
             eventDefinition,

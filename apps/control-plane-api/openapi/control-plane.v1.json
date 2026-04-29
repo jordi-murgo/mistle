@@ -459,6 +459,7 @@
                           "type": "string",
                           "enum": [
                             "INVALID_WEBHOOK_SOURCE_REFERENCE",
+                            "INVALID_WEBHOOK_TRIGGER_REQUIREMENTS",
                             "WEBHOOK_SOURCE_TARGET_NOT_WEBHOOK_CAPABLE",
                             "INVALID_SANDBOX_PROFILE_REFERENCE",
                             "INVALID_SANDBOX_PROFILE_TRIGGER_REFERENCE",
@@ -966,6 +967,7 @@
                           "type": "string",
                           "enum": [
                             "INVALID_WEBHOOK_SOURCE_REFERENCE",
+                            "INVALID_WEBHOOK_TRIGGER_REQUIREMENTS",
                             "WEBHOOK_SOURCE_TARGET_NOT_WEBHOOK_CAPABLE",
                             "INVALID_SANDBOX_PROFILE_REFERENCE",
                             "INVALID_SANDBOX_PROFILE_TRIGGER_REFERENCE",
@@ -6412,6 +6414,45 @@
                                 "category": {
                                   "type": "string",
                                   "minLength": 1
+                                },
+                                "requirements": {
+                                  "type": "object",
+                                  "properties": {
+                                    "anyOf": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "event": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "permissions": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "permission": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "access": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                }
+                                              },
+                                              "required": ["permission"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 1
+                                    }
+                                  },
+                                  "required": ["anyOf"],
+                                  "additionalProperties": false
                                 },
                                 "payloadReferences": {
                                   "type": "array",

@@ -345,7 +345,11 @@ export async function startProviderAppSetup(
     failureMessage: "Failed to persist provider app setup redirect session state.",
   });
 
-  if (parsedSecrets.length > 0 || startedSetup.connection !== undefined) {
+  if (
+    parsedSecrets.length > 0 ||
+    startedSetup.connection !== undefined ||
+    startedSetup.webhookSource !== undefined
+  ) {
     await persistProviderAppSetupResult({
       db: ctx.db,
       integrationsConfig: ctx.integrationsConfig,
@@ -356,6 +360,9 @@ export async function startProviderAppSetup(
       ...(startedSetup.connection === undefined
         ? {}
         : { connectionUpdate: startedSetup.connection }),
+      ...(startedSetup.webhookSource === undefined
+        ? {}
+        : { webhookSourceUpdate: startedSetup.webhookSource }),
     });
   }
 
@@ -516,6 +523,9 @@ export async function completeProviderAppSetup(
     definition,
     parsedSecrets,
     ...(setupResult.connection === undefined ? {} : { connectionUpdate: setupResult.connection }),
+    ...(setupResult.webhookSource === undefined
+      ? {}
+      : { webhookSourceUpdate: setupResult.webhookSource }),
     redirectSession,
   });
 

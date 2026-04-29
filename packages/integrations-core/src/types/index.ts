@@ -513,6 +513,9 @@ export type IntegrationProviderAppSetupConnectionUpdate = {
 export type IntegrationProviderAppSetupResult = {
   connection?: IntegrationProviderAppSetupConnectionUpdate;
   secrets?: Record<string, string>;
+  webhookSource?: {
+    providerMetadata?: Record<string, unknown>;
+  };
 };
 
 export type IntegrationProviderAppSetupConnectionSecretResolver = (input: {
@@ -1759,6 +1762,28 @@ export type IntegrationWebhookEventParameterDefinition =
       placeholder?: string | undefined;
     };
 
+export type IntegrationWebhookTriggerProviderPermissionRequirement = {
+  permission: string;
+  access?: string | undefined;
+};
+
+export type IntegrationWebhookTriggerRequirementSet = {
+  event?: string | undefined;
+  permissions?: ReadonlyArray<IntegrationWebhookTriggerProviderPermissionRequirement> | undefined;
+};
+
+export type IntegrationWebhookTriggerRequirements = {
+  anyOf: ReadonlyArray<IntegrationWebhookTriggerRequirementSet>;
+};
+
+export const IntegrationWebhookTriggerCapabilitiesProviderMetadataKey =
+  "webhookTriggerCapabilities";
+
+export type IntegrationWebhookTriggerCapabilities = {
+  events?: ReadonlyArray<string> | undefined;
+  permissions?: ReadonlyArray<IntegrationWebhookTriggerProviderPermissionRequirement> | undefined;
+};
+
 /**
  * A normalized webhook event that an integration exposes to the rest of
  * Mistle. These definitions drive automation event pickers, payload previews,
@@ -1789,6 +1814,7 @@ export type IntegrationWebhookEventDefinition = {
       }>
     | undefined;
   parameters?: ReadonlyArray<IntegrationWebhookEventParameterDefinition> | undefined;
+  requirements?: IntegrationWebhookTriggerRequirements | undefined;
 };
 
 /**

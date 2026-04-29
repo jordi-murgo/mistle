@@ -1,3 +1,5 @@
+import type { IntegrationWebhookTriggerRequirements } from "@mistle/integrations-core";
+
 export const WebhookAutomationEventOptionAvailabilities = {
   AVAILABLE: "available",
   MISSING_INTEGRATION: "missing_integration",
@@ -67,6 +69,7 @@ export type WebhookAutomationEventOption = {
   payloadReferences?: readonly WebhookAutomationPayloadReference[];
   conversationKeyOptions?: readonly WebhookAutomationConversationKeyOption[];
   parameters?: readonly WebhookAutomationEventParameterOption[];
+  requirements?: IntegrationWebhookTriggerRequirements;
 };
 
 export type WebhookAutomationTriggerParameterValueMap = Record<string, Record<string, string>>;

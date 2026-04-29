@@ -120,12 +120,37 @@ const IntegrationConnectionMethodSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
+const IntegrationWebhookTriggerRequirementsSchema = z
+  .object({
+    anyOf: z
+      .array(
+        z
+          .object({
+            event: z.string().min(1).optional(),
+            permissions: z
+              .array(
+                z
+                  .object({
+                    permission: z.string().min(1),
+                    access: z.string().min(1).optional(),
+                  })
+                  .strict(),
+              )
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
 export const IntegrationWebhookEventDefinitionSchema = z
   .object({
     eventType: z.string().min(1),
     providerEventType: z.string().min(1),
     displayName: z.string().min(1),
     category: z.string().min(1).optional(),
+    requirements: IntegrationWebhookTriggerRequirementsSchema.optional(),
     payloadReferences: z
       .array(
         z

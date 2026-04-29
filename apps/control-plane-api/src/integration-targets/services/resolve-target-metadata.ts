@@ -63,6 +63,15 @@ type ResolvedWebhookEvent = {
   providerEventType: string;
   displayName: string;
   category?: string;
+  requirements?: {
+    anyOf: {
+      event?: string;
+      permissions?: {
+        permission: string;
+        access?: string;
+      }[];
+    }[];
+  };
   payloadReferences?: {
     path: string[];
     description: string;
@@ -284,6 +293,23 @@ function cloneWebhookEvents(
     providerEventType: eventDefinition.providerEventType,
     displayName: eventDefinition.displayName,
     ...(eventDefinition.category === undefined ? {} : { category: eventDefinition.category }),
+    ...(eventDefinition.requirements === undefined
+      ? {}
+      : {
+          requirements: {
+            anyOf: eventDefinition.requirements.anyOf.map((requirementSet) => ({
+              ...(requirementSet.event === undefined ? {} : { event: requirementSet.event }),
+              ...(requirementSet.permissions === undefined
+                ? {}
+                : {
+                    permissions: requirementSet.permissions.map((permission) => ({
+                      permission: permission.permission,
+                      ...(permission.access === undefined ? {} : { access: permission.access }),
+                    })),
+                  }),
+            })),
+          },
+        }),
     ...(eventDefinition.payloadReferences === undefined
       ? {}
       : {
