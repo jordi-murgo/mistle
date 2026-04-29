@@ -1,7 +1,8 @@
 import type { RouteHandler } from "@hono/zod-openapi";
 import { withHttpErrorHandler } from "@mistle/http/errors.js";
 
-import { completeGitHubAppInstallationConnection } from "../../../integration-connections/github-app/services/complete-installation.js";
+import { IntegrationConnectionsBadRequestCodes } from "../../../integration-connections/constants.js";
+import { completeProviderAppSetup } from "../../../integration-connections/services/provider-app-setup.js";
 import { buildDashboardUrl } from "../../../lib/dashboard-url.js";
 import type { AppContextBindings } from "../../../types.js";
 import { route } from "./route.js";
@@ -12,13 +13,17 @@ const routeHandler = async (ctx: Parameters<RouteHandler<typeof route, AppContex
   const integrationRegistry = ctx.get("integrationRegistry");
   const query = ctx.req.valid("query");
 
-  const completedConnection = await completeGitHubAppInstallationConnection(
+  const completedConnection = await completeProviderAppSetup(
     {
       db,
       integrationRegistry,
+      integrationsConfig: config.integrations,
+      controlPlaneBaseUrl: config.auth.baseUrl,
     },
     {
       query,
+      invalidInputCode:
+        IntegrationConnectionsBadRequestCodes.INVALID_GITHUB_APP_INSTALLATION_COMPLETE_INPUT,
     },
   );
 

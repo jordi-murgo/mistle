@@ -2,34 +2,34 @@ import { createRoute } from "@hono/zod-openapi";
 import { ForbiddenResponseSchema, UnauthorizedResponseSchema } from "@mistle/http/errors.js";
 
 import {
-  StartSlackAppManifestConnectionBadRequestResponseSchema,
-  StartSlackAppManifestConnectionBodySchema,
-  StartSlackAppManifestConnectionNotFoundResponseSchema,
-  StartSlackAppManifestConnectionParamsSchema,
-  StartSlackAppManifestConnectionResponseSchema,
+  StartProviderAppSetupBadRequestResponseSchema,
+  StartProviderAppSetupBodySchema,
+  StartProviderAppSetupNotFoundResponseSchema,
+  StartProviderAppSetupParamsSchema,
+  StartedProviderAppSetupResponseSchema,
 } from "./schema.js";
 
 export const route = createRoute({
   method: "post",
-  path: "/:connectionId/slack-app-manifest/start",
+  path: "/:connectionId/setup/:routeSegment/start",
   tags: ["Integrations"],
   request: {
-    params: StartSlackAppManifestConnectionParamsSchema,
+    params: StartProviderAppSetupParamsSchema,
     body: {
       required: true,
       content: {
         "application/json": {
-          schema: StartSlackAppManifestConnectionBodySchema,
+          schema: StartProviderAppSetupBodySchema,
         },
       },
     },
   },
   responses: {
     200: {
-      description: "Create a Slack app from a manifest and return the installation URL.",
+      description: "Start a provider app setup flow.",
       content: {
         "application/json": {
-          schema: StartSlackAppManifestConnectionResponseSchema,
+          schema: StartedProviderAppSetupResponseSchema,
         },
       },
     },
@@ -37,7 +37,7 @@ export const route = createRoute({
       description: "Invalid request.",
       content: {
         "application/json": {
-          schema: StartSlackAppManifestConnectionBadRequestResponseSchema,
+          schema: StartProviderAppSetupBadRequestResponseSchema,
         },
       },
     },
@@ -61,7 +61,7 @@ export const route = createRoute({
       description: "Integration connection was not found.",
       content: {
         "application/json": {
-          schema: StartSlackAppManifestConnectionNotFoundResponseSchema,
+          schema: StartProviderAppSetupNotFoundResponseSchema,
         },
       },
     },

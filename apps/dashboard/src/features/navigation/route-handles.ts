@@ -192,15 +192,7 @@ export const ROUTE_HANDLES = {
       icon: resolveIntegrationDetailHeaderIcon,
     },
   },
-  integrationGitHubAppSetup: {
-    appShellInsetOwner: "child",
-    breadcrumb: "Setup",
-    title: resolveIntegrationAppSetupTitle,
-    header: {
-      icon: resolveIntegrationDetailHeaderIcon,
-    },
-  },
-  integrationSlackAppSetup: {
+  integrationSetup: {
     appShellInsetOwner: "child",
     breadcrumb: "Setup",
     title: resolveIntegrationAppSetupTitle,

@@ -1662,227 +1662,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/integration/connections/:connectionId/github-app-installation/start": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post: {
-      parameters: {
-        query?: never;
-        header?: never;
-        path: {
-          connectionId: string;
-        };
-        cookie?: never;
-      };
-      requestBody?: never;
-      responses: {
-        /** @description Create a GitHub App installation authorization URL for an existing integration connection. */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** Format: uri */
-              authorizationUrl: string;
-            };
-          };
-        };
-        /** @description Invalid request. */
-        400: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json":
-              | {
-                  /** @enum {string} */
-                  code:
-                    | "INVALID_GITHUB_APP_INSTALLATION_START_INPUT"
-                    | "GITHUB_APP_INSTALLATION_NOT_SUPPORTED";
-                  message: string;
-                }
-              | {
-                  /** @enum {string} */
-                  code: "VALIDATION_ERROR";
-                  message: string;
-                };
-          };
-        };
-        /** @description Authentication is required. */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "UNAUTHORIZED";
-              message: string;
-            };
-          };
-        };
-        /** @description Active organization is required. */
-        403: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "FORBIDDEN";
-              message: string;
-            };
-          };
-        };
-        /** @description Integration connection was not found. */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "CONNECTION_NOT_FOUND";
-              message: string;
-            };
-          };
-        };
-      };
-    };
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v1/integration/connections/:connectionId/github-app-manifest/start": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post: {
-      parameters: {
-        query?: never;
-        header?: never;
-        path: {
-          connectionId: string;
-        };
-        cookie?: never;
-      };
-      requestBody: {
-        content: {
-          "application/json": {
-            manifest: {
-              [key: string]: unknown;
-            };
-            owner:
-              | {
-                  /** @enum {string} */
-                  kind: "personal";
-                }
-              | {
-                  /** @enum {string} */
-                  kind: "organization";
-                  organizationSlug: string;
-                };
-          };
-        };
-      };
-      responses: {
-        /** @description Create a GitHub App manifest registration form submission. */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              fields: {
-                manifest: string;
-              };
-              /** Format: uri */
-              submissionUrl: string;
-            };
-          };
-        };
-        /** @description Invalid request. */
-        400: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json":
-              | {
-                  /** @enum {string} */
-                  code:
-                    | "INVALID_GITHUB_APP_MANIFEST_START_INPUT"
-                    | "GITHUB_APP_INSTALLATION_NOT_SUPPORTED";
-                  message: string;
-                }
-              | {
-                  /** @enum {string} */
-                  code: "VALIDATION_ERROR";
-                  message: string;
-                };
-          };
-        };
-        /** @description Authentication is required. */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "UNAUTHORIZED";
-              message: string;
-            };
-          };
-        };
-        /** @description Active organization is required. */
-        403: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "FORBIDDEN";
-              message: string;
-            };
-          };
-        };
-        /** @description Integration connection was not found. */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "CONNECTION_NOT_FOUND";
-              message: string;
-            };
-          };
-        };
-      };
-    };
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/integration/connections/:connectionId/resources": {
     parameters: {
       query?: never;
@@ -2234,7 +2013,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/integration/connections/:connectionId/slack-app-manifest/start": {
+  "/v1/integration/connections/:connectionId/setup/:routeSegment/start": {
     parameters: {
       query?: never;
       header?: never;
@@ -2249,30 +2028,40 @@ export interface paths {
         header?: never;
         path: {
           connectionId: string;
+          routeSegment: string;
         };
         cookie?: never;
       };
       requestBody: {
         content: {
           "application/json": {
-            appConfigToken: string;
-            manifest: {
-              [key: string]: unknown;
-            };
+            [key: string]: unknown;
           };
         };
       };
       responses: {
-        /** @description Create a Slack app from a manifest and return the installation URL. */
+        /** @description Start a provider app setup flow. */
         200: {
           headers: {
             [name: string]: unknown;
           };
           content: {
-            "application/json": {
-              /** Format: uri */
-              authorizationUrl: string;
-            };
+            "application/json":
+              | {
+                  fields: {
+                    [key: string]: string;
+                  };
+                  /** @enum {string} */
+                  kind: "form-post";
+                  /** Format: uri */
+                  submissionUrl: string;
+                }
+              | {
+                  /** Format: uri */
+                  authorizationUrl: string;
+                  /** @enum {string} */
+                  kind: "redirect";
+                };
           };
         };
         /** @description Invalid request. */
@@ -2285,8 +2074,12 @@ export interface paths {
               | {
                   /** @enum {string} */
                   code:
+                    | "FORM_CONNECTION_METHOD_NOT_SUPPORTED"
+                    | "GITHUB_APP_INSTALLATION_NOT_SUPPORTED"
+                    | "INVALID_GITHUB_APP_INSTALLATION_START_INPUT"
+                    | "INVALID_GITHUB_APP_MANIFEST_START_INPUT"
                     | "INVALID_SLACK_APP_MANIFEST_START_INPUT"
-                    | "SLACK_APP_MANIFEST_NOT_SUPPORTED"
+                    | "INVALID_UPDATE_CONNECTION_INPUT"
                     | "WEBHOOK_SOURCE_NOT_SUPPORTED";
                   message: string;
                 }

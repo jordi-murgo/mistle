@@ -494,6 +494,94 @@ export type IntegrationFormConnectionMethodSetupFlow = {
   routeSegment: string;
 };
 
+export type IntegrationProviderAppSetupStartResult =
+  | {
+      kind: "form-post";
+      fields: Record<string, string>;
+      submissionUrl: string;
+    }
+  | {
+      authorizationUrl: string;
+      kind: "redirect";
+    };
+
+export type IntegrationProviderAppSetupConnectionUpdate = {
+  config?: Record<string, unknown>;
+  externalSubjectId?: string | null;
+};
+
+export type IntegrationProviderAppSetupResult = {
+  connection?: IntegrationProviderAppSetupConnectionUpdate;
+  secrets?: Record<string, string>;
+};
+
+export type IntegrationProviderAppSetupConnectionSecretResolver = (input: {
+  secretKind: string;
+  slotKey: string;
+}) => MaybePromise<string>;
+
+export type IntegrationProviderAppSetupStartInput<
+  TTargetConfig = Record<string, unknown>,
+  TTargetSecrets = Record<string, string>,
+  TConnectionConfig = Record<string, unknown>,
+> = {
+  body: Record<string, unknown>;
+  connection: IntegrationConnection & {
+    config: TConnectionConfig;
+  };
+  controlPlaneBaseUrl: string;
+  redirectState: string;
+  resolveConnectionSecret: IntegrationProviderAppSetupConnectionSecretResolver;
+  target: IntegrationResolvedTarget<TTargetConfig, TTargetSecrets>;
+  webhookCallbackUrl?: string;
+};
+
+export type IntegrationProviderAppSetupCompleteInput<
+  TTargetConfig = Record<string, unknown>,
+  TTargetSecrets = Record<string, string>,
+  TConnectionConfig = Record<string, unknown>,
+> = {
+  connection: IntegrationConnection & {
+    config: TConnectionConfig;
+  };
+  controlPlaneBaseUrl: string;
+  query: URLSearchParams;
+  resolveConnectionSecret: IntegrationProviderAppSetupConnectionSecretResolver;
+  target: IntegrationResolvedTarget<TTargetConfig, TTargetSecrets>;
+};
+
+export type IntegrationProviderAppSetupFlowCapability<
+  TTargetConfig = Record<string, unknown>,
+  TTargetSecrets = Record<string, string>,
+  TConnectionConfig = Record<string, unknown>,
+> = {
+  methodId: IntegrationConnectionMethodId;
+  requiresWebhookCallbackUrl?: boolean;
+  routeSegment: string;
+  complete?(
+    input: IntegrationProviderAppSetupCompleteInput<
+      TTargetConfig,
+      TTargetSecrets,
+      TConnectionConfig
+    >,
+  ): MaybePromise<IntegrationProviderAppSetupResult>;
+  start?(
+    input: IntegrationProviderAppSetupStartInput<TTargetConfig, TTargetSecrets, TConnectionConfig>,
+  ): MaybePromise<
+    IntegrationProviderAppSetupResult & { start: IntegrationProviderAppSetupStartResult }
+  >;
+};
+
+export type IntegrationProviderAppSetupCapability<
+  TTargetConfig = Record<string, unknown>,
+  TTargetSecrets = Record<string, string>,
+  TConnectionConfig = Record<string, unknown>,
+> = {
+  flows: ReadonlyArray<
+    IntegrationProviderAppSetupFlowCapability<TTargetConfig, TTargetSecrets, TConnectionConfig>
+  >;
+};
+
 export type IntegrationFormConnectionMethodSetupCompletionRequirementLeaf =
   | {
       kind: "connection-external-subject";
@@ -1931,6 +2019,11 @@ export type IntegrationDefinition<
     TConnectionConfig
   >;
   deviceAuthorization?: IntegrationDeviceAuthorizationCapability<
+    ParsedSchemaOutput<TTargetConfigSchema>,
+    ParsedSchemaOutput<TTargetSecretsSchema>,
+    TConnectionConfig
+  >;
+  providerAppSetup?: IntegrationProviderAppSetupCapability<
     ParsedSchemaOutput<TTargetConfigSchema>,
     ParsedSchemaOutput<TTargetSecretsSchema>,
     TConnectionConfig
