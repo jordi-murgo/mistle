@@ -45,6 +45,7 @@ export type IntegrationConnectionDetailItem = {
   authSecretLabels?: readonly string[];
   authMethodId?: string | null;
   authMethodLabel?: string | null;
+  automationCount?: number;
   bindingCount: number;
   canDelete: boolean;
   contextItems?: readonly {
@@ -610,7 +611,7 @@ function ConnectionDetailPane(input: {
 function resolveDeleteConnectionMessage(
   connection: Pick<
     IntegrationConnectionDetailItem,
-    "bindingCount" | "canDelete" | "isIdentityLinked"
+    "automationCount" | "bindingCount" | "canDelete" | "isIdentityLinked"
   >,
 ): string | null {
   if (connection.canDelete) {
@@ -622,7 +623,12 @@ function resolveDeleteConnectionMessage(
   }
 
   if (connection.bindingCount > 0) {
-    return `This connection can't be deleted while it has ${connection.bindingCount} ${connection.bindingCount === 1 ? "binding" : "bindings"}.`;
+    return `This connection can't be deleted while it has ${connection.bindingCount} active sandbox profile ${connection.bindingCount === 1 ? "binding" : "bindings"}.`;
+  }
+
+  const automationCount = connection.automationCount ?? 0;
+  if (automationCount > 0) {
+    return `This connection can't be deleted while it has ${automationCount} webhook ${automationCount === 1 ? "automation" : "automations"}.`;
   }
 
   return "This connection can't be deleted while it is still in use.";

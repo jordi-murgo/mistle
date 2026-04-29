@@ -4,6 +4,7 @@ import {
   integrationCredentials,
   integrationWebhookSources,
   OrganizationIdentityLinkProviderConfigStatus,
+  sandboxProfiles,
   sandboxProfileVersionIntegrationBindings,
   type ControlPlaneDatabase,
   webhookAutomations,
@@ -17,6 +18,7 @@ import {
   IntegrationConnectionsConflictCodes,
   IntegrationConnectionsNotFoundCodes,
 } from "../constants.js";
+import { listActiveSandboxProfileBindingCountsByConnectionId } from "./list-active-sandbox-profile-binding-counts-by-connection-id.js";
 import {
   resolveConnectionConfigOrThrow,
   resolveConnectionSecretsOrThrow,
@@ -28,6 +30,33 @@ export type DeleteIntegrationConnectionInput = {
   organizationId: string;
   connectionId: string;
 };
+
+async function lockAffectedSandboxProfilesForUpdate(input: {
+  db: ControlPlaneDatabase;
+  organizationId: string;
+  connectionId: string;
+}): Promise<void> {
+  await input.db
+    .select({
+      id: sandboxProfiles.id,
+    })
+    .from(sandboxProfiles)
+    .where(
+      and(
+        eq(sandboxProfiles.organizationId, input.organizationId),
+        inArray(
+          sandboxProfiles.id,
+          input.db
+            .select({
+              sandboxProfileId: sandboxProfileVersionIntegrationBindings.sandboxProfileId,
+            })
+            .from(sandboxProfileVersionIntegrationBindings)
+            .where(eq(sandboxProfileVersionIntegrationBindings.connectionId, input.connectionId)),
+        ),
+      ),
+    )
+    .for("update");
+}
 
 async function assertConnectionDeletionGuardsOrThrow(input: {
   db: ControlPlaneDatabase;
@@ -55,17 +84,23 @@ async function assertConnectionDeletionGuardsOrThrow(input: {
     );
   }
 
-  const [bindingUsage] = await input.db
-    .select({
-      bindingCount: sql<number>`count(*)::int`,
-    })
-    .from(sandboxProfileVersionIntegrationBindings)
-    .where(eq(sandboxProfileVersionIntegrationBindings.connectionId, lockedConnection.id));
+  await lockAffectedSandboxProfilesForUpdate({
+    db: input.db,
+    organizationId: input.organizationId,
+    connectionId: lockedConnection.id,
+  });
 
-  if ((bindingUsage?.bindingCount ?? 0) > 0) {
+  const activeVersionBindingCountsByConnectionId =
+    await listActiveSandboxProfileBindingCountsByConnectionId({
+      db: input.db,
+      connectionIds: [lockedConnection.id],
+      organizationId: input.organizationId,
+    });
+
+  if ((activeVersionBindingCountsByConnectionId.get(lockedConnection.id) ?? 0) > 0) {
     throw new ConflictError(
       IntegrationConnectionsConflictCodes.CONNECTION_HAS_BINDINGS,
-      "This integration connection cannot be deleted while it is still used by one or more bindings.",
+      "This integration connection cannot be deleted while it is still used by one or more active sandbox profile versions.",
     );
   }
 
@@ -123,89 +158,85 @@ export async function deleteIntegrationConnection(
       organizationId: input.organizationId,
       connectionId: input.connectionId,
     });
-  });
 
-  const connection = await resolveConnectionWithTargetOrThrow({
-    db: ctx.db,
-    organizationId: input.organizationId,
-    connectionId: input.connectionId,
-  });
-  const connectionOwnedWebhookSources = await ctx.db.query.integrationWebhookSources.findMany({
-    where: (table, { eq: whereEq }) => whereEq(table.integrationConnectionId, connection.id),
-  });
-
-  if (connectionOwnedWebhookSources.length > 0) {
-    const definition = ctx.integrationRegistry.getDefinition({
-      familyId: connection.target.familyId,
-      variantId: connection.target.variantId,
-    });
-
-    if (definition?.webhookSource !== undefined) {
-      const { webhookSourceCapability, parsedTargetConfig, parsedTargetSecrets } =
-        resolveWebhookSourceCapabilityOrThrow({
-          integrationRegistry: ctx.integrationRegistry,
-          integrationsConfig: ctx.integrationsConfig,
-          target: connection.target,
-        });
-
-      if (webhookSourceCapability.lifecycle === IntegrationWebhookSourceLifecycles.MANAGED) {
-        const deleteRegistration =
-          webhookSourceCapability.deleteRegistration?.bind(webhookSourceCapability);
-
-        if (deleteRegistration !== undefined) {
-          const connectionSecrets = await resolveConnectionSecretsOrThrow({
-            db: ctx.db,
-            integrationRegistry: ctx.integrationRegistry,
-            connection,
-            integrationsConfig: ctx.integrationsConfig,
-          });
-
-          for (const source of connectionOwnedWebhookSources) {
-            await deleteRegistration({
-              organizationId: input.organizationId,
-              targetKey: connection.targetKey,
-              controlPlaneBaseUrl: ctx.controlPlaneBaseUrl,
-              target: {
-                familyId: connection.target.familyId,
-                variantId: connection.target.variantId,
-                enabled: connection.target.enabled,
-                config: parsedTargetConfig,
-                secrets: parsedTargetSecrets,
-              },
-              connection: {
-                id: connection.id,
-                status: "active",
-                config: resolveConnectionConfigOrThrow({
-                  connectionId: connection.id,
-                  config: connection.config,
-                }),
-              },
-              connectionSecrets,
-              source: {
-                id: source.id,
-                targetKey: source.targetKey,
-                organizationId: source.organizationId,
-                integrationConnectionId: source.integrationConnectionId,
-                ...(source.displayName === null ? {} : { displayName: source.displayName }),
-                endpointKey: source.endpointKey,
-                ...(source.remoteRegistrationId === null
-                  ? {}
-                  : { remoteRegistrationId: source.remoteRegistrationId }),
-                providerMetadata: source.providerMetadata,
-              },
-            });
-          }
-        }
-      }
-    }
-  }
-
-  await ctx.db.transaction(async (tx) => {
-    await assertConnectionDeletionGuardsOrThrow({
+    const connection = await resolveConnectionWithTargetOrThrow({
       db: tx,
       organizationId: input.organizationId,
       connectionId: input.connectionId,
     });
+    const webhookSourcesForRegistrationCleanup = await tx.query.integrationWebhookSources.findMany({
+      where: (table, { eq: whereEq }) => whereEq(table.integrationConnectionId, connection.id),
+    });
+
+    if (webhookSourcesForRegistrationCleanup.length > 0) {
+      const definition = ctx.integrationRegistry.getDefinition({
+        familyId: connection.target.familyId,
+        variantId: connection.target.variantId,
+      });
+
+      if (definition?.webhookSource !== undefined) {
+        const { webhookSourceCapability, parsedTargetConfig, parsedTargetSecrets } =
+          resolveWebhookSourceCapabilityOrThrow({
+            integrationRegistry: ctx.integrationRegistry,
+            integrationsConfig: ctx.integrationsConfig,
+            target: connection.target,
+          });
+
+        if (webhookSourceCapability.lifecycle === IntegrationWebhookSourceLifecycles.MANAGED) {
+          const deleteRegistration =
+            webhookSourceCapability.deleteRegistration?.bind(webhookSourceCapability);
+
+          if (deleteRegistration !== undefined) {
+            const connectionSecrets = await resolveConnectionSecretsOrThrow({
+              db: tx,
+              integrationRegistry: ctx.integrationRegistry,
+              connection,
+              integrationsConfig: ctx.integrationsConfig,
+            });
+
+            for (const source of webhookSourcesForRegistrationCleanup) {
+              await deleteRegistration({
+                organizationId: input.organizationId,
+                targetKey: connection.targetKey,
+                controlPlaneBaseUrl: ctx.controlPlaneBaseUrl,
+                target: {
+                  familyId: connection.target.familyId,
+                  variantId: connection.target.variantId,
+                  enabled: connection.target.enabled,
+                  config: parsedTargetConfig,
+                  secrets: parsedTargetSecrets,
+                },
+                connection: {
+                  id: connection.id,
+                  status: "active",
+                  config: resolveConnectionConfigOrThrow({
+                    connectionId: connection.id,
+                    config: connection.config,
+                  }),
+                },
+                connectionSecrets,
+                source: {
+                  id: source.id,
+                  targetKey: source.targetKey,
+                  organizationId: source.organizationId,
+                  integrationConnectionId: source.integrationConnectionId,
+                  ...(source.displayName === null ? {} : { displayName: source.displayName }),
+                  endpointKey: source.endpointKey,
+                  ...(source.remoteRegistrationId === null
+                    ? {}
+                    : { remoteRegistrationId: source.remoteRegistrationId }),
+                  providerMetadata: source.providerMetadata,
+                },
+              });
+            }
+          }
+        }
+      }
+    }
+
+    await tx
+      .delete(sandboxProfileVersionIntegrationBindings)
+      .where(eq(sandboxProfileVersionIntegrationBindings.connectionId, input.connectionId));
 
     const connectionOwnedWebhookSources = await tx.query.integrationWebhookSources.findMany({
       columns: {

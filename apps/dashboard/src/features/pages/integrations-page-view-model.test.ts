@@ -634,6 +634,27 @@ describe("integrations page view model", () => {
     expect(item?.canDelete).toBe(false);
   });
 
+  it("blocks deletion when a connection has active sandbox profile bindings", () => {
+    const [item] = buildIntegrationConnectionDetailItems({
+      connections: [
+        {
+          id: "icn_active_binding",
+          targetKey: "github",
+          displayName: "Engineering GitHub",
+          status: "active",
+          bindingCount: 2,
+          automationCount: 0,
+          createdAt: "2026-03-03T00:00:00.000Z",
+          updatedAt: "2026-03-11T04:30:00.000Z",
+        } satisfies IntegrationConnection,
+      ],
+      refreshingResourceKeys: new Set<string>(),
+    });
+
+    expect(item?.bindingCount).toBe(2);
+    expect(item?.canDelete).toBe(false);
+  });
+
   it("returns an empty resource summary list when a connection has no resources payload", () => {
     expect(
       getIntegrationConnectionResourceSummaries({

@@ -278,7 +278,8 @@ describe("IntegrationsPage resource refresh concurrency", () => {
     }
   });
 
-  it("offers delete for unbound connections and calls the delete endpoint", async () => {
+  it("offers delete for inactive-binding connections and calls the delete endpoint", async () => {
+    const deleteRequestPaths: string[] = [];
     const renderedPage = await renderDashboardPageIntegration({
       handler: (request, response) => {
         const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -302,11 +303,11 @@ describe("IntegrationsPage resource refresh concurrency", () => {
             JSON.stringify({
               items: [
                 {
-                  id: "icn_bound",
+                  id: "icn_inactive_binding",
                   targetKey: "github",
-                  displayName: "Bound GitHub",
+                  displayName: "Inactive binding GitHub",
                   status: "active",
-                  bindingCount: 1,
+                  bindingCount: 0,
                   config: {
                     connection_method: "github-app-installation",
                     app_id: "123",
@@ -340,12 +341,20 @@ describe("IntegrationsPage resource refresh concurrency", () => {
 
         if (
           request.method === "DELETE" &&
-          requestUrl.pathname === "/v1/integration/connections/icn_free"
+          (requestUrl.pathname === "/v1/integration/connections/icn_free" ||
+            requestUrl.pathname === "/v1/integration/connections/icn_inactive_binding")
         ) {
+          const connectionId = requestUrl.pathname.split("/").at(-1);
+          if (connectionId === undefined) {
+            throw new Error(
+              `Delete request path '${requestUrl.pathname}' is missing connection id.`,
+            );
+          }
+          deleteRequestPaths.push(`${requestUrl.pathname}${requestUrl.search}`);
           response.writeHead(200, { "content-type": "application/json" });
           response.end(
             JSON.stringify({
-              connectionId: "icn_free",
+              connectionId,
             }),
           );
           return;
@@ -358,9 +367,18 @@ describe("IntegrationsPage resource refresh concurrency", () => {
     });
 
     try {
-      expect(
-        await screen.findByRole("button", { name: "Delete connection Bound GitHub" }),
-      ).toHaveProperty("disabled", true);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Delete connection Inactive binding GitHub" }),
+      );
+      expect(await screen.findByText("Delete integration connection")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
+
+      await waitFor(() => {
+        expect(deleteRequestPaths).toContain("/v1/integration/connections/icn_inactive_binding");
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("Delete integration connection")).toBeNull();
+      });
 
       fireEvent.click(screen.getByRole("button", { name: "Select connection Free GitHub" }));
       fireEvent.click(screen.getByRole("button", { name: "Delete connection Free GitHub" }));
@@ -369,6 +387,7 @@ describe("IntegrationsPage resource refresh concurrency", () => {
 
       await waitFor(() => {
         expect(screen.queryByText("Delete integration connection")).toBeNull();
+        expect(deleteRequestPaths).toContain("/v1/integration/connections/icn_free");
       });
     } finally {
       await renderedPage.close();

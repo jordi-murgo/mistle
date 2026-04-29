@@ -55,6 +55,10 @@ function renderNeverSyncedResourceDetail(input: { isLoading: boolean }): void {
   );
 }
 
+function rejectUnexpectedDeleteConnection(): void {
+  throw new Error("Delete connection handler should not be called.");
+}
+
 afterEach(() => {
   cleanup();
 });
@@ -96,7 +100,7 @@ describe("IntegrationConnectionDetailView", () => {
             resources: [],
           },
         ]}
-        onDeleteConnection={() => {}}
+        onDeleteConnection={rejectUnexpectedDeleteConnection}
       />,
     );
 
@@ -110,6 +114,67 @@ describe("IntegrationConnectionDetailView", () => {
       screen.getByText(
         "This connection can't be deleted while it is configured for Identity Linking.",
       ),
+    ).toBeTruthy();
+  });
+
+  it("explains disabled delete when a connection has active sandbox profile bindings", () => {
+    render(
+      <IntegrationConnectionDetailView
+        connections={[
+          {
+            id: "icn_github_primary",
+            bindingCount: 2,
+            canDelete: false,
+            displayName: "Engineering GitHub",
+            status: "active",
+            authMethodLabel: "GitHub App installation",
+            resources: [],
+          },
+        ]}
+        onDeleteConnection={rejectUnexpectedDeleteConnection}
+      />,
+    );
+
+    const deleteButton = screen.getByRole("button", {
+      name: "Delete connection Engineering GitHub",
+    });
+
+    expect(deleteButton.getAttribute("disabled")).toBe("");
+    fireEvent.mouseEnter(deleteButton.parentElement ?? deleteButton);
+    expect(
+      screen.getByText(
+        "This connection can't be deleted while it has 2 active sandbox profile bindings.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("explains disabled delete when a connection has webhook automations", () => {
+    render(
+      <IntegrationConnectionDetailView
+        connections={[
+          {
+            id: "icn_github_primary",
+            automationCount: 1,
+            bindingCount: 0,
+            canDelete: false,
+            displayName: "Engineering GitHub",
+            status: "active",
+            authMethodLabel: "GitHub App installation",
+            resources: [],
+          },
+        ]}
+        onDeleteConnection={rejectUnexpectedDeleteConnection}
+      />,
+    );
+
+    const deleteButton = screen.getByRole("button", {
+      name: "Delete connection Engineering GitHub",
+    });
+
+    expect(deleteButton.getAttribute("disabled")).toBe("");
+    fireEvent.mouseEnter(deleteButton.parentElement ?? deleteButton);
+    expect(
+      screen.getByText("This connection can't be deleted while it has 1 webhook automation."),
     ).toBeTruthy();
   });
 
@@ -144,8 +209,8 @@ describe("IntegrationConnectionDetailView", () => {
         connections={[
           {
             id: "icn_github_primary",
-            bindingCount: 1,
-            canDelete: false,
+            bindingCount: 0,
+            canDelete: true,
             displayName: "Engineering GitHub",
             status: "active",
             installation: {
@@ -941,17 +1006,17 @@ describe("IntegrationConnectionDetailView", () => {
     expect(within(authSection).getAllByText("**********")).toHaveLength(2);
   });
 
-  it("shows delete for all connections and disables it when bindings prevent deletion", () => {
+  it("allows delete for deletable connections", () => {
     let deletedConnectionId: string | null = null;
 
     render(
       <IntegrationConnectionDetailView
         connections={[
           {
-            id: "icn_bound",
-            bindingCount: 2,
-            canDelete: false,
-            displayName: "Bound connection",
+            id: "icn_primary",
+            bindingCount: 0,
+            canDelete: true,
+            displayName: "Primary connection",
             authMethodId: "github-app-installation",
             authMethodLabel: "GitHub App installation",
             status: "active",
@@ -974,13 +1039,14 @@ describe("IntegrationConnectionDetailView", () => {
       />,
     );
 
-    const boundDeleteButton = screen.getByRole("button", {
-      name: "Delete connection Bound connection",
+    const primaryDeleteButton = screen.getByRole("button", {
+      name: "Delete connection Primary connection",
     });
-    expect(boundDeleteButton).toHaveProperty("disabled", true);
-    expect(boundDeleteButton.getAttribute("title")).toBe(
-      "This connection can't be deleted while it has 2 bindings.",
-    );
+    expect(primaryDeleteButton).not.toHaveProperty("disabled", true);
+    fireEvent.click(primaryDeleteButton);
+    expect(deletedConnectionId).toBe("icn_primary");
+    deletedConnectionId = null;
+
     fireEvent.click(screen.getByRole("button", { name: "Select connection Free connection" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete connection Free connection" }));
     expect(deletedConnectionId).toBe("icn_free");

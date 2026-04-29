@@ -15,6 +15,8 @@ import {
   sandboxProfiles,
   sandboxProfileVersionIntegrationBindings,
   sandboxProfileVersions,
+  type SandboxProfileVersionState,
+  SandboxProfileVersionStates,
   webhookAutomations,
 } from "@mistle/db/control-plane";
 import { ValidationErrorResponseSchema } from "@mistle/http/errors.js";
@@ -119,6 +121,7 @@ describe("integration connections list integration", () => {
       profileDisplayName: "Profile 1",
       bindingId: "ibd_001",
       connectionId: "icn_001",
+      activeVersion: 1,
     });
     await insertWebhookAutomationUsage(fixture, {
       organizationId: firstOrgSession.organizationId,
@@ -491,7 +494,7 @@ describe("integration connections list integration", () => {
     });
   });
 
-  it("deletes an unbound connection and blocks deleting a bound connection", async ({
+  it("deletes inactive binding connections and blocks active bindings or automations", async ({
     fixture,
   }) => {
     const session = await fixture.authSession({
@@ -509,10 +512,10 @@ describe("integration connections list integration", () => {
         status: IntegrationConnectionStatuses.ACTIVE,
       },
       {
-        id: "icn_delete_bound",
+        id: "icn_delete_draft_binding",
         organizationId: session.organizationId,
         targetKey: "github_cloud",
-        displayName: "Bound connection",
+        displayName: "Draft binding connection",
         status: IntegrationConnectionStatuses.ACTIVE,
       },
       {
@@ -522,14 +525,46 @@ describe("integration connections list integration", () => {
         displayName: "Automation connection",
         status: IntegrationConnectionStatuses.ACTIVE,
       },
+      {
+        id: "icn_delete_inactive_published_binding",
+        organizationId: session.organizationId,
+        targetKey: "github_cloud",
+        displayName: "Inactive published binding connection",
+        status: IntegrationConnectionStatuses.ACTIVE,
+      },
+      {
+        id: "icn_delete_active_version_binding",
+        organizationId: session.organizationId,
+        targetKey: "github_cloud",
+        displayName: "Active version binding connection",
+        status: IntegrationConnectionStatuses.ACTIVE,
+      },
     ]);
 
     await insertBindingUsage(fixture, {
       organizationId: session.organizationId,
-      profileId: "spf_delete",
-      profileDisplayName: "Delete test profile",
-      bindingId: "ibd_delete_bound",
-      connectionId: "icn_delete_bound",
+      profileId: "spf_delete_draft_binding",
+      profileDisplayName: "Draft binding test profile",
+      bindingId: "ibd_delete_draft_binding",
+      connectionId: "icn_delete_draft_binding",
+      state: SandboxProfileVersionStates.DRAFT,
+    });
+    await insertBindingUsage(fixture, {
+      organizationId: session.organizationId,
+      profileId: "spf_delete_published",
+      profileDisplayName: "Delete published test profile",
+      bindingId: "ibd_delete_published_binding",
+      connectionId: "icn_delete_inactive_published_binding",
+      state: SandboxProfileVersionStates.PUBLISHED,
+    });
+    await insertBindingUsage(fixture, {
+      organizationId: session.organizationId,
+      profileId: "spf_delete_active_version",
+      profileDisplayName: "Delete active version test profile",
+      bindingId: "ibd_delete_active_version_binding",
+      connectionId: "icn_delete_active_version_binding",
+      state: SandboxProfileVersionStates.PUBLISHED,
+      activeVersion: 1,
     });
 
     const organizationCredentialKey = await fixture.db.query.organizationCredentialKeys.findFirst({
@@ -591,6 +626,28 @@ describe("integration connections list integration", () => {
       },
     });
 
+    const listUsageResponse = await fixture.request("/v1/integration/connections", {
+      headers: {
+        cookie: session.cookie,
+      },
+    });
+    expect(listUsageResponse.status).toBe(200);
+    const listUsagePage = ListIntegrationConnectionsResponseSchema.parse(
+      await listUsageResponse.json(),
+    );
+    function expectListedBindingCount(connectionId: string, bindingCount: number): void {
+      const listedConnection = listUsagePage.items.find(
+        (connection) => connection.id === connectionId,
+      );
+
+      expect(listedConnection).toBeDefined();
+      expect(listedConnection?.bindingCount).toBe(bindingCount);
+    }
+
+    expectListedBindingCount("icn_delete_draft_binding", 0);
+    expectListedBindingCount("icn_delete_inactive_published_binding", 0);
+    expectListedBindingCount("icn_delete_active_version_binding", 1);
+
     const deleteFreeResponse = await fixture.request(
       "/v1/integration/connections/icn_delete_free",
       {
@@ -633,8 +690,8 @@ describe("integration connections list integration", () => {
     });
     expect(deletedWebhookSecretCredential).toBeUndefined();
 
-    const deleteBoundResponse = await fixture.request(
-      "/v1/integration/connections/icn_delete_bound",
+    const deleteDraftBindingResponse = await fixture.request(
+      "/v1/integration/connections/icn_delete_draft_binding",
       {
         method: "DELETE",
         headers: {
@@ -642,17 +699,21 @@ describe("integration connections list integration", () => {
         },
       },
     );
-    expect(deleteBoundResponse.status).toBe(409);
-    expect(await deleteBoundResponse.json()).toEqual({
-      code: "CONNECTION_HAS_BINDINGS",
-      message:
-        "This integration connection cannot be deleted while it is still used by one or more bindings.",
+    expect(deleteDraftBindingResponse.status).toBe(200);
+    expect(await deleteDraftBindingResponse.json()).toEqual({
+      connectionId: "icn_delete_draft_binding",
     });
 
-    const boundConnection = await fixture.db.query.integrationConnections.findFirst({
-      where: (table, { eq }) => eq(table.id, "icn_delete_bound"),
+    const deletedDraftBinding =
+      await fixture.db.query.sandboxProfileVersionIntegrationBindings.findFirst({
+        where: (table, { eq }) => eq(table.id, "ibd_delete_draft_binding"),
+      });
+    expect(deletedDraftBinding).toBeUndefined();
+
+    const deletedDraftBindingConnection = await fixture.db.query.integrationConnections.findFirst({
+      where: (table, { eq }) => eq(table.id, "icn_delete_draft_binding"),
     });
-    expect(boundConnection).toBeDefined();
+    expect(deletedDraftBindingConnection).toBeUndefined();
 
     const deleteAutomationResponse = await fixture.request(
       "/v1/integration/connections/icn_delete_automation",
@@ -679,6 +740,59 @@ describe("integration connections list integration", () => {
       where: (table, { eq }) => eq(table.automationId, "atm_delete_automation"),
     });
     expect(persistedWebhookAutomation).toBeDefined();
+
+    const deleteActiveVersionBindingResponse = await fixture.request(
+      "/v1/integration/connections/icn_delete_active_version_binding",
+      {
+        method: "DELETE",
+        headers: {
+          cookie: session.cookie,
+        },
+      },
+    );
+    expect(deleteActiveVersionBindingResponse.status).toBe(409);
+    expect(await deleteActiveVersionBindingResponse.json()).toEqual({
+      code: "CONNECTION_HAS_BINDINGS",
+      message:
+        "This integration connection cannot be deleted while it is still used by one or more active sandbox profile versions.",
+    });
+
+    const activeVersionBindingConnection = await fixture.db.query.integrationConnections.findFirst({
+      where: (table, { eq }) => eq(table.id, "icn_delete_active_version_binding"),
+    });
+    expect(activeVersionBindingConnection).toBeDefined();
+
+    const persistedActiveVersionBinding =
+      await fixture.db.query.sandboxProfileVersionIntegrationBindings.findFirst({
+        where: (table, { eq }) => eq(table.id, "ibd_delete_active_version_binding"),
+      });
+    expect(persistedActiveVersionBinding).toBeDefined();
+
+    const deleteInactivePublishedBindingResponse = await fixture.request(
+      "/v1/integration/connections/icn_delete_inactive_published_binding",
+      {
+        method: "DELETE",
+        headers: {
+          cookie: session.cookie,
+        },
+      },
+    );
+    expect(deleteInactivePublishedBindingResponse.status).toBe(200);
+    expect(await deleteInactivePublishedBindingResponse.json()).toEqual({
+      connectionId: "icn_delete_inactive_published_binding",
+    });
+
+    const deletedInactivePublishedBinding =
+      await fixture.db.query.sandboxProfileVersionIntegrationBindings.findFirst({
+        where: (table, { eq }) => eq(table.id, "ibd_delete_published_binding"),
+      });
+    expect(deletedInactivePublishedBinding).toBeUndefined();
+
+    const deletedInactivePublishedConnection =
+      await fixture.db.query.integrationConnections.findFirst({
+        where: (table, { eq }) => eq(table.id, "icn_delete_inactive_published_binding"),
+      });
+    expect(deletedInactivePublishedConnection).toBeUndefined();
   });
 
   it("returns 401 when the request is unauthenticated", async ({ fixture }) => {
@@ -743,16 +857,22 @@ async function insertBindingUsage(
     profileDisplayName: string;
     bindingId: string;
     connectionId: string;
+    state?: SandboxProfileVersionState;
+    activeVersion?: number | null;
   },
 ): Promise<void> {
   await fixture.db.insert(sandboxProfiles).values({
     id: input.profileId,
     organizationId: input.organizationId,
     displayName: input.profileDisplayName,
+    ...(input.activeVersion === undefined ? {} : { activeVersion: input.activeVersion }),
   });
   await fixture.db.insert(sandboxProfileVersions).values({
     sandboxProfileId: input.profileId,
     version: 1,
+    state: input.state ?? SandboxProfileVersionStates.PUBLISHED,
+    publishedAt:
+      input.state === SandboxProfileVersionStates.DRAFT ? null : "2026-03-01T00:00:00.000Z",
   });
   await fixture.db.insert(sandboxProfileVersionIntegrationBindings).values({
     id: input.bindingId,
