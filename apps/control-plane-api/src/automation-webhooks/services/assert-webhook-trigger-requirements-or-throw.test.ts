@@ -99,16 +99,27 @@ describe("assertWebhookTriggerRequirementsOrThrow", () => {
       }),
     );
 
-    expect(error).toBeInstanceOf(BadRequestError);
-    if (!(error instanceof BadRequestError)) {
-      throw new Error("Expected trigger requirements assertion to fail with BadRequestError.");
-    }
-
-    expect(error.code).toBe(AutomationWebhooksBadRequestCodes.INVALID_WEBHOOK_TRIGGER_REQUIREMENTS);
+    expectInvalidWebhookTriggerRequirementsError(error);
   });
 
-  it("allows existing sources without capability metadata", () => {
+  it("allows selected triggers without requirements when capability metadata is missing", () => {
     expect(() =>
+      assertWebhookTriggerRequirementsOrThrow({
+        eventTypes: ["github.issues.opened"],
+        providerMetadata: {},
+        supportedWebhookEvents: [
+          {
+            eventType: "github.issues.opened",
+            providerEventType: "issues",
+            displayName: "Issue opened",
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects selected triggers with requirements when capability metadata is missing", () => {
+    const error = captureError(() =>
       assertWebhookTriggerRequirementsOrThrow({
         eventTypes: ["github.pull_request.opened"],
         providerMetadata: {},
@@ -128,7 +139,9 @@ describe("assertWebhookTriggerRequirementsOrThrow", () => {
           },
         ],
       }),
-    ).not.toThrow();
+    );
+
+    expectInvalidWebhookTriggerRequirementsError(error);
   });
 
   it("validates all advertised triggers when eventTypes is null", () => {
@@ -182,4 +195,13 @@ function captureError(action: () => void): unknown {
   }
 
   return undefined;
+}
+
+function expectInvalidWebhookTriggerRequirementsError(error: unknown): void {
+  expect(error).toBeInstanceOf(BadRequestError);
+  if (!(error instanceof BadRequestError)) {
+    throw new Error("Expected trigger requirements assertion to fail with BadRequestError.");
+  }
+
+  expect(error.code).toBe(AutomationWebhooksBadRequestCodes.INVALID_WEBHOOK_TRIGGER_REQUIREMENTS);
 }
