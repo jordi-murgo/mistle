@@ -19,6 +19,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  packages: read
 
 concurrency:
   group: scheduled-sandboxd-stress-${{ github.ref }}
@@ -36,11 +37,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+
+      - name: Set up Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+        with:
+          use-gha-cache: enabled
+          use-flakehub: disabled
+          diagnostic-endpoint: ""
+          source-url: https://github.com/DeterminateSystems/magic-nix-cache/releases/download/v0.1.6/magic-nix-cache-X64-Linux
 
       - name: Restore sandboxd container cargo cache
         id: sandboxd-stress-container-cargo-cache
@@ -51,6 +57,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-sandboxd-test-cargo-home-
 
+      - name: Restore sandboxd container target cache
+        id: sandboxd-stress-container-target-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .local/sandboxd-test/target-debian-container
+          key: ${{ runner.os }}-sandboxd-test-target-debian-${{ hashFiles('packages/sandboxd/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sandboxd-test-target-debian-${{ hashFiles('packages/sandboxd/Cargo.lock') }}-
+            ${{ runner.os }}-sandboxd-test-target-debian-
+
       - name: Restore pnpm store cache
         id: sandboxd-stress-pnpm-store-cache
         uses: actions/cache/restore@v5
@@ -60,7 +76,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -73,21 +92,19 @@ jobs:
       - name: Generate integration config
         run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
-      - name: Build sandboxd test runner image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: packages/sandboxd/Dockerfile.test
-          tags: mistle/sandboxd-test-runner:ci
-          load: true
-          cache-from: type=gha,scope=sandboxd-test-runner
-          cache-to: type=gha,mode=max,scope=sandboxd-test-runner
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull sandboxd test runner image
+        run: docker pull "ghcr.io/mistlehq/sandboxd-test-runner:dockerfile-${{ hashFiles('packages/sandboxd/Dockerfile.test') }}"
 
       - name: Run sandboxd stress tests in Nix shell
         env:
           MISTLE_SANDBOXD_STRESS_CASES: ${{ inputs.stress_cases || '' }}
           MISTLE_SANDBOXD_STRESS_MULTIPLIER: ${{ inputs.stress_multiplier || '4' }}
-          MISTLE_SANDBOXD_TEST_IMAGE: mistle/sandboxd-test-runner:ci
+          MISTLE_SANDBOXD_TEST_IMAGE: ghcr.io/mistlehq/sandboxd-test-runner:dockerfile-${{ hashFiles('packages/sandboxd/Dockerfile.test') }}
           MISTLE_SANDBOXD_TEST_RUNNER_BUILD_POLICY: never
         run: nix develop --command pnpm --filter @mistle/sandboxd test:stress
 
@@ -97,6 +114,13 @@ jobs:
         with:
           path: .local/sandboxd-test/cargo-home
           key: ${{ runner.os }}-sandboxd-test-cargo-home-${{ hashFiles('packages/sandboxd/Cargo.lock') }}
+
+      - name: Save sandboxd container target cache
+        if: ${{ always() && !cancelled() && steps.sandboxd-stress-container-target-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .local/sandboxd-test/target-debian-container
+          key: ${{ runner.os }}-sandboxd-test-target-debian-${{ hashFiles('packages/sandboxd/Cargo.lock') }}-${{ github.sha }}
 
   notify:
     name: Notify Slack

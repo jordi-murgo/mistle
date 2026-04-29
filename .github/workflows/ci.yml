@@ -22,8 +22,13 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      ts: ${{ steps.filter.outputs.ts }}
-      rust: ${{ steps.filter.outputs.rust }}
+      ts_static: ${{ steps.filter.outputs.ts_static }}
+      ts_build: ${{ steps.filter.outputs.ts_build }}
+      ts_test: ${{ steps.filter.outputs.ts_test }}
+      ts_component: ${{ steps.filter.outputs.ts_component }}
+      rust_static: ${{ steps.filter.outputs.rust_static }}
+      commit_sign: ${{ steps.filter.outputs.commit_sign }}
+      sandboxd: ${{ steps.filter.outputs.sandboxd }}
       sandbox_base_linux: ${{ steps.filter.outputs.sandbox_base_linux }}
 
     steps:
@@ -35,7 +40,7 @@ jobs:
         uses: dorny/paths-filter@v4
         with:
           filters: |
-            ts:
+            ts_static:
               - '.github/workflows/ci.yml'
               - '.github/workflows/ci-scheduled-integration.yml'
               - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
@@ -53,7 +58,68 @@ jobs:
               - 'turbo.json'
               - 'tsconfig.base.json'
               - '!packages/sandboxd/**'
-            rust:
+            ts_build:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/ci-scheduled-integration.yml'
+              - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
+              - '.github/workflows/ci-scheduled-system.yml'
+              - '.envrc'
+              - 'apps/**'
+              - 'packages/**'
+              - 'scripts/**'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - 'tsconfig.base.json'
+              - '!packages/commit-sign/**'
+              - '!packages/docs/**'
+              - '!packages/sandboxd/**'
+            ts_test:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/ci-scheduled-integration.yml'
+              - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
+              - '.github/workflows/ci-scheduled-system.yml'
+              - '.envrc'
+              - 'apps/**'
+              - 'packages/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - 'tsconfig.base.json'
+              - '!packages/commit-sign/**'
+              - '!packages/docs/**'
+              - '!packages/sandboxd/**'
+            ts_component:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/ci-scheduled-integration.yml'
+              - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
+              - '.github/workflows/ci-scheduled-system.yml'
+              - '.envrc'
+              - 'apps/dashboard/**'
+              - 'packages/config/**'
+              - 'packages/http/**'
+              - 'packages/integrations-core/**'
+              - 'packages/integrations-definitions/**'
+              - 'packages/sandbox-session-client/**'
+              - 'packages/sandbox-session-protocol/**'
+              - 'packages/time/**'
+              - 'packages/ui/**'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - 'tsconfig.base.json'
+            rust_static:
               - '.github/workflows/ci.yml'
               - '.github/workflows/ci-scheduled-integration.yml'
               - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
@@ -74,24 +140,51 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'turbo.json'
               - 'tsconfig.base.json'
+            commit_sign:
+              - '.github/workflows/ci.yml'
+              - '.envrc'
+              - 'packages/commit-sign/**'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+            sandboxd:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/ci-scheduled-integration.yml'
+              - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
+              - '.github/workflows/ci-scheduled-system.yml'
+              - '.envrc'
+              - 'packages/sandboxd/**'
+              - 'packages/sandbox-runtime-contract/**'
+              - 'packages/integrations-core/**'
+              - 'packages/integrations-definitions/**'
+              - 'packages/sandbox-session-protocol/**'
+              - 'packages/time/**'
+              - 'scripts/**'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - 'tsconfig.base.json'
             sandbox_base_linux:
               - '.github/workflows/ci.yml'
               - '.github/workflows/ci-scheduled-integration.yml'
               - '.github/workflows/ci-scheduled-sandboxd-stress.yml'
               - '.github/workflows/ci-scheduled-system.yml'
               - '.dockerignore'
-              - 'packages/sandboxd/**'
               - 'packages/sandboxd/Dockerfile'
               - 'packages/sandboxd/scripts/cmddir'
 
   static-ts:
     name: TS Static
-    # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.ts == 'true'
+    if: needs.changes.outputs.ts_static == 'true'
     env:
       CI: true
       TURBO_TELEMETRY_DISABLED: "1"
@@ -102,8 +195,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore pnpm store cache
         id: static-ts-pnpm-store-cache
@@ -124,7 +235,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.workflow }}-static-ts-
             ${{ runner.os }}-turbo-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -138,7 +252,14 @@ jobs:
         run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
       - name: Run TS static checks in Nix shell
-        run: nix develop --command bash -c "pnpm format:check && pnpm exec oxlint --type-aware --deny-warnings --threads=1 apps packages tests && pnpm lint:openapi && pnpm lint:docs && pnpm lint:sql && pnpm typecheck:ts"
+        run: >-
+          nix develop --command bash -c
+          "pnpm exec oxfmt --check --threads=4 . &&
+          pnpm exec oxlint --type-aware --deny-warnings --threads=4 apps packages tests &&
+          pnpm lint:openapi &&
+          pnpm lint:docs &&
+          pnpm lint:sql &&
+          pnpm typecheck:ts"
 
       - name: Save Turbo local cache
         if: ${{ always() && !cancelled() && steps.static-ts-turbo-cache.outputs.cache-hit != 'true' }}
@@ -153,7 +274,7 @@ jobs:
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.ts == 'true'
+    if: needs.changes.outputs.ts_build == 'true'
     env:
       CI: true
       TURBO_TELEMETRY_DISABLED: "1"
@@ -164,8 +285,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore pnpm store cache
         id: build-ts-pnpm-store-cache
@@ -186,7 +325,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.workflow }}-build-ts-
             ${{ runner.os }}-turbo-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -211,12 +353,11 @@ jobs:
 
   static-rust:
     name: Rust Static
-    # runs-on: blacksmith-2vcpu-ubuntu-2404
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust_static == 'true'
     env:
       CI: true
       TURBO_TELEMETRY_DISABLED: "1"
@@ -227,18 +368,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: sandbox-rust
           workspaces: |
+            packages/commit-sign -> target
             packages/sandboxd -> target
           env-vars: AR CARGO CC CFLAGS CMAKE CXX DEVELOPER_DIR HOST_PATH LD MACOSX_DEPLOYMENT_TARGET NIX NM RANLIB RUST SDKROOT
           cmd-format: nix develop --command {0}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore pnpm store cache
         id: static-rust-pnpm-store-cache
@@ -259,7 +418,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.workflow }}-static-rust-
             ${{ runner.os }}-turbo-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -277,7 +439,11 @@ jobs:
         run: nix develop --command bash -c "MISTLE_CONFIG_PATH=$GITHUB_WORKSPACE/config/config.integration.docker.toml pnpm turbo run build --filter=@mistle/sandboxd"
 
       - name: Run Rust static checks in Nix shell
-        run: nix develop --command bash -c "pnpm lint:rust && pnpm typecheck:rust"
+        run: >-
+          nix develop --command bash -c
+          "pnpm --filter @mistle/sandboxd format:check &&
+          pnpm --filter @mistle/commit-sign format:check &&
+          pnpm turbo run lint typecheck --output-logs=full --concurrency=2 --filter=@mistle/sandboxd --filter=@mistle/commit-sign"
 
       - name: Save Turbo local cache
         if: ${{ always() && !cancelled() && steps.static-rust-turbo-cache.outputs.cache-hit != 'true' }}
@@ -303,6 +469,16 @@ jobs:
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
+
+      - name: Set up Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+        with:
+          use-gha-cache: enabled
+          use-flakehub: disabled
+          diagnostic-endpoint: ""
+          source-url: https://github.com/DeterminateSystems/magic-nix-cache/releases/download/v0.1.6/magic-nix-cache-X64-Linux
 
       - name: Restore pnpm store cache
         id: knip-pnpm-store-cache
@@ -313,7 +489,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Generate integration config
@@ -328,7 +507,7 @@ jobs:
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.ts == 'true'
+    if: needs.changes.outputs.ts_test == 'true'
     env:
       CI: true
       TURBO_TELEMETRY_DISABLED: "1"
@@ -339,8 +518,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore pnpm store cache
         id: test-ts-pnpm-store-cache
@@ -361,7 +558,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.workflow }}-test-ts-
             ${{ runner.os }}-turbo-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -392,7 +592,7 @@ jobs:
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.ts == 'true'
+    if: needs.changes.outputs.ts_component == 'true'
     env:
       CI: true
       TURBO_TELEMETRY_DISABLED: "1"
@@ -403,8 +603,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore pnpm store cache
         id: test-ts-component-pnpm-store-cache
@@ -425,7 +643,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ github.workflow }}-test-ts-component-
             ${{ runner.os }}-turbo-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -455,18 +676,33 @@ jobs:
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.commit_sign == 'true'
     env:
       CI: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore commit-sign container cargo cache
         id: test-commit-sign-container-cargo-cache
@@ -477,6 +713,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-commit-sign-test-cargo-home-
 
+      - name: Restore commit-sign container target cache
+        id: test-commit-sign-container-target-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .local/commit-sign-test/target-alpine-container
+          key: ${{ runner.os }}-commit-sign-test-target-alpine-${{ hashFiles('packages/commit-sign/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-commit-sign-test-target-alpine-${{ hashFiles('packages/commit-sign/Cargo.lock') }}-
+            ${{ runner.os }}-commit-sign-test-target-alpine-
+
       - name: Restore pnpm store cache
         id: test-commit-sign-pnpm-store-cache
         uses: actions/cache/restore@v5
@@ -486,7 +732,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -496,17 +745,23 @@ jobs:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Build commit-sign test runner image
-        uses: useblacksmith/build-push-action@v2
+      - name: Setup Blacksmith Docker builder
+        uses: useblacksmith/setup-docker-builder@v1
         with:
-          context: .
-          file: packages/commit-sign/Dockerfile.test
-          tags: mistle/commit-sign-test-runner:ci
-          load: true
+          max-cache-size-mb: "10240"
+
+      - name: Build commit-sign test runner image
+        run: >-
+          docker buildx build
+          --load
+          --pull=false
+          --tag "mistle/commit-sign-test-runner:dockerfile-${{ hashFiles('packages/commit-sign/Dockerfile.test') }}"
+          --file packages/commit-sign/Dockerfile.test
+          packages/commit-sign
 
       - name: Run commit-sign tests in Nix shell
         env:
-          MISTLE_COMMIT_SIGN_TEST_IMAGE: mistle/commit-sign-test-runner:ci
+          MISTLE_COMMIT_SIGN_TEST_IMAGE: mistle/commit-sign-test-runner:dockerfile-${{ hashFiles('packages/commit-sign/Dockerfile.test') }}
           MISTLE_COMMIT_SIGN_TEST_RUNNER_BUILD_POLICY: never
         run: nix develop --command pnpm --filter @mistle/commit-sign test
 
@@ -517,6 +772,13 @@ jobs:
           path: .local/commit-sign-test/cargo-home
           key: ${{ runner.os }}-commit-sign-test-cargo-home-${{ hashFiles('packages/commit-sign/Cargo.lock') }}
 
+      - name: Save commit-sign container target cache
+        if: ${{ always() && !cancelled() && steps.test-commit-sign-container-target-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .local/commit-sign-test/target-alpine-container
+          key: ${{ runner.os }}-commit-sign-test-target-alpine-${{ hashFiles('packages/commit-sign/Cargo.lock') }}-${{ github.sha }}
+
   test-sandboxd:
     name: Sandboxd Test
     # runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -524,7 +786,7 @@ jobs:
     timeout-minutes: 60
     needs:
       - changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.sandboxd == 'true'
     env:
       CI: true
 
@@ -532,11 +794,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
+      - name: Create Nix directories
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chmod -R 777 /nix
+
+      - name: Mount Nix sticky disk
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store-single-user-${{ runner.os }}-${{ github.job }}
+          path: /nix
+
+      - name: Prepare single-user Nix store
+        run: |
+          sudo mkdir -p /nix/store
+          sudo chown "$USER:$USER" /nix /nix/store
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
+        with:
+          install_options: --no-daemon
 
       - name: Restore sandboxd container cargo cache
         id: test-sandboxd-container-cargo-cache
@@ -547,6 +824,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-sandboxd-test-cargo-home-
 
+      - name: Restore sandboxd container target cache
+        id: test-sandboxd-container-target-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .local/sandboxd-test/target-debian-container
+          key: ${{ runner.os }}-sandboxd-test-target-debian-${{ hashFiles('packages/sandboxd/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sandboxd-test-target-debian-${{ hashFiles('packages/sandboxd/Cargo.lock') }}-
+            ${{ runner.os }}-sandboxd-test-target-debian-
+
       - name: Restore pnpm store cache
         id: test-sandboxd-pnpm-store-cache
         uses: actions/cache/restore@v5
@@ -556,7 +843,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies in Nix shell
+      - name: Materialize Nix shell
+        run: nix develop --command true
+
+      - name: Install pnpm dependencies
         run: nix develop --command pnpm install --frozen-lockfile
 
       - name: Save pnpm store cache
@@ -569,31 +859,31 @@ jobs:
       - name: Generate integration config
         run: nix develop --command bash -c "MISTLE_TEST_SANDBOX_INTEGRATION_PROVIDERS=docker pnpm run config:init:integration"
 
-      - name: Build sandboxd test runner image
-        uses: useblacksmith/build-push-action@v2
+      - name: Setup Blacksmith Docker builder
+        uses: useblacksmith/setup-docker-builder@v1
         with:
-          context: .
-          file: packages/sandboxd/Dockerfile.test
-          tags: mistle/sandboxd-test-runner:ci
-          load: true
+          max-cache-size-mb: "20480"
+
+      - name: Build sandboxd test runner image
+        run: >-
+          docker buildx build
+          --load
+          --pull=false
+          --tag "mistle/sandboxd-test-runner:dockerfile-${{ hashFiles('packages/sandboxd/Dockerfile.test') }}"
+          --file packages/sandboxd/Dockerfile.test
+          packages/sandboxd
 
       - name: Run sandboxd tests in Nix shell
         env:
-          MISTLE_SANDBOXD_TEST_IMAGE: mistle/sandboxd-test-runner:ci
+          MISTLE_SANDBOXD_TEST_IMAGE: mistle/sandboxd-test-runner:dockerfile-${{ hashFiles('packages/sandboxd/Dockerfile.test') }}
           MISTLE_SANDBOXD_TEST_RUNNER_BUILD_POLICY: never
         run: nix develop --command pnpm --filter @mistle/sandboxd test
 
       - name: Run sandboxd integration tests in Nix shell
         env:
-          MISTLE_SANDBOXD_TEST_IMAGE: mistle/sandboxd-test-runner:ci
+          MISTLE_SANDBOXD_TEST_IMAGE: mistle/sandboxd-test-runner:dockerfile-${{ hashFiles('packages/sandboxd/Dockerfile.test') }}
           MISTLE_SANDBOXD_TEST_RUNNER_BUILD_POLICY: never
         run: nix develop --command pnpm --filter @mistle/sandboxd test:integration
-
-      - name: Run sandboxd stress tests in Nix shell
-        env:
-          MISTLE_SANDBOXD_TEST_IMAGE: mistle/sandboxd-test-runner:ci
-          MISTLE_SANDBOXD_TEST_RUNNER_BUILD_POLICY: never
-        run: nix develop --command pnpm --filter @mistle/sandboxd test:stress
 
       - name: Save sandboxd container cargo cache
         if: steps.test-sandboxd-container-cargo-cache.outputs.cache-hit != 'true'
@@ -601,6 +891,13 @@ jobs:
         with:
           path: .local/sandboxd-test/cargo-home
           key: ${{ runner.os }}-sandboxd-test-cargo-home-${{ hashFiles('packages/sandboxd/Cargo.lock') }}
+
+      - name: Save sandboxd container target cache
+        if: ${{ always() && !cancelled() && steps.test-sandboxd-container-target-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .local/sandboxd-test/target-debian-container
+          key: ${{ runner.os }}-sandboxd-test-target-debian-${{ hashFiles('packages/sandboxd/Cargo.lock') }}-${{ github.sha }}
 
   sandbox-base-linux:
     name: Sandbox Base Image (Linux)
@@ -614,20 +911,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Blacksmith Docker builder
+        uses: useblacksmith/setup-docker-builder@v1
+        with:
+          max-cache-size-mb: "20480"
+
       - name: Run Linux sandbox base packaging check
         run: |
-          docker build \
+          docker buildx build \
+            --load \
             --platform linux/amd64 \
-            --target sandbox-base \
-            --tag mistle-sandbox-base-check:local \
+            --target sandbox-base-tooling \
+            --tag mistle-sandbox-base-tooling-check:local \
             --file packages/sandboxd/Dockerfile \
             .
 
       - name: Verify sandbox base login shell PATH
         run: |
-          docker run --rm --platform linux/amd64 --entrypoint bash mistle-sandbox-base-check:local -lc '
+          docker run --rm --platform linux/amd64 --entrypoint bash mistle-sandbox-base-tooling-check:local -lc '
             set -euo pipefail
-            for tool in cmddir mise sandboxd nix; do
+            for tool in cmddir docker dockerd mise nix node python3; do
               command -v "$tool"
             done
           '
