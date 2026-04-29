@@ -45,6 +45,7 @@ function createStartSandboxIdempotencyKey(input: StartSandboxInstanceInput): str
     organizationId: input.organizationId,
     sandboxProfileId: input.sandboxProfileId,
     sandboxProfileVersion: input.sandboxProfileVersion,
+    purpose: input.purpose,
     source: input.source,
     idempotencyKey,
   });
@@ -136,6 +137,7 @@ export async function startSandboxInstance(
     sandboxProfileId: input.sandboxProfileId,
     sandboxProfileVersion: input.sandboxProfileVersion,
     persistenceMode,
+    purpose: input.purpose,
     runtimePlan: input.runtimePlan,
     startedBy: input.startedBy,
     ...(input.actingUserId === undefined ? {} : { actingUserId: input.actingUserId }),
@@ -172,6 +174,7 @@ export async function startSandboxInstance(
       startedByKind: input.startedBy.kind,
       startedById: input.startedBy.id,
       source: input.source,
+      purpose: input.purpose,
       persistenceMode,
     })
     .onConflictDoNothing({

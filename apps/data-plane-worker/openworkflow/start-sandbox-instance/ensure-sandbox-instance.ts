@@ -1,8 +1,8 @@
 import {
-  SandboxInstancePurposes,
   SandboxInstanceStatuses,
   sandboxInstances,
   type DataPlaneDatabase,
+  type SandboxInstancePurpose,
 } from "@mistle/db/data-plane";
 import type { SandboxProvider } from "@mistle/sandbox";
 
@@ -17,7 +17,7 @@ export async function ensureSandboxInstance(
     sandboxProfileId: string;
     sandboxProfileVersion: number;
     persistenceMode: "ephemeral" | "persistent";
-    purpose?: "session" | "snapshot";
+    purpose: SandboxInstancePurpose;
     startedBy: {
       kind: "user" | "system";
       id: string;
@@ -41,7 +41,7 @@ export async function ensureSandboxInstance(
       startedByKind: input.startedBy.kind,
       startedById: input.startedBy.id,
       source: input.source,
-      purpose: input.purpose ?? SandboxInstancePurposes.SESSION,
+      purpose: input.purpose,
       persistenceMode: input.persistenceMode,
     })
     .onConflictDoNothing({
