@@ -252,12 +252,12 @@ export function resolveSandboxProfileEditorVersionMode(input: {
     };
   }
 
-  if (input.activeVersion !== null && activeVersion !== null) {
+  if (latestPublishedVersion !== null) {
     return {
       ok: true,
       mode: {
         kind: "active",
-        version: activeVersion.version,
+        version: latestPublishedVersion.version,
         activeVersion: input.activeVersion,
         hasDraft: draftVersion !== null,
         draftVersion: draftVersion?.version ?? null,
@@ -265,22 +265,9 @@ export function resolveSandboxProfileEditorVersionMode(input: {
     };
   }
 
-  if (latestPublishedVersion === null) {
-    return {
-      ok: false,
-      message: "Sandbox profile published version could not be loaded.",
-    };
-  }
-
   return {
-    ok: true,
-    mode: {
-      kind: "active",
-      version: latestPublishedVersion.version,
-      activeVersion: input.activeVersion,
-      hasDraft: draftVersion !== null,
-      draftVersion: draftVersion?.version ?? null,
-    },
+    ok: false,
+    message: "Sandbox profile published version could not be loaded.",
   };
 }
 
@@ -963,24 +950,19 @@ function LoadedSandboxProfileEditorPage(
         },
       );
 
-      const invalidationPromises = [
+      void Promise.all([
         input.invalidateProfileVersions(input.profileId),
         input.invalidateSandboxProfiles(),
         input.invalidateProfileDetail(input.profileId),
-      ];
-      if (result.activeVersion !== null) {
-        invalidationPromises.push(
-          input.invalidateVersionBindings({
-            profileId: input.profileId,
-            version: result.activeVersion,
-          }),
-          input.invalidateVersionSetupScript({
-            profileId: input.profileId,
-            version: result.activeVersion,
-          }),
-        );
-      }
-      void Promise.all(invalidationPromises);
+        input.invalidateVersionBindings({
+          profileId: input.profileId,
+          version: result.version.version,
+        }),
+        input.invalidateVersionSetupScript({
+          profileId: input.profileId,
+          version: result.version.version,
+        }),
+      ]);
     },
     onError: (error: unknown) => {
       setVersionActionError(
