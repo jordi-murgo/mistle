@@ -510,12 +510,27 @@ export type IntegrationProviderAppSetupConnectionUpdate = {
   externalSubjectId?: string | null;
 };
 
+export type IntegrationProviderAppSetupCompletionRedirect =
+  | {
+      kind: "connection-detail";
+      notice?: string;
+    }
+  | {
+      kind: "setup-route";
+      query?: Record<string, string>;
+    };
+
 export type IntegrationProviderAppSetupResult = {
+  completionRedirect?: IntegrationProviderAppSetupCompletionRedirect;
   connection?: IntegrationProviderAppSetupConnectionUpdate;
   secrets?: Record<string, string>;
   webhookSource?: {
     providerMetadata?: Record<string, unknown>;
   };
+};
+
+export type IntegrationProviderAppSetupCompleteResult = IntegrationProviderAppSetupResult & {
+  completionRedirect: IntegrationProviderAppSetupCompletionRedirect;
 };
 
 export type IntegrationProviderAppSetupConnectionSecretResolver = (input: {
@@ -570,7 +585,7 @@ export type IntegrationProviderAppSetupFlowCapability<
       TTargetSecrets,
       TConnectionConfig
     >,
-  ): MaybePromise<IntegrationProviderAppSetupResult>;
+  ): MaybePromise<IntegrationProviderAppSetupCompleteResult>;
   start?(
     input: IntegrationProviderAppSetupStartInput<TTargetConfig, TTargetSecrets, TConnectionConfig>,
   ): MaybePromise<
