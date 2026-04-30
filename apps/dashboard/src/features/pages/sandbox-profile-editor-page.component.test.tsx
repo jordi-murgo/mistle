@@ -792,6 +792,9 @@ describe("SandboxProfileEditorPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Snapshots" }));
 
     expect(screen.getByText("Creating snapshot")).toBeDefined();
+    const status = screen.getByRole("status", { name: "Creating snapshot" });
+    expect(status.className).toContain("sm:justify-end");
+    expect(status.querySelector(".text-right")?.textContent).toContain("Creating snapshot");
   });
 
   it("shows creating while the first snapshot is materializing from a manual job", () => {
@@ -1001,6 +1004,11 @@ describe("SandboxProfileEditorPage", () => {
       versionState: "draft",
     });
 
+    expect(
+      screen.getByText(
+        "A snapshot is the prepared sandbox image created from this published profile version and its setup script. New sessions can only start after a snapshot is ready.",
+      ),
+    ).toBeDefined();
     expect(
       screen.getByText("Publish this sandbox profile before managing snapshots."),
     ).toBeDefined();
