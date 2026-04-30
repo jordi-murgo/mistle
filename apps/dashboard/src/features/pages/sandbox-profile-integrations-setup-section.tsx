@@ -36,6 +36,10 @@ import {
   type SandboxProfileBindingEditorRow,
 } from "./sandbox-profile-binding-config-editor.js";
 import { resolveRowBindingMetadata } from "./sandbox-profile-binding-shared.js";
+import {
+  hasSandboxProfileBindingResourcesAndToolsCellContent,
+  SandboxProfileBindingResourcesAndToolsCell,
+} from "./sandbox-profile-resources-and-tools-section.js";
 
 type IntegrationChoice = {
   id: string;
@@ -48,9 +52,14 @@ type IntegrationChoice = {
 const NoIntegrationValue = "none";
 
 const SandboxProfileIntegrationSetupColumns = [
-  { key: "type", label: "Type", desktopWidth: "10rem" },
-  { key: "integration", label: "Integration", desktopWidth: "minmax(0,1fr)" },
-  { key: "connection", label: "Connection", desktopWidth: "minmax(0,1fr)" },
+  { key: "integration", label: "Integration", desktopWidth: "minmax(10rem,0.8fr)" },
+  { key: "connection", label: "Connection", desktopWidth: "minmax(10rem,0.8fr)" },
+  {
+    key: "resources-and-tools",
+    label: "Resources & Tools",
+    desktopWidth: "minmax(16rem,1.4fr)",
+    hideMobileLabel: true,
+  },
   {
     key: "actions",
     label: <span className="sr-only">Actions</span>,
@@ -60,9 +69,13 @@ const SandboxProfileIntegrationSetupColumns = [
   },
 ] satisfies readonly ResponsiveFieldListColumn[];
 
+const SandboxProfileIntegrationCellContentClassName = "flex items-center md:min-h-9";
+const SandboxProfileIntegrationActionCellClassName =
+  "absolute right-0 top-0 md:static md:flex md:justify-end";
+
 function IntegrationNameCell(input: { item: IntegrationChoice }): React.JSX.Element {
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div className={`${SandboxProfileIntegrationCellContentClassName} gap-2 text-sm`}>
       {input.item.logoKey === undefined ? null : (
         <img
           alt=""
@@ -71,6 +84,14 @@ function IntegrationNameCell(input: { item: IntegrationChoice }): React.JSX.Elem
         />
       )}
       <div className="min-w-0 truncate font-medium">{input.item.title}</div>
+    </div>
+  );
+}
+
+function ConnectionNameCell(input: { displayName: string }): React.JSX.Element {
+  return (
+    <div className={`${SandboxProfileIntegrationCellContentClassName} text-sm`}>
+      <span className="min-w-0 truncate">{input.displayName}</span>
     </div>
   );
 }
@@ -87,9 +108,18 @@ function IntegrationSelectionCell(input: {
     (choice) => choice.id === input.selectedIntegrationId,
   );
 
+  if (input.disabled === true) {
+    return selectedIntegration === undefined ? (
+      <div className={SandboxProfileIntegrationCellContentClassName}>
+        <p className="text-muted-foreground text-sm">None</p>
+      </div>
+    ) : (
+      <IntegrationNameCell item={selectedIntegration} />
+    );
+  }
+
   return (
     <Select
-      disabled={input.disabled === true}
       onValueChange={(nextIntegrationId) => {
         if (nextIntegrationId === null) {
           return;
@@ -139,18 +169,26 @@ function ConnectionSelectionCell(input: {
   const selectedConnection = input.availableConnections.find(
     (connection) => connection.id === input.selectedConnectionId,
   );
-  const selectedTarget =
-    selectedConnection === undefined
-      ? undefined
-      : input.availableTargets.find((target) => target.targetKey === selectedConnection.targetKey);
-
   if (input.availableConnections.length === 0) {
-    return <p className="text-muted-foreground text-sm">No connections available.</p>;
+    return (
+      <div className={SandboxProfileIntegrationCellContentClassName}>
+        <p className="text-muted-foreground text-sm">No connections available.</p>
+      </div>
+    );
+  }
+
+  if (input.disabled === true) {
+    return selectedConnection === undefined ? (
+      <div className={SandboxProfileIntegrationCellContentClassName}>
+        <p className="text-muted-foreground text-sm">Choose a connection</p>
+      </div>
+    ) : (
+      <ConnectionNameCell displayName={selectedConnection.displayName} />
+    );
   }
 
   return (
     <Select
-      disabled={input.disabled === true}
       onValueChange={(nextConnectionId) => {
         if (nextConnectionId === null) {
           return;
@@ -164,16 +202,7 @@ function ConnectionSelectionCell(input: {
           {selectedConnection === undefined ? (
             "Choose a connection"
           ) : (
-            <div className="flex items-center gap-2 text-sm">
-              {selectedTarget?.logoKey === undefined ? null : (
-                <img
-                  alt=""
-                  className="h-5 w-5 rounded-sm"
-                  src={resolveIntegrationLogoPath({ logoKey: selectedTarget.logoKey })}
-                />
-              )}
-              <span className="truncate">{selectedConnection.displayName}</span>
-            </div>
+            <ConnectionNameCell displayName={selectedConnection.displayName} />
           )}
         </SelectValue>
       </SelectTrigger>
@@ -185,6 +214,23 @@ function ConnectionSelectionCell(input: {
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+function RemoveIntegrationBindingButton(input: {
+  label: string;
+  onRemove: () => void;
+}): React.JSX.Element {
+  return (
+    <Button
+      aria-label={input.label}
+      className="h-7 w-7"
+      onClick={input.onRemove}
+      type="button"
+      variant="ghost"
+    >
+      <TrashIcon aria-hidden className="size-4" />
+    </Button>
   );
 }
 
@@ -314,15 +360,27 @@ function AddConnectorTile(input: {
 }
 
 function UnresolvedConnectionCell(input: { message: string }): React.JSX.Element {
-  return <p className="text-destructive text-sm">{input.message}</p>;
+  return (
+    <div className={SandboxProfileIntegrationCellContentClassName}>
+      <p className="text-destructive text-sm">{input.message}</p>
+    </div>
+  );
 }
 
 function UnresolvedIntegrationCell(input: { title: string }): React.JSX.Element {
-  return <p className="text-destructive truncate text-sm">{input.title}</p>;
+  return (
+    <div className={SandboxProfileIntegrationCellContentClassName}>
+      <p className="text-destructive truncate text-sm">{input.title}</p>
+    </div>
+  );
 }
 
 function UnresolvedNoneCell(): React.JSX.Element {
-  return <p className="text-sm">None</p>;
+  return (
+    <div className={SandboxProfileIntegrationCellContentClassName}>
+      <p className="text-sm">None</p>
+    </div>
+  );
 }
 
 function resolveConnectorRowIssue(input: {
@@ -597,10 +655,11 @@ export function SandboxProfileIntegrationsSetupSection(input: {
 
       <div className="max-w-5xl">
         <ResponsiveFieldList columns={SandboxProfileIntegrationSetupColumns} gapClassName="gap-6">
-          <ResponsiveFieldListRow className="py-4" gapClassName="gap-6">
-            <ResponsiveFieldListCell columnKey="type">
-              <p className="text-primary text-sm font-medium">Agent Harness</p>
-            </ResponsiveFieldListCell>
+          <ResponsiveFieldListRow
+            className="py-4"
+            gapClassName="gap-6"
+            gridClassName="md:items-start"
+          >
             <ResponsiveFieldListCell columnKey="integration">
               {agentDisplayChoice === undefined ? null : (
                 <IntegrationNameCell item={agentDisplayChoice} />
@@ -640,13 +699,42 @@ export function SandboxProfileIntegrationsSetupSection(input: {
                 disabled={input.disabled}
               />
             </ResponsiveFieldListCell>
-            <ResponsiveFieldListCell columnKey="actions" />
+            <ResponsiveFieldListCell
+              columnKey="resources-and-tools"
+              hideOnMobile={
+                agentRow === null ||
+                !hasSandboxProfileBindingResourcesAndToolsCellContent({
+                  row: agentRow,
+                  availableConnections: input.availableConnections,
+                  availableTargets: input.availableTargets,
+                })
+              }
+            >
+              {agentRow === null ? null : (
+                <SandboxProfileBindingResourcesAndToolsCell
+                  availableConnections={input.availableConnections}
+                  availableTargets={input.availableTargets}
+                  disabled={input.disabled}
+                  onRowChange={input.onIntegrationBindingRowChange}
+                  row={agentRow}
+                />
+              )}
+            </ResponsiveFieldListCell>
+            <ResponsiveFieldListCell
+              className={SandboxProfileIntegrationActionCellClassName}
+              columnKey="actions"
+            />
           </ResponsiveFieldListRow>
 
-          <ResponsiveFieldListRow className="py-4" gapClassName="gap-6">
-            <ResponsiveFieldListCell columnKey="type">
-              <p className="text-primary text-sm font-medium">Git Provider</p>
-            </ResponsiveFieldListCell>
+          <ResponsiveFieldListRow
+            className={
+              gitIssue === null || gitRow === null || input.disabled === true
+                ? "py-4"
+                : "py-4 pr-10 md:pr-0"
+            }
+            gapClassName="gap-6"
+            gridClassName="md:items-start"
+          >
             <ResponsiveFieldListCell columnKey="integration">
               {gitIssue === null ? (
                 <IntegrationSelectionCell
@@ -716,19 +804,38 @@ export function SandboxProfileIntegrationsSetupSection(input: {
                 />
               )}
             </ResponsiveFieldListCell>
-            <ResponsiveFieldListCell columnKey="actions">
+            <ResponsiveFieldListCell
+              columnKey="resources-and-tools"
+              hideOnMobile={
+                gitRow === null ||
+                !hasSandboxProfileBindingResourcesAndToolsCellContent({
+                  row: gitRow,
+                  availableConnections: input.availableConnections,
+                  availableTargets: input.availableTargets,
+                })
+              }
+            >
+              {gitRow === null ? null : (
+                <SandboxProfileBindingResourcesAndToolsCell
+                  availableConnections={input.availableConnections}
+                  availableTargets={input.availableTargets}
+                  disabled={input.disabled}
+                  onRowChange={input.onIntegrationBindingRowChange}
+                  row={gitRow}
+                />
+              )}
+            </ResponsiveFieldListCell>
+            <ResponsiveFieldListCell
+              className={SandboxProfileIntegrationActionCellClassName}
+              columnKey="actions"
+            >
               {gitIssue === null || gitRow === null || input.disabled === true ? null : (
-                <Button
-                  aria-label="Remove git provider"
-                  className="h-7 w-7"
-                  onClick={() => {
+                <RemoveIntegrationBindingButton
+                  label="Remove git provider"
+                  onRemove={() => {
                     input.onRemoveIntegrationBindingRow(gitRow.clientId);
                   }}
-                  type="button"
-                  variant="ghost"
-                >
-                  <TrashIcon aria-hidden className="size-4" />
-                </Button>
+                />
               )}
             </ResponsiveFieldListCell>
           </ResponsiveFieldListRow>
@@ -760,12 +867,19 @@ export function SandboxProfileIntegrationsSetupSection(input: {
                 : target === undefined
                   ? "Integration no longer available."
                   : null;
+            const hasResourcesAndTools = hasSandboxProfileBindingResourcesAndToolsCellContent({
+              row,
+              availableConnections: input.availableConnections,
+              availableTargets: input.availableTargets,
+            });
 
             return (
-              <ResponsiveFieldListRow className="py-4" gapClassName="gap-6" key={row.clientId}>
-                <ResponsiveFieldListCell columnKey="type">
-                  <p className="text-primary text-sm font-medium">Connector</p>
-                </ResponsiveFieldListCell>
+              <ResponsiveFieldListRow
+                className={input.disabled === true ? "py-4" : "py-4 pr-10 md:pr-0"}
+                gapClassName="gap-6"
+                gridClassName="md:items-start"
+                key={row.clientId}
+              >
                 <ResponsiveFieldListCell columnKey="integration">
                   {connection === undefined ? (
                     <UnresolvedIntegrationCell title={integrationTitle} />
@@ -805,19 +919,29 @@ export function SandboxProfileIntegrationsSetupSection(input: {
                     />
                   )}
                 </ResponsiveFieldListCell>
-                <ResponsiveFieldListCell columnKey="actions">
+                <ResponsiveFieldListCell
+                  columnKey="resources-and-tools"
+                  hideOnMobile={!hasResourcesAndTools}
+                >
+                  <SandboxProfileBindingResourcesAndToolsCell
+                    availableConnections={input.availableConnections}
+                    availableTargets={input.availableTargets}
+                    disabled={input.disabled}
+                    onRowChange={input.onIntegrationBindingRowChange}
+                    row={row}
+                  />
+                </ResponsiveFieldListCell>
+                <ResponsiveFieldListCell
+                  className={SandboxProfileIntegrationActionCellClassName}
+                  columnKey="actions"
+                >
                   {input.disabled === true ? null : (
-                    <Button
-                      aria-label="Remove connector"
-                      className="h-7 w-7"
-                      onClick={() => {
+                    <RemoveIntegrationBindingButton
+                      label="Remove connector"
+                      onRemove={() => {
                         input.onRemoveIntegrationBindingRow(row.clientId);
                       }}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <TrashIcon aria-hidden className="size-4" />
-                    </Button>
+                    />
                   )}
                 </ResponsiveFieldListCell>
               </ResponsiveFieldListRow>

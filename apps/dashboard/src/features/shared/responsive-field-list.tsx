@@ -108,6 +108,7 @@ export function ResponsiveFieldListRow(input: {
   children: ReactNode;
   className?: string;
   gapClassName?: string;
+  gridClassName?: string;
   isLastRow?: boolean;
   status?: ReactNode;
   statusClassName?: string;
@@ -124,8 +125,9 @@ export function ResponsiveFieldListRow(input: {
     >
       <div
         className={cn(
-          "grid md:items-center md:grid-cols-[var(--responsive-field-list-grid-template)]",
+          "relative grid md:items-center md:grid-cols-[var(--responsive-field-list-grid-template)]",
           input.gapClassName ?? "gap-4",
+          input.gridClassName,
         )}
         data-slot="responsive-field-list-row-grid"
         style={gridStyle}
@@ -146,6 +148,7 @@ export function ResponsiveFieldListCell(input: {
   className?: string;
   columnKey: string;
   contentClassName?: string;
+  hideOnMobile?: boolean;
   mobileLabelClassName?: string;
 }): React.JSX.Element {
   const { columns } = useResponsiveFieldListContext();
@@ -155,6 +158,7 @@ export function ResponsiveFieldListCell(input: {
     <div
       className={cn(
         "min-w-0",
+        input.hideOnMobile === true ? "hidden md:block" : null,
         resolveAlignmentClassName(column.align),
         column.cellClassName,
         input.className,

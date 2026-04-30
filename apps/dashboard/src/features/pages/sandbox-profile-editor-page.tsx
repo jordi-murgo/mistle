@@ -1,4 +1,3 @@
-import { findNextScheduleOccurrence, validateScheduleCronExpression } from "@mistle/time";
 import {
   Accordion,
   AccordionContent,
@@ -35,9 +34,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type Key,
+  type ReactNode,
   type SyntheticEvent,
 } from "react";
 import {
@@ -54,7 +53,6 @@ import { resolveApiErrorMessage } from "../api/error-message.js";
 import { listWebhookAutomationsForSandboxProfile } from "../automations/webhook-automations-service.js";
 import type { WebhookAutomationSandboxProfileUsage } from "../automations/webhook-automations-types.js";
 import { SingleSelectStringComboboxField } from "../forms/single-select-string-combobox-field.js";
-import type { StringComboboxOption } from "../forms/string-combobox-options.js";
 import { NavigationBlockerDialog } from "../navigation/navigation-blocker-dialog.js";
 import { useAppPageMeta } from "../navigation/route-meta.js";
 import { SandboxProfilesApiError } from "../sandbox-profiles/sandbox-profiles-api-errors.js";
@@ -78,12 +76,12 @@ import {
   refreshSandboxProfileVersion,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
 import type {
-  PublishSandboxProfileVersionResult,
   SandboxProfile,
   SandboxProfileVersion,
 } from "../sandbox-profiles/sandbox-profiles-types.js";
 import { ActivityStatus } from "../shared/activity-status.js";
 import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
+import { FormPageSection } from "../shared/form-page.js";
 import { FormPageFrame, PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
 import {
   createSandboxBaseSetupScriptContextFromGeneratedInventory,
@@ -96,6 +94,22 @@ import type {
   SandboxProfileBindingEditorRow,
 } from "./sandbox-profile-binding-config-editor.js";
 import {
+  applyPublishedSandboxProfileVersionToProfile,
+  applyPublishedSandboxProfileVersionToVersions,
+  createTimezoneOptions,
+  formatCronExpressionBreakdownDiagram,
+  resolveCronExpressionBreakdown,
+  resolveSandboxProfileEditorVersionMode,
+  resolveSandboxProfileSetupScriptIntegrationRows,
+  resolveSnapshotRefreshScheduleBehaviorDescription,
+  shouldPollSandboxProfileSnapshotJobs,
+  shouldRedirectDraftSandboxProfileViewToPublished,
+  type CronExpressionBreakdown,
+  type SandboxProfileEditorVersionMode,
+  type SandboxProfileRouteView,
+} from "./sandbox-profile-editor-page-model.js";
+import {
+  SandboxProfileEditorHorizontalTabContent,
   SandboxProfileEditorSections,
   type SandboxProfileEditorSection,
 } from "./sandbox-profile-editor-sections.js";
@@ -108,7 +122,6 @@ import {
   useCreateSandboxProfileMetaState,
   useEditSandboxProfileMetaState,
 } from "./sandbox-profile-meta-state.js";
-import { SandboxProfileResourcesAndToolsSection } from "./sandbox-profile-resources-and-tools-section.js";
 import {
   useLoadedSandboxProfileSetupScriptState,
   useSandboxProfileSetupScriptLoader,
@@ -121,30 +134,9 @@ type SandboxProfileEditorPageProps =
     }
   | {
       mode: "edit";
-      view: SandboxProfileRouteView;
     };
 
-type SandboxProfileEditorVersionMode =
-  | {
-      kind: "draft";
-      version: number;
-      activeVersion: number | null;
-      hasDraft: true;
-    }
-  | {
-      kind: "active";
-      version: number;
-      activeVersion: number | null;
-      hasDraft: boolean;
-      draftVersion: number | null;
-    };
-
-type SandboxProfileRouteView = "published" | "draft";
-type SandboxProfileEditorSectionId =
-  | "integrations"
-  | "resources-and-tools"
-  | "configurations"
-  | "snapshot";
+type SandboxProfileEditorSectionId = "sandbox-profile" | "snapshot";
 type SnapshotPanelState =
   | {
       kind: "draft-unavailable";
@@ -177,97 +169,12 @@ type SandboxProfileDraftSectionState = {
   integrationRows?: readonly SandboxProfileBindingEditorRow[] | null;
   isSaving: boolean;
 };
-type SandboxProfileIntegrationSetupSectionId = Extract<
-  SandboxProfileEditorSectionId,
-  "integrations" | "resources-and-tools"
->;
 
 function createIdleSandboxProfileDraftSectionState(): SandboxProfileDraftSectionState {
   return {
     flushDraftChanges: async () => true,
     hasUnpersistedChanges: false,
     isSaving: false,
-  };
-}
-
-type ResolveEditorVersionModeResult =
-  | {
-      ok: true;
-      mode: SandboxProfileEditorVersionMode;
-    }
-  | {
-      ok: false;
-      message: string;
-    };
-
-export function resolveSandboxProfileEditorVersionMode(input: {
-  activeVersion: number | null;
-  versions: readonly SandboxProfileVersion[];
-  view: SandboxProfileRouteView;
-}): ResolveEditorVersionModeResult {
-  const draftVersions = input.versions.filter((version) => version.state === "draft");
-  const publishedVersions = input.versions.filter((version) => version.state === "published");
-  if (draftVersions.length > 1) {
-    return {
-      ok: false,
-      message: "Sandbox profile has multiple draft versions.",
-    };
-  }
-
-  const draftVersion = draftVersions[0] ?? null;
-  const activeVersion =
-    input.activeVersion === null
-      ? null
-      : (input.versions.find((version) => version.version === input.activeVersion) ?? null);
-  const latestPublishedVersion =
-    publishedVersions.length === 0
-      ? null
-      : publishedVersions.reduce((latestVersion, currentVersion) =>
-          currentVersion.version > latestVersion.version ? currentVersion : latestVersion,
-        );
-
-  if (input.activeVersion !== null && activeVersion === null) {
-    return {
-      ok: false,
-      message: "Sandbox profile active version could not be loaded.",
-    };
-  }
-
-  if (input.view === "draft") {
-    if (draftVersion === null) {
-      return {
-        ok: false,
-        message: "Sandbox profile draft version could not be loaded.",
-      };
-    }
-
-    return {
-      ok: true,
-      mode: {
-        kind: "draft",
-        version: draftVersion.version,
-        activeVersion: input.activeVersion,
-        hasDraft: true,
-      },
-    };
-  }
-
-  if (latestPublishedVersion !== null) {
-    return {
-      ok: true,
-      mode: {
-        kind: "active",
-        version: latestPublishedVersion.version,
-        activeVersion: input.activeVersion,
-        hasDraft: draftVersion !== null,
-        draftVersion: draftVersion?.version ?? null,
-      },
-    };
-  }
-
-  return {
-    ok: false,
-    message: "Sandbox profile published version could not be loaded.",
   };
 }
 
@@ -278,80 +185,63 @@ pnpm install
 pnpm dev:bootstrap`;
 
 const SandboxProfileEditorSectionIds = {
-  INTEGRATIONS: "integrations",
-  RESOURCES_AND_TOOLS: "resources-and-tools",
-  CONFIGURATIONS: "configurations",
+  SANDBOX_PROFILE: "sandbox-profile",
   SNAPSHOT: "snapshot",
 } satisfies Record<string, SandboxProfileEditorSectionId>;
-const SnapshotRefreshSchedulePreviewPrompt =
-  "Enter a valid cron expression and timezone to preview the schedule.";
-const BrowserTimezoneOptions = Intl.supportedValuesOf("timeZone").map((timezone) => ({
-  label: timezone,
-  value: timezone,
-}));
-const MonthFieldLabels = new Map([
-  ["1", "January"],
-  ["2", "February"],
-  ["3", "March"],
-  ["4", "April"],
-  ["5", "May"],
-  ["6", "June"],
-  ["7", "July"],
-  ["8", "August"],
-  ["9", "September"],
-  ["10", "October"],
-  ["11", "November"],
-  ["12", "December"],
-]);
-const DayOfWeekFieldLabels = new Map([
-  ["0", "Sunday"],
-  ["1", "Monday"],
-  ["2", "Tuesday"],
-  ["3", "Wednesday"],
-  ["4", "Thursday"],
-  ["5", "Friday"],
-  ["6", "Saturday"],
-  ["7", "Sunday"],
-]);
-
 const PublishSuccessNavigationState: SandboxProfileEditorNavigationState = {
   notice: "publish-success",
 };
 
+function createSandboxProfileDefaultPath(profileId: string): string {
+  return `/sandbox-profiles/${profileId}/sandbox-profile`;
+}
+
 function createSandboxProfileEditorPath(input: {
   profileId: string;
-  view: SandboxProfileRouteView;
-  sectionId: SandboxProfileEditorSectionId;
+  view?: SandboxProfileRouteView;
 }): string {
-  return `/sandbox-profiles/${input.profileId}/${input.view}/${input.sectionId}`;
+  return input.view === undefined
+    ? createSandboxProfileDefaultPath(input.profileId)
+    : `/sandbox-profiles/${input.profileId}/sandbox-profile/${input.view}`;
 }
 
-export function shouldPollSandboxProfileSnapshotJobs(
-  versions: readonly SandboxProfileVersion[] | undefined,
-): boolean {
-  if (versions === undefined) {
-    return false;
-  }
-
-  return versions.some(
-    (version) =>
-      version.state === "published" &&
-      (version.latestSnapshotJob?.state === "queued" ||
-        version.latestSnapshotJob?.state === "running"),
-  );
+function createSandboxProfileSnapshotsPath(profileId: string): string {
+  return `/sandbox-profiles/${profileId}/snapshots`;
 }
 
-function resolveSnapshotPanelState(input: {
-  mode: SandboxProfileEditorVersionMode;
-  version: SandboxProfileVersion | null;
-}): SnapshotPanelState {
-  if (input.mode.kind === "draft" || input.version === null) {
+function createSandboxProfileTabPath(input: {
+  profileId: string;
+  sectionId: SandboxProfileEditorSectionId;
+  view?: SandboxProfileRouteView;
+}): string {
+  return input.sectionId === SandboxProfileEditorSectionIds.SNAPSHOT
+    ? createSandboxProfileSnapshotsPath(input.profileId)
+    : createSandboxProfileEditorPath({
+        profileId: input.profileId,
+        ...(input.view === undefined ? {} : { view: input.view }),
+      });
+}
+
+function resolveLatestPublishedSandboxProfileVersion(
+  versions: readonly SandboxProfileVersion[],
+): SandboxProfileVersion | null {
+  const publishedVersions = versions.filter((version) => version.state === "published");
+
+  return publishedVersions.length === 0
+    ? null
+    : publishedVersions.reduce((latestVersion, currentVersion) =>
+        currentVersion.version > latestVersion.version ? currentVersion : latestVersion,
+      );
+}
+
+function resolveSnapshotPanelState(version: SandboxProfileVersion | null): SnapshotPanelState {
+  if (version === null) {
     return {
       kind: "draft-unavailable",
     };
   }
 
-  const latestSnapshotJob = input.version.latestSnapshotJob;
+  const latestSnapshotJob = version.latestSnapshotJob;
   if (latestSnapshotJob?.state === "queued" || latestSnapshotJob?.state === "running") {
     return {
       kind: "creating",
@@ -360,7 +250,7 @@ function resolveSnapshotPanelState(input: {
 
   if (latestSnapshotJob?.state === "failed") {
     const message = latestSnapshotJob.errorMessage ?? "Snapshot materialization failed.";
-    return input.version.usable
+    return version.usable
       ? {
           kind: "refresh-error",
           latestSnapshotCreatedAt: null,
@@ -372,7 +262,7 @@ function resolveSnapshotPanelState(input: {
         };
   }
 
-  if (!input.version.usable) {
+  if (!version.usable) {
     return {
       kind: "no-snapshot",
     };
@@ -385,11 +275,8 @@ function resolveSnapshotPanelState(input: {
   };
 }
 
-function shouldShowMissingSnapshotAlert(input: {
-  mode: SandboxProfileEditorVersionMode;
-  snapshotState: SnapshotPanelState;
-}): boolean {
-  return input.mode.kind === "active" && input.snapshotState.kind === "no-snapshot";
+function shouldShowMissingSnapshotAlert(input: { snapshotState: SnapshotPanelState }): boolean {
+  return input.snapshotState.kind === "no-snapshot";
 }
 
 function readSandboxProfileEditorNavigationState(
@@ -408,61 +295,79 @@ function readSandboxProfileEditorNavigationState(
   };
 }
 
-function readSandboxProfileEditorRouteSectionId(
-  value: string | undefined,
-): SandboxProfileEditorSectionId | null {
-  if (isSandboxProfileEditorSectionId(value)) {
-    return value;
+function readSandboxProfileEditorSectionPathSegment(input: {
+  pathname: string;
+  profileId: string;
+}): SandboxProfileEditorSectionId | null {
+  if (
+    input.pathname === createSandboxProfileDefaultPath(input.profileId) ||
+    input.pathname.startsWith(`${createSandboxProfileDefaultPath(input.profileId)}/`)
+  ) {
+    return SandboxProfileEditorSectionIds.SANDBOX_PROFILE;
+  }
+
+  if (input.pathname === createSandboxProfileSnapshotsPath(input.profileId)) {
+    return SandboxProfileEditorSectionIds.SNAPSHOT;
   }
 
   return null;
 }
 
-function isSandboxProfileEditorSectionId(value: unknown): value is SandboxProfileEditorSectionId {
-  return (
-    value === SandboxProfileEditorSectionIds.INTEGRATIONS ||
-    value === SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS ||
-    value === SandboxProfileEditorSectionIds.CONFIGURATIONS ||
-    value === SandboxProfileEditorSectionIds.SNAPSHOT
-  );
-}
-
-function readSandboxProfileEditorSectionPathSegment(input: {
+function readSandboxProfileEditorRoute(input: {
   pathname: string;
   profileId: string;
-  view: SandboxProfileRouteView;
-}): SandboxProfileEditorSectionId | null {
-  const prefix = `/sandbox-profiles/${input.profileId}/${input.view}/`;
-  if (!input.pathname.startsWith(prefix)) {
-    return null;
+}): { sectionId: SandboxProfileEditorSectionId; view?: SandboxProfileRouteView } | null {
+  const sandboxProfilePath = createSandboxProfileDefaultPath(input.profileId);
+  if (input.pathname === sandboxProfilePath) {
+    return {
+      sectionId: SandboxProfileEditorSectionIds.SANDBOX_PROFILE,
+    };
   }
 
-  const sectionId = input.pathname.slice(prefix.length);
-  if (!isSandboxProfileEditorSectionId(sectionId)) {
-    return null;
+  if (input.pathname === `${sandboxProfilePath}/draft`) {
+    return {
+      sectionId: SandboxProfileEditorSectionIds.SANDBOX_PROFILE,
+      view: "draft",
+    };
   }
 
-  return sectionId;
+  if (input.pathname === `${sandboxProfilePath}/published`) {
+    return {
+      sectionId: SandboxProfileEditorSectionIds.SANDBOX_PROFILE,
+      view: "published",
+    };
+  }
+
+  if (input.pathname === createSandboxProfileSnapshotsPath(input.profileId)) {
+    return {
+      sectionId: SandboxProfileEditorSectionIds.SNAPSHOT,
+    };
+  }
+
+  return null;
 }
 
 function shouldBlockSandboxProfileEditorUnpersistedChangesNavigation(input: {
   profileId: string;
-  view: SandboxProfileRouteView;
   currentPathname: string;
   nextPathname: string;
 }): boolean {
   const currentSectionId = readSandboxProfileEditorSectionPathSegment({
     pathname: input.currentPathname,
     profileId: input.profileId,
-    view: input.view,
   });
   const nextSectionId = readSandboxProfileEditorSectionPathSegment({
     pathname: input.nextPathname,
     profileId: input.profileId,
-    view: input.view,
   });
 
   return currentSectionId === null || nextSectionId === null;
+}
+
+function resolveDefaultSandboxProfileEditorView(input: {
+  versions: readonly SandboxProfileVersion[];
+}): SandboxProfileRouteView {
+  return input.versions.some((version) => version.state === "draft") ? "draft" : "published";
 }
 
 function shouldRedirectPublishedSandboxProfileViewToDraft(input: {
@@ -474,51 +379,12 @@ function shouldRedirectPublishedSandboxProfileViewToDraft(input: {
   );
 }
 
-export function shouldRedirectDraftSandboxProfileViewToPublished(input: {
-  versions: readonly SandboxProfileVersion[];
-}): boolean {
-  const hasDraftVersion = input.versions.some((version) => version.state === "draft");
-  const hasPublishedVersion = input.versions.some((version) => version.state === "published");
-
-  return !hasDraftVersion && hasPublishedVersion;
-}
-
-export function applyPublishedSandboxProfileVersionToProfile(input: {
-  profile: SandboxProfile | undefined;
-  result: PublishSandboxProfileVersionResult;
-}): SandboxProfile | undefined {
-  if (input.profile === undefined) {
-    return undefined;
-  }
-
-  return {
-    ...input.profile,
-    activeVersion: input.result.activeVersion,
-  };
-}
-
-export function applyPublishedSandboxProfileVersionToVersions(input: {
-  versions: readonly SandboxProfileVersion[] | undefined;
-  result: PublishSandboxProfileVersionResult;
-}): readonly SandboxProfileVersion[] | undefined {
-  if (input.versions === undefined) {
-    return undefined;
-  }
-
-  const remainingVersions = input.versions.filter(
-    (version) => version.version !== input.result.version.version,
-  );
-  return [...remainingVersions, input.result.version].sort(
-    (left, right) => left.version - right.version,
-  );
-}
-
 export function SandboxProfileEditorPage(props: SandboxProfileEditorPageProps): React.JSX.Element {
   if (props.mode === "create") {
     return <CreateSandboxProfileEditorPage />;
   }
 
-  return <EditSandboxProfileEditorPage view={props.view} />;
+  return <EditSandboxProfileEditorPage />;
 }
 
 function CreateSandboxProfileEditorPage(): React.JSX.Element {
@@ -702,7 +568,7 @@ export function SandboxProfileEditorShell(): React.JSX.Element {
   }
 
   return (
-    <PageFrame maxWidthClassName="max-w-5xl" title="">
+    <PageFrame paddingClassName="py-0" title="">
       <Outlet
         context={
           {
@@ -750,49 +616,29 @@ export function SandboxProfileEditorShell(): React.JSX.Element {
 
 export function SandboxProfileDefaultRedirect(): React.JSX.Element {
   const shellContext = useSandboxProfileEditorShellContext();
-  const defaultView = shellContext.profile.activeVersion === null ? "draft" : "published";
 
-  return (
-    <Navigate
-      replace
-      to={createSandboxProfileEditorPath({
-        profileId: shellContext.profileId,
-        view: defaultView,
-        sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
-      })}
-    />
-  );
-}
-
-export function SandboxProfileSectionDefaultRedirect(input: {
-  view: SandboxProfileRouteView;
-}): React.JSX.Element {
-  const shellContext = useSandboxProfileEditorShellContext();
-
-  return (
-    <Navigate
-      replace
-      to={createSandboxProfileEditorPath({
-        profileId: shellContext.profileId,
-        view: input.view,
-        sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
-      })}
-    />
-  );
+  return <Navigate replace to={createSandboxProfileDefaultPath(shellContext.profileId)} />;
 }
 
 function useSandboxProfileEditorShellContext(): SandboxProfileEditorShellContext {
   return useOutletContext<SandboxProfileEditorShellContext>();
 }
 
-function EditSandboxProfileEditorPage(input: { view: SandboxProfileRouteView }): React.JSX.Element {
+function EditSandboxProfileEditorPage(): React.JSX.Element {
   const shellContext = useSandboxProfileEditorShellContext();
   const location = useLocation();
-  const params = useParams();
   const navigationState = readSandboxProfileEditorNavigationState(location.state);
-  const routeSectionId = readSandboxProfileEditorRouteSectionId(params["sectionId"]);
+  const route = readSandboxProfileEditorRoute({
+    pathname: location.pathname,
+    profileId: shellContext.profileId,
+  });
   const publishSuccessMessage = navigationState.notice === "publish-success";
   const navigate = shellContext.navigate;
+  const routeView =
+    route?.view ??
+    resolveDefaultSandboxProfileEditorView({
+      versions: shellContext.versions,
+    });
   const onPublishSuccessNavigationConsumed = useCallback(() => {
     void navigate(location.pathname + location.search, {
       replace: true,
@@ -800,29 +646,18 @@ function EditSandboxProfileEditorPage(input: { view: SandboxProfileRouteView }):
     });
   }, [location.pathname, location.search, navigate]);
 
-  if (
-    routeSectionId === null ||
-    (input.view === "draft" && routeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT)
-  ) {
-    return (
-      <Navigate
-        replace
-        to={createSandboxProfileEditorPath({
-          profileId: shellContext.profileId,
-          view: input.view,
-          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
-        })}
-      />
-    );
+  if (route === null) {
+    return <Navigate replace to={createSandboxProfileDefaultPath(shellContext.profileId)} />;
   }
 
   return (
     <LoadedSandboxProfileEditorPage
-      routeSectionId={routeSectionId}
+      routeSectionId={route.sectionId}
       publishSuccessNavigationKey={publishSuccessMessage ? location.key : null}
       onPublishSuccessNavigationConsumed={onPublishSuccessNavigationConsumed}
       publishSuccessMessage={publishSuccessMessage}
-      view={input.view}
+      explicitView={route.view}
+      view={routeView}
       navigate={shellContext.navigate}
       profileId={shellContext.profileId}
       profile={shellContext.profile}
@@ -842,6 +677,7 @@ type LoadedSandboxProfileEditorPageInput = {
   publishSuccessNavigationKey: string | null;
   onPublishSuccessNavigationConsumed: () => void;
   publishSuccessMessage: boolean;
+  explicitView: SandboxProfileRouteView | undefined;
   profileId: string;
   profile: SandboxProfile;
   versions: readonly SandboxProfileVersion[];
@@ -857,7 +693,6 @@ function LoadedSandboxProfileEditorPage(
   input: LoadedSandboxProfileEditorPageInput,
 ): React.JSX.Element {
   const queryClient = useQueryClient();
-  const pendingPublishedSectionIdRef = useRef<SandboxProfileEditorSectionId | null>(null);
   const [versionActionError, setVersionActionError] = useState<string | null>(null);
   const [isDeleteProfileDialogOpen, setIsDeleteProfileDialogOpen] = useState(false);
   const [deleteProfileError, setDeleteProfileError] = useState<string | null>(null);
@@ -887,7 +722,6 @@ function LoadedSandboxProfileEditorPage(
         createSandboxProfileEditorPath({
           profileId: input.profileId,
           view: "draft",
-          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
         }),
       );
     },
@@ -919,7 +753,6 @@ function LoadedSandboxProfileEditorPage(
     },
     onSuccess: async (result) => {
       setVersionActionError(null);
-      pendingPublishedSectionIdRef.current = SandboxProfileEditorSectionIds.SNAPSHOT;
       queryClient.setQueryData<SandboxProfile | undefined>(
         sandboxProfileDetailQueryKey(input.profileId),
         (currentProfile) =>
@@ -939,16 +772,9 @@ function LoadedSandboxProfileEditorPage(
           return nextVersions === undefined ? currentVersions : { versions: nextVersions };
         },
       );
-      void input.navigate(
-        createSandboxProfileEditorPath({
-          profileId: input.profileId,
-          view: "published",
-          sectionId: SandboxProfileEditorSectionIds.SNAPSHOT,
-        }),
-        {
-          state: PublishSuccessNavigationState,
-        },
-      );
+      void input.navigate(createSandboxProfileSnapshotsPath(input.profileId), {
+        state: PublishSuccessNavigationState,
+      });
 
       void Promise.all([
         input.invalidateProfileVersions(input.profileId),
@@ -990,7 +816,6 @@ function LoadedSandboxProfileEditorPage(
         createSandboxProfileEditorPath({
           profileId: input.profileId,
           view: "published",
-          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
         }),
       );
     },
@@ -1069,7 +894,6 @@ function LoadedSandboxProfileEditorPage(
     },
   });
   const onPublishSuccessNavigationConsumed = useCallback(() => {
-    pendingPublishedSectionIdRef.current = null;
     input.onPublishSuccessNavigationConsumed();
   }, [input.onPublishSuccessNavigationConsumed]);
 
@@ -1086,7 +910,6 @@ function LoadedSandboxProfileEditorPage(
         to={createSandboxProfileEditorPath({
           profileId: input.profileId,
           view: "draft",
-          sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
         })}
       />
     );
@@ -1098,15 +921,12 @@ function LoadedSandboxProfileEditorPage(
       versions: input.versions,
     })
   ) {
-    const pendingSectionId = pendingPublishedSectionIdRef.current;
     return (
       <Navigate
         replace
-        state={pendingSectionId === null ? undefined : PublishSuccessNavigationState}
         to={createSandboxProfileEditorPath({
           profileId: input.profileId,
           view: "published",
-          sectionId: pendingSectionId ?? SandboxProfileEditorSectionIds.INTEGRATIONS,
         })}
       />
     );
@@ -1149,6 +969,7 @@ function LoadedSandboxProfileEditorPage(
       publishSuccessNavigationKey={input.publishSuccessNavigationKey}
       onPublishSuccessNavigationConsumed={onPublishSuccessNavigationConsumed}
       publishSuccessMessage={input.publishSuccessMessage}
+      explicitRouteView={input.explicitView}
       routeView={input.view}
       onViewActive={() => {
         setVersionActionError(null);
@@ -1156,7 +977,6 @@ function LoadedSandboxProfileEditorPage(
           createSandboxProfileEditorPath({
             profileId: input.profileId,
             view: "published",
-            sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
           }),
         );
       }}
@@ -1166,12 +986,12 @@ function LoadedSandboxProfileEditorPage(
           createSandboxProfileEditorPath({
             profileId: input.profileId,
             view: "draft",
-            sectionId: SandboxProfileEditorSectionIds.INTEGRATIONS,
           }),
         );
       }}
       profile={input.profile}
       profileId={input.profileId}
+      versions={input.versions}
       deleteProfileAutomationUsages={automationUsagesQuery.data ?? []}
       deleteProfileAutomationUsagesError={
         automationUsagesQuery.isError
@@ -1222,10 +1042,12 @@ function ReadySandboxProfileEditorPage(input: {
   profile: SandboxProfile;
   mode: SandboxProfileEditorVersionMode;
   currentVersion: SandboxProfileVersion | null;
+  versions: readonly SandboxProfileVersion[];
   routeSectionId: SandboxProfileEditorSectionId;
   publishSuccessNavigationKey: string | null;
   onPublishSuccessNavigationConsumed: () => void;
   publishSuccessMessage: boolean;
+  explicitRouteView: SandboxProfileRouteView | undefined;
   routeView: SandboxProfileRouteView;
   versionActionError: string | null;
   versionActionIsPending: boolean;
@@ -1273,12 +1095,9 @@ function ReadySandboxProfileEditorPage(input: {
   const activeSectionId = input.routeSectionId;
   const draftFieldsAreDisabled =
     input.mode.kind !== "draft" || isSavingDraftChanges || publishRequestIsPending;
-  const snapshotPanelState = resolveSnapshotPanelState({
-    mode: input.mode,
-    version: input.currentVersion,
-  });
+  const snapshotVersion = resolveLatestPublishedSandboxProfileVersion(input.versions);
+  const snapshotPanelState = resolveSnapshotPanelState(snapshotVersion);
   const editorSections = createSandboxProfileEditorSections({
-    mode: input.mode,
     snapshotState: snapshotPanelState,
   });
   const metaState = useEditSandboxProfileMetaState({
@@ -1292,11 +1111,10 @@ function ReadySandboxProfileEditorPage(input: {
     ({ currentLocation, nextLocation }) =>
       shouldBlockSandboxProfileEditorUnpersistedChangesNavigation({
         profileId: input.profileId,
-        view: input.routeView,
         currentPathname: currentLocation.pathname,
         nextPathname: nextLocation.pathname,
       }),
-    [input.profileId, input.routeView],
+    [input.profileId],
   );
 
   useEffect(() => {
@@ -1367,11 +1185,28 @@ function ReadySandboxProfileEditorPage(input: {
         void handlePublish(version);
       }}
       onActiveSectionIdChange={(sectionId) => {
+        if (
+          sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE &&
+          input.explicitRouteView === undefined
+        ) {
+          void input.navigate(createSandboxProfileEditorPath({ profileId: input.profileId }));
+          return;
+        }
+
+        const view =
+          sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE
+            ? input.explicitRouteView
+            : input.routeView;
+
+        if (view === undefined) {
+          throw new Error("Sandbox profile tab navigation view could not be resolved.");
+        }
+
         void input.navigate(
-          createSandboxProfileEditorPath({
+          createSandboxProfileTabPath({
             profileId: input.profileId,
-            view: input.routeView,
             sectionId,
+            view,
           }),
         );
       }}
@@ -1406,6 +1241,7 @@ function ReadySandboxProfileEditorPage(input: {
           refreshSchedule={input.currentVersion?.refreshSchedule ?? null}
           setupScriptLoader={setupScriptLoader}
           snapshotPanelState={snapshotPanelState}
+          snapshotVersion={snapshotVersion}
           versionActionIsPending={input.versionActionIsPending}
         />
       )}
@@ -1433,31 +1269,42 @@ function SandboxProfileEditorSectionPanels(input: {
   refreshSchedule: SandboxProfileVersion["refreshSchedule"];
   setupScriptLoader: ReturnType<typeof useSandboxProfileSetupScriptLoader>;
   snapshotPanelState: SnapshotPanelState;
+  snapshotVersion: SandboxProfileVersion | null;
   versionActionIsPending: boolean;
 }): React.JSX.Element {
-  const showIntegrationSetup =
-    input.activeSectionId === SandboxProfileEditorSectionIds.INTEGRATIONS ||
-    input.activeSectionId === SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS;
-  const integrationSetupSectionId =
-    input.activeSectionId === SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS
-      ? SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS
-      : SandboxProfileEditorSectionIds.INTEGRATIONS;
+  if (input.activeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT) {
+    return (
+      <SandboxProfileSnapshotPanel
+        isActionPending={input.versionActionIsPending}
+        invalidateProfileVersions={input.invalidateProfileVersions}
+        onRefreshSnapshot={() => {
+          if (input.snapshotVersion !== null) {
+            input.onRefreshSnapshot(input.snapshotVersion.version);
+          }
+        }}
+        onPublishSuccessMessageDismiss={input.onPublishSuccessMessageDismiss}
+        publishSuccessMessageKey={input.publishSuccessMessageKey}
+        publishSuccessMessage={input.publishSuccessMessage}
+        profileId={input.profileId}
+        refreshSchedule={input.snapshotVersion?.refreshSchedule ?? null}
+        state={input.snapshotPanelState}
+        version={input.snapshotVersion?.version ?? null}
+      />
+    );
+  }
 
   return (
-    <>
-      <div hidden={!showIntegrationSetup}>
-        <LoadedSandboxProfileIntegrationSetupSection
-          key={`${input.profileId}:integration-setup`}
-          activeSectionId={integrationSetupSectionId}
-          loader={input.integrationsLoader}
-          onDraftStateChange={input.onIntegrationDraftStateChange}
-          profileId={input.profileId}
-          disabled={input.draftFieldsAreDisabled}
-          version={input.mode.version}
-          invalidateVersionBindings={input.invalidateVersionBindings}
-        />
-      </div>
-      <div hidden={input.activeSectionId !== SandboxProfileEditorSectionIds.CONFIGURATIONS}>
+    <div className="flex w-full flex-col gap-8">
+      <LoadedSandboxProfileIntegrationSetupSection
+        key={`${input.profileId}:integration-setup`}
+        loader={input.integrationsLoader}
+        onDraftStateChange={input.onIntegrationDraftStateChange}
+        profileId={input.profileId}
+        disabled={input.draftFieldsAreDisabled}
+        version={input.mode.version}
+        invalidateVersionBindings={input.invalidateVersionBindings}
+      />
+      <SandboxProfilePanelSection>
         <LoadedSandboxProfileSetupScriptSection
           disabled={input.draftFieldsAreDisabled}
           key={`${input.profileId}:${String(input.mode.version)}:setup-script`}
@@ -1471,67 +1318,37 @@ function SandboxProfileEditorSectionPanels(input: {
           onDraftStateChange={input.onSetupScriptDraftStateChange}
           version={input.mode.version}
         />
-      </div>
-      {input.activeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT ? (
-        <SandboxProfileSnapshotPanel
-          isActionPending={input.versionActionIsPending}
-          invalidateProfileVersions={input.invalidateProfileVersions}
-          onRefreshSnapshot={() => {
-            input.onRefreshSnapshot(input.mode.version);
-          }}
-          onPublishSuccessMessageDismiss={input.onPublishSuccessMessageDismiss}
-          publishSuccessMessageKey={input.publishSuccessMessageKey}
-          publishSuccessMessage={input.publishSuccessMessage}
-          profileId={input.profileId}
-          refreshSchedule={input.refreshSchedule}
-          state={input.snapshotPanelState}
-          version={input.mode.version}
-        />
-      ) : null}
-    </>
+      </SandboxProfilePanelSection>
+    </div>
   );
 }
 
-export function resolveSandboxProfileSetupScriptIntegrationRows(
-  initialRows: readonly SandboxProfileBindingEditorRow[] | null,
-  draftRows: readonly SandboxProfileBindingEditorRow[] | null | undefined,
-): readonly SandboxProfileBindingEditorRow[] | null {
-  return draftRows ?? initialRows;
+export function SandboxProfilePanelSection(input: { children: ReactNode }): React.JSX.Element {
+  return <section className="flex flex-col gap-4">{input.children}</section>;
 }
 
 const SandboxProfileEditorTabs = [
   {
-    id: SandboxProfileEditorSectionIds.INTEGRATIONS,
-    label: "Integrations",
-  },
-  {
-    id: SandboxProfileEditorSectionIds.RESOURCES_AND_TOOLS,
-    label: "Resources & Tools",
-  },
-  {
-    id: SandboxProfileEditorSectionIds.CONFIGURATIONS,
-    label: "Configurations",
+    id: SandboxProfileEditorSectionIds.SANDBOX_PROFILE,
+    label: "Sandbox Profile",
   },
   {
     id: SandboxProfileEditorSectionIds.SNAPSHOT,
-    label: "Snapshot",
+    label: "Snapshots",
   },
 ] as const satisfies readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[];
 
 function createSandboxProfileEditorSections(input: {
-  mode: SandboxProfileEditorVersionMode;
   snapshotState: SnapshotPanelState;
 }): readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[] {
   return SandboxProfileEditorTabs.map((section) =>
     section.id === SandboxProfileEditorSectionIds.SNAPSHOT
       ? {
           ...section,
-          disabled: input.mode.kind === "draft",
           sideLabel: (
             <span className="inline-flex items-center gap-1.5">
-              <span>Snapshot</span>
+              <span>Snapshots</span>
               {shouldShowMissingSnapshotAlert({
-                mode: input.mode,
                 snapshotState: input.snapshotState,
               }) ? (
                 <WarningCircleIcon
@@ -1556,14 +1373,29 @@ function SandboxProfileSnapshotPanel(input: {
   profileId: string;
   refreshSchedule: SandboxProfileVersion["refreshSchedule"];
   state: SnapshotPanelState;
-  version: number;
+  version: number | null;
 }): React.JSX.Element {
+  if (input.state.kind === "draft-unavailable" || input.version === null) {
+    return (
+      <SandboxProfileEditorHorizontalTabContent>
+        <Notice title="Publish this sandbox profile before managing snapshots.">
+          Snapshots are available after the sandbox profile has a published version.
+        </Notice>
+      </SandboxProfileEditorHorizontalTabContent>
+    );
+  }
+
   const actionLabel = resolveSnapshotActionLabel(input.state);
   const activityLabel = resolveSnapshotActivityLabel(input.state);
   const latestSnapshotCreatedAt = resolveLatestSnapshotCreatedAt(input.state);
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
+    <SandboxProfileEditorHorizontalTabContent>
+      <p className="text-sm text-muted-foreground">
+        A snapshot is the prepared sandbox image created from this published profile version and its
+        setup script. New sessions can only start after a snapshot is ready.
+      </p>
+
       <PublishSuccessSnapshotNotice
         onDismiss={input.onPublishSuccessMessageDismiss}
         noticeKey={input.publishSuccessMessageKey}
@@ -1586,41 +1418,41 @@ function SandboxProfileSnapshotPanel(input: {
         </Notice>
       ) : null}
 
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold leading-6">About snapshots</h2>
-        <p className="text-sm text-muted-foreground">
-          A snapshot is the prepared sandbox image created from this published profile version and
-          its setup script. New sessions can only start after a snapshot is ready.
-        </p>
-      </div>
+      <FormPageSection>
+        <div className="flex flex-col gap-4 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <DefinitionList
+              className="min-w-0 flex-1 md:grid-cols-1"
+              items={[
+                {
+                  id: "snapshot-created",
+                  label: "Latest snapshot",
+                  value: latestSnapshotCreatedAt ?? "N/A",
+                },
+              ]}
+            />
 
-      {actionLabel === null ? null : (
-        <div>
-          <Button disabled={input.isActionPending} onClick={input.onRefreshSnapshot} type="button">
-            {actionLabel}
-          </Button>
+            {activityLabel === null ? null : (
+              <ActivityStatus
+                className="shrink-0 justify-start text-muted-foreground sm:min-w-48 sm:justify-end"
+                label={activityLabel}
+                labelKey={input.state.kind}
+              />
+            )}
+
+            {activityLabel !== null || actionLabel === null ? null : (
+              <Button
+                className="w-fit shrink-0"
+                disabled={input.isActionPending}
+                onClick={input.onRefreshSnapshot}
+                type="button"
+              >
+                {actionLabel}
+              </Button>
+            )}
+          </div>
         </div>
-      )}
-
-      {activityLabel === null ? null : (
-        <ActivityStatus
-          className="justify-start text-muted-foreground"
-          label={activityLabel}
-          labelKey={input.state.kind}
-        />
-      )}
-
-      {latestSnapshotCreatedAt === null ? null : (
-        <DefinitionList
-          items={[
-            {
-              id: "snapshot-created",
-              label: "Latest snapshot",
-              value: latestSnapshotCreatedAt,
-            },
-          ]}
-        />
-      )}
+      </FormPageSection>
 
       <SandboxProfileSnapshotRefreshScheduleSection
         disabled={input.isActionPending}
@@ -1629,7 +1461,7 @@ function SandboxProfileSnapshotPanel(input: {
         refreshSchedule={input.refreshSchedule}
         version={input.version}
       />
-    </div>
+    </SandboxProfileEditorHorizontalTabContent>
   );
 }
 
@@ -1732,116 +1564,120 @@ function SandboxProfileSnapshotRefreshScheduleSection(input: {
   }
 
   return (
-    <form className="space-y-4 border-t pt-4" onSubmit={handleSubmit}>
-      <div className="space-y-1">
-        <div className="flex min-h-10 items-center justify-between gap-3">
+    <FormPageSection>
+      <form onSubmit={handleSubmit}>
+        <div className="flex flex-col gap-4 p-4">
           <div className="space-y-1">
-            <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-enabled">
-              Automatic refresh
-            </FieldLabel>
-            <p className="text-sm text-muted-foreground">{scheduleStatusMessage}</p>
+            <div className="flex min-h-10 items-center justify-between gap-3">
+              <div className="space-y-1">
+                <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-enabled">
+                  Automatic refresh
+                </FieldLabel>
+                <p className="text-sm text-muted-foreground">{scheduleStatusMessage}</p>
+              </div>
+              <Switch
+                aria-label="Automatic refresh"
+                checked={scheduleEnabled}
+                disabled={fieldsAreDisabled}
+                id="sandbox-profile-snapshot-refresh-enabled"
+                onCheckedChange={(checked) => {
+                  setScheduleEnabled(checked);
+                }}
+              />
+            </div>
           </div>
-          <Switch
-            aria-label="Automatic refresh"
-            checked={scheduleEnabled}
-            disabled={fieldsAreDisabled}
-            id="sandbox-profile-snapshot-refresh-enabled"
-            onCheckedChange={(checked) => {
-              setScheduleEnabled(checked);
-            }}
-          />
+
+          {mutationError === null ? null : (
+            <Notice title="Schedule update failed" variant="alert">
+              {mutationError}
+            </Notice>
+          )}
+
+          {existingSchedule === null || !scheduleEnabled ? null : (
+            <DefinitionList
+              items={[
+                {
+                  id: "snapshot-refresh-cron",
+                  label: "Cron",
+                  value: existingSchedule.cronExpression,
+                },
+                {
+                  id: "snapshot-refresh-timezone",
+                  label: "Timezone",
+                  value: existingSchedule.timezone,
+                },
+                {
+                  id: "snapshot-refresh-next",
+                  label: "Next refresh",
+                  value: existingSchedule.nextScheduledAt ?? "Not scheduled",
+                },
+              ]}
+            />
+          )}
+
+          {scheduleEnabled ? (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldHeader>
+                    <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-cron">
+                      Cron expression
+                    </FieldLabel>
+                  </FieldHeader>
+                  <FieldContent>
+                    <Input
+                      disabled={fieldsAreDisabled}
+                      id="sandbox-profile-snapshot-refresh-cron"
+                      onChange={(event) => {
+                        setCronExpression(event.target.value);
+                      }}
+                      placeholder="0 9 * * 1"
+                      required
+                      value={cronExpression}
+                    />
+                  </FieldContent>
+                </Field>
+                <Field>
+                  <FieldHeader>
+                    <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-timezone">
+                      Timezone
+                    </FieldLabel>
+                  </FieldHeader>
+                  <FieldContent>
+                    <SingleSelectStringComboboxField
+                      contentClassName="max-h-80"
+                      disabled={fieldsAreDisabled}
+                      emptyMessage="No matching timezones."
+                      inputId="sandbox-profile-snapshot-refresh-timezone"
+                      inputLabel="Timezone"
+                      onChange={(value) => {
+                        setTimezone(value ?? "");
+                      }}
+                      options={timezoneOptions}
+                      placeholder="Asia/Singapore"
+                      value={timezone}
+                    />
+                  </FieldContent>
+                </Field>
+              </div>
+
+              <CronExpressionBreakdownList
+                breakdown={cronExpressionBreakdown}
+                message={scheduleBehaviorDescription}
+              />
+            </>
+          ) : null}
+
+          {scheduleEnabled || existingSchedule !== null ? (
+            <ButtonGroup>
+              <Button disabled={submitIsDisabled} type="submit">
+                {scheduleEnabled ? "Save schedule" : "Save changes"}
+              </Button>
+            </ButtonGroup>
+          ) : null}
         </div>
-      </div>
-
-      {mutationError === null ? null : (
-        <Notice title="Schedule update failed" variant="alert">
-          {mutationError}
-        </Notice>
-      )}
-
-      {existingSchedule === null || !scheduleEnabled ? null : (
-        <DefinitionList
-          items={[
-            {
-              id: "snapshot-refresh-cron",
-              label: "Cron",
-              value: existingSchedule.cronExpression,
-            },
-            {
-              id: "snapshot-refresh-timezone",
-              label: "Timezone",
-              value: existingSchedule.timezone,
-            },
-            {
-              id: "snapshot-refresh-next",
-              label: "Next refresh",
-              value: existingSchedule.nextScheduledAt ?? "Not scheduled",
-            },
-          ]}
-        />
-      )}
-
-      {scheduleEnabled ? (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field>
-              <FieldHeader>
-                <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-cron">
-                  Cron expression
-                </FieldLabel>
-              </FieldHeader>
-              <FieldContent>
-                <Input
-                  disabled={fieldsAreDisabled}
-                  id="sandbox-profile-snapshot-refresh-cron"
-                  onChange={(event) => {
-                    setCronExpression(event.target.value);
-                  }}
-                  placeholder="0 9 * * 1"
-                  required
-                  value={cronExpression}
-                />
-              </FieldContent>
-            </Field>
-            <Field>
-              <FieldHeader>
-                <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-timezone">
-                  Timezone
-                </FieldLabel>
-              </FieldHeader>
-              <FieldContent>
-                <SingleSelectStringComboboxField
-                  contentClassName="max-h-80"
-                  disabled={fieldsAreDisabled}
-                  emptyMessage="No matching timezones."
-                  inputId="sandbox-profile-snapshot-refresh-timezone"
-                  inputLabel="Timezone"
-                  onChange={(value) => {
-                    setTimezone(value ?? "");
-                  }}
-                  options={timezoneOptions}
-                  placeholder="Asia/Singapore"
-                  value={timezone}
-                />
-              </FieldContent>
-            </Field>
-          </div>
-
-          <CronExpressionBreakdownList
-            breakdown={cronExpressionBreakdown}
-            message={scheduleBehaviorDescription}
-          />
-        </>
-      ) : null}
-
-      {scheduleEnabled || existingSchedule !== null ? (
-        <ButtonGroup>
-          <Button disabled={submitIsDisabled} type="submit">
-            {scheduleEnabled ? "Save schedule" : "Save changes"}
-          </Button>
-        </ButtonGroup>
-      ) : null}
-    </form>
+      </form>
+    </FormPageSection>
   );
 }
 
@@ -1864,181 +1700,6 @@ function CronExpressionBreakdownList(input: {
 
 function readBrowserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
-}
-
-type CronExpressionBreakdown = Readonly<{
-  minute: string;
-  hour: string;
-  dayOfMonthExpression: string;
-  dayOfMonth: string;
-  monthExpression: string;
-  month: string;
-  dayOfWeekExpression: string;
-  dayOfWeek: string;
-}>;
-
-export function createTimezoneOptions(
-  persistedTimezone: string | null,
-): readonly StringComboboxOption[] {
-  if (
-    persistedTimezone === null ||
-    persistedTimezone.trim().length === 0 ||
-    BrowserTimezoneOptions.some((option) => option.value === persistedTimezone)
-  ) {
-    return BrowserTimezoneOptions;
-  }
-
-  return [
-    {
-      label: persistedTimezone,
-      value: persistedTimezone,
-    },
-    ...BrowserTimezoneOptions,
-  ];
-}
-
-export function resolveCronExpressionBreakdown(
-  cronExpression: string,
-): CronExpressionBreakdown | null {
-  const fields = cronExpression.trim().split(/\s+/);
-  if (fields.length !== 5) {
-    return null;
-  }
-
-  try {
-    validateScheduleCronExpression(cronExpression);
-  } catch {
-    return null;
-  }
-
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
-  if (
-    minute === undefined ||
-    hour === undefined ||
-    dayOfMonth === undefined ||
-    month === undefined ||
-    dayOfWeek === undefined
-  ) {
-    return null;
-  }
-
-  return {
-    minute,
-    hour,
-    dayOfMonthExpression: dayOfMonth,
-    dayOfMonth: describeCronField({
-      everyLabel: "Every day",
-      field: dayOfMonth,
-      labelMap: null,
-    }),
-    monthExpression: month,
-    month: describeCronField({
-      everyLabel: "Every month",
-      field: month,
-      labelMap: MonthFieldLabels,
-    }),
-    dayOfWeekExpression: dayOfWeek,
-    dayOfWeek: describeCronField({
-      everyLabel: "Every day",
-      field: dayOfWeek,
-      labelMap: DayOfWeekFieldLabels,
-    }),
-  };
-}
-
-function describeCronField(input: {
-  everyLabel: string;
-  field: string;
-  labelMap: ReadonlyMap<string, string> | null;
-}): string {
-  if (input.field === "*") {
-    return input.everyLabel;
-  }
-
-  const parts = input.field.split(",");
-  const labels = parts.map((part) => describeCronFieldPart({ part, labelMap: input.labelMap }));
-  if (labels.length === 1) {
-    const label = labels[0];
-    if (label === undefined) {
-      throw new Error("Cron field part did not produce a label.");
-    }
-    return label;
-  }
-
-  return labels.join(", ");
-}
-
-function describeCronFieldPart(input: {
-  part: string;
-  labelMap: ReadonlyMap<string, string> | null;
-}): string {
-  const mappedLabel = input.labelMap?.get(input.part);
-  if (mappedLabel !== undefined) {
-    return mappedLabel;
-  }
-
-  return input.part;
-}
-
-export function formatCronExpressionBreakdownDiagram(input: CronExpressionBreakdown): string {
-  return [
-    `${input.minute} ${input.hour} ${input.dayOfMonthExpression} ${input.monthExpression} ${input.dayOfWeekExpression}`,
-    "| | | | |",
-    `| | | | day of week: ${input.dayOfWeek}`,
-    `| | | month: ${input.month.toLowerCase()}`,
-    `| | day of month: ${input.dayOfMonth.toLowerCase()}`,
-    `| hour: ${formatHourLabel(input.hour)}`,
-    `minute: ${input.minute}`,
-  ].join("\n");
-}
-
-function formatHourLabel(hour: string): string {
-  const hourNumber = Number(hour);
-  if (!Number.isInteger(hourNumber) || hourNumber < 0 || hourNumber > 23) {
-    return hour;
-  }
-
-  if (hourNumber === 0) {
-    return "12 AM";
-  }
-
-  if (hourNumber < 12) {
-    return `${hourNumber} AM`;
-  }
-
-  if (hourNumber === 12) {
-    return "12 PM";
-  }
-
-  return `${hourNumber - 12} PM`;
-}
-
-export function resolveSnapshotRefreshScheduleBehaviorDescription(input: {
-  after: Date;
-  cronExpression: string;
-  timezone: string;
-}): string {
-  const cronExpression = input.cronExpression.trim();
-  const timezone = input.timezone.trim();
-  if (cronExpression.length === 0 || timezone.length === 0) {
-    return SnapshotRefreshSchedulePreviewPrompt;
-  }
-
-  try {
-    const occurrence = findNextScheduleOccurrence({
-      after: input.after,
-      cronExpression,
-      timezone,
-    });
-
-    if (occurrence === null) {
-      return "No future refresh is scheduled.";
-    }
-
-    return `Next refresh: ${occurrence.localScheduledDate} ${occurrence.localScheduledTime} ${timezone}.`;
-  } catch {
-    return SnapshotRefreshSchedulePreviewPrompt;
-  }
 }
 
 function PublishSuccessSnapshotNotice(input: {
@@ -2211,7 +1872,6 @@ export function SandboxProfileEditorView(input: {
   activeSectionId: SandboxProfileEditorSectionId;
   onActiveSectionIdChange: (sectionId: SandboxProfileEditorSectionId) => void;
   renderSectionPanel: (sectionId: SandboxProfileEditorSectionId) => React.JSX.Element;
-  versionStatusBadge?: React.JSX.Element;
   versionActions?: React.JSX.Element;
   hasUnpersistedIntegrationChanges?: boolean;
   hasUnpersistedSetupScriptChanges?: boolean;
@@ -2221,24 +1881,6 @@ export function SandboxProfileEditorView(input: {
     input.mode.kind === "draft" &&
     ((input.hasUnpersistedIntegrationChanges ?? false) ||
       (input.hasUnpersistedSetupScriptChanges ?? false));
-  const publishRequestIsPending = input.publishRequestIsPending === true;
-  const versionActionIsDisabled = input.versionActionIsPending || publishRequestIsPending;
-  const discardChangesInput = resolveDiscardDraftInput(input.mode);
-  const discardChangesMenuItem =
-    discardChangesInput === null ? null : (
-      <DropdownMenuItem
-        disabled={hasUnpersistedDraftChanges || versionActionIsDisabled}
-        onClick={() => {
-          input.onDiscardChangesAndLeaveDraft(discardChangesInput);
-        }}
-      >
-        Discard draft
-      </DropdownMenuItem>
-    );
-  const viewPublishedMenuItem =
-    input.mode.kind !== "draft" || input.mode.activeVersion === null ? null : (
-      <DropdownMenuItem onClick={input.onViewActive}>View published</DropdownMenuItem>
-    );
   const deleteProfileMenuItem = (
     <DropdownMenuItem
       onClick={() => {
@@ -2251,7 +1893,7 @@ export function SandboxProfileEditorView(input: {
   );
 
   return (
-    <div className="gap-4 flex flex-col">
+    <div className="flex min-h-[calc(100svh-3rem)] flex-col">
       <NavigationBlockerDialog
         title="Leave before draft changes are saved?"
         description="Some draft changes have not been saved yet. If you leave this page, those changes will be discarded."
@@ -2261,7 +1903,7 @@ export function SandboxProfileEditorView(input: {
         enabled={hasUnpersistedDraftChanges}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-6 pb-3">
         <div className="min-w-0">
           <AutoSaveTitleHeading
             ariaLabel="Profile name"
@@ -2273,67 +1915,19 @@ export function SandboxProfileEditorView(input: {
           />
         </div>
         <div className="flex items-center gap-2">
-          {input.versionStatusBadge ?? (
-            <span
-              className={
-                input.mode.kind === "draft"
-                  ? "inline-flex h-6 items-center rounded-sm border border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-700"
-                  : "inline-flex h-6 items-center rounded-sm border border-blue-200 bg-blue-50 px-2 text-xs font-medium text-blue-700"
-              }
-            >
-              {input.mode.kind === "draft" ? "Viewing: Draft" : "Viewing: Published"}
-            </span>
-          )}
           {input.versionActions ??
-            (input.mode.kind === "draft" ? (
-              <ButtonGroup>
-                <Button
-                  disabled={versionActionIsDisabled}
-                  onClick={() => {
-                    input.onPublish(input.mode.version);
-                  }}
-                  type="button"
-                >
-                  {publishRequestIsPending ? "Publishing..." : "Publish"}
-                </Button>
-                <MoreActionsMenu
-                  disabled={versionActionIsDisabled}
-                  triggerIconVariant="chevron-down"
-                  triggerLabel="More actions"
-                  triggerVariant="default"
-                >
-                  {viewPublishedMenuItem}
-                  {discardChangesMenuItem}
-                  {deleteProfileMenuItem}
-                </MoreActionsMenu>
-              </ButtonGroup>
-            ) : (
-              <ButtonGroup>
-                <Button
-                  disabled={input.versionActionIsPending}
-                  onClick={input.mode.hasDraft ? input.onViewDraft : input.onMakeChanges}
-                  type="button"
-                >
-                  {input.mode.hasDraft ? "Resume editing" : "Edit"}
-                </Button>
-                <MoreActionsMenu
-                  disabled={input.versionActionIsPending}
-                  triggerIconVariant="chevron-down"
-                  triggerLabel="More actions"
-                  triggerVariant="default"
-                >
-                  {discardChangesMenuItem}
-                  {deleteProfileMenuItem}
-                </MoreActionsMenu>
-              </ButtonGroup>
+            (input.deleteProfileIsPending ? null : (
+              <MoreActionsMenu triggerLabel="More actions">{deleteProfileMenuItem}</MoreActionsMenu>
             ))}
         </div>
       </div>
 
       {input.versionActionError === null ? null : (
-        <Notice title="Profile version action failed" variant="alert">
-          {input.versionActionError}
-        </Notice>
+        <div className="px-4 pb-4">
+          <Notice title="Profile version action failed" variant="alert">
+            {input.versionActionError}
+          </Notice>
+        </div>
       )}
 
       <DeleteSandboxProfileDialog
@@ -2351,9 +1945,125 @@ export function SandboxProfileEditorView(input: {
       <SandboxProfileEditorSections<SandboxProfileEditorSectionId>
         activeSectionId={input.activeSectionId}
         onActiveSectionIdChange={input.onActiveSectionIdChange}
-        renderPanel={input.renderSectionPanel}
+        renderPanel={(sectionId) =>
+          sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE ? (
+            <SandboxProfileEditorHorizontalTabContent>
+              <SandboxProfileLifecycleActions
+                hasUnpersistedDraftChanges={hasUnpersistedDraftChanges}
+                mode={input.mode}
+                onDiscardChangesAndLeaveDraft={input.onDiscardChangesAndLeaveDraft}
+                onMakeChanges={input.onMakeChanges}
+                onPublish={input.onPublish}
+                onViewActive={input.onViewActive}
+                onViewDraft={input.onViewDraft}
+                publishRequestIsPending={input.publishRequestIsPending === true}
+                versionActionIsPending={input.versionActionIsPending}
+              />
+              {input.renderSectionPanel(sectionId)}
+            </SandboxProfileEditorHorizontalTabContent>
+          ) : (
+            input.renderSectionPanel(sectionId)
+          )
+        }
         sections={input.sections}
       />
+    </div>
+  );
+}
+
+function SandboxProfileVersionStatusBadge(input: {
+  mode: SandboxProfileEditorVersionMode;
+}): React.JSX.Element {
+  return (
+    <span
+      className={
+        input.mode.kind === "draft"
+          ? "inline-flex h-6 items-center rounded-sm border border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-700"
+          : "inline-flex h-6 items-center rounded-sm border border-blue-200 bg-blue-50 px-2 text-xs font-medium text-blue-700"
+      }
+    >
+      {input.mode.kind === "draft" ? "Viewing: Draft" : "Viewing: Published"}
+    </span>
+  );
+}
+
+function SandboxProfileLifecycleActions(input: {
+  mode: SandboxProfileEditorVersionMode;
+  hasUnpersistedDraftChanges: boolean;
+  publishRequestIsPending: boolean;
+  versionActionIsPending: boolean;
+  onPublish: (version: number) => void;
+  onDiscardChangesAndLeaveDraft: (input: { draftVersion: number }) => void;
+  onMakeChanges: () => void;
+  onViewActive: () => void;
+  onViewDraft: () => void;
+}): React.JSX.Element {
+  const versionActionIsDisabled = input.versionActionIsPending || input.publishRequestIsPending;
+  const discardChangesInput = resolveDiscardDraftInput(input.mode);
+  const discardChangesMenuItem =
+    discardChangesInput === null ? null : (
+      <DropdownMenuItem
+        disabled={input.hasUnpersistedDraftChanges || versionActionIsDisabled}
+        onClick={() => {
+          input.onDiscardChangesAndLeaveDraft(discardChangesInput);
+        }}
+      >
+        Discard draft
+      </DropdownMenuItem>
+    );
+  const viewPublishedMenuItem =
+    input.mode.kind !== "draft" || input.mode.activeVersion === null ? null : (
+      <DropdownMenuItem onClick={input.onViewActive}>View published</DropdownMenuItem>
+    );
+  const hasDraftMenuItems = viewPublishedMenuItem !== null || discardChangesMenuItem !== null;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <SandboxProfileVersionStatusBadge mode={input.mode} />
+      {input.mode.kind === "draft" ? (
+        <ButtonGroup>
+          <Button
+            disabled={versionActionIsDisabled}
+            onClick={() => {
+              input.onPublish(input.mode.version);
+            }}
+            type="button"
+          >
+            {input.publishRequestIsPending ? "Publishing..." : "Publish"}
+          </Button>
+          {hasDraftMenuItems ? (
+            <MoreActionsMenu
+              disabled={versionActionIsDisabled}
+              triggerIconVariant="chevron-down"
+              triggerLabel="Sandbox profile actions"
+              triggerVariant="default"
+            >
+              {viewPublishedMenuItem}
+              {discardChangesMenuItem}
+            </MoreActionsMenu>
+          ) : null}
+        </ButtonGroup>
+      ) : (
+        <ButtonGroup>
+          <Button
+            disabled={input.versionActionIsPending}
+            onClick={input.mode.hasDraft ? input.onViewDraft : input.onMakeChanges}
+            type="button"
+          >
+            {input.mode.hasDraft ? "Resume editing" : "Edit"}
+          </Button>
+          {discardChangesMenuItem === null ? null : (
+            <MoreActionsMenu
+              disabled={input.versionActionIsPending}
+              triggerIconVariant="chevron-down"
+              triggerLabel="Sandbox profile actions"
+              triggerVariant="default"
+            >
+              {discardChangesMenuItem}
+            </MoreActionsMenu>
+          )}
+        </ButtonGroup>
+      )}
     </div>
   );
 }
@@ -2377,7 +2087,6 @@ function resolveDiscardDraftInput(
 }
 
 function LoadedSandboxProfileIntegrationSetupSection(input: {
-  activeSectionId: SandboxProfileIntegrationSetupSectionId;
   profileId: string;
   version: number;
   disabled: boolean;
@@ -2396,26 +2105,26 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
     input.loader.integrationDirectoryQuery.isError
   ) {
     return (
-      <SandboxProfileIntegrationsSetupUnavailableState
-        activeSectionId={input.activeSectionId}
-        integrationBindingsError={
-          showBindingsUnavailableNotice ? input.loader.integrationBindingsQuery.error : null
-        }
-        integrationDirectoryError={
-          showDirectoryUnavailableNotice ? input.loader.integrationDirectoryQuery.error : null
-        }
-        isPending={
-          input.loader.integrationBindingsQuery.isPending ||
-          input.loader.integrationDirectoryQuery.isPending
-        }
-      />
+      <SandboxProfilePanelSection>
+        <SandboxProfileIntegrationsSetupUnavailableState
+          integrationBindingsError={
+            showBindingsUnavailableNotice ? input.loader.integrationBindingsQuery.error : null
+          }
+          integrationDirectoryError={
+            showDirectoryUnavailableNotice ? input.loader.integrationDirectoryQuery.error : null
+          }
+          isPending={
+            input.loader.integrationBindingsQuery.isPending ||
+            input.loader.integrationDirectoryQuery.isPending
+          }
+        />
+      </SandboxProfilePanelSection>
     );
   }
 
   return (
     <ReadySandboxProfileIntegrationSetupSection
       key={`${input.profileId}:${String(input.version)}`}
-      activeSectionId={input.activeSectionId}
       profileId={input.profileId}
       version={input.version}
       initialRows={input.loader.initialRows}
@@ -2432,14 +2141,13 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
 }
 
 export function SandboxProfileIntegrationsSetupUnavailableState(input: {
-  activeSectionId: SandboxProfileIntegrationSetupSectionId;
   integrationBindingsError: unknown;
   integrationDirectoryError: unknown;
   isPending: boolean;
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4">
-      {input.isPending && input.activeSectionId !== "resources-and-tools" ? (
+      {input.isPending ? (
         <div
           aria-live="polite"
           className="text-muted-foreground flex items-center gap-2 text-sm"
@@ -2470,7 +2178,6 @@ export function SandboxProfileIntegrationsSetupUnavailableState(input: {
 }
 
 function ReadySandboxProfileIntegrationSetupSection(input: {
-  activeSectionId: SandboxProfileIntegrationSetupSectionId;
   profileId: string;
   version: number;
   initialRows: readonly SandboxProfileBindingEditorRow[];
@@ -2508,32 +2215,28 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
     integrationsState.isSubmittingIntegrationBindings,
   ]);
 
-  return input.activeSectionId === "resources-and-tools" ? (
-    <SandboxProfileResourcesAndToolsSection
-      availableConnections={integrationsState.availableConnections}
-      availableTargets={integrationsState.availableTargets}
-      disabled={input.disabled}
-      onRowChange={integrationsState.onIntegrationBindingRowChange}
-      rows={integrationsState.integrationRows}
-    />
-  ) : (
-    <SandboxProfileIntegrationsSetupSection
-      availableConnections={integrationsState.availableConnections}
-      availableTargets={integrationsState.availableTargets}
-      integrationBindingsQuery={{
-        isError: false,
-        error: null,
-        isPending: false,
-      }}
-      integrationDirectoryQuery={input.integrationDirectoryQuery}
-      integrationRows={integrationsState.integrationRows}
-      integrationSaveError={integrationsState.integrationSaveError}
-      disabled={input.disabled}
-      onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
-      onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
-      onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
-      onIntegrationSaveErrorDismiss={integrationsState.onIntegrationSaveErrorDismiss}
-    />
+  return (
+    <>
+      <SandboxProfilePanelSection>
+        <SandboxProfileIntegrationsSetupSection
+          availableConnections={integrationsState.availableConnections}
+          availableTargets={integrationsState.availableTargets}
+          integrationBindingsQuery={{
+            isError: false,
+            error: null,
+            isPending: false,
+          }}
+          integrationDirectoryQuery={input.integrationDirectoryQuery}
+          integrationRows={integrationsState.integrationRows}
+          integrationSaveError={integrationsState.integrationSaveError}
+          disabled={input.disabled}
+          onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
+          onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
+          onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
+          onIntegrationSaveErrorDismiss={integrationsState.onIntegrationSaveErrorDismiss}
+        />
+      </SandboxProfilePanelSection>
+    </>
   );
 }
 
@@ -2690,58 +2393,60 @@ export function SandboxProfileSetupScriptPanel(input: {
               value={input.value}
               {...(input.onBlur === undefined ? {} : { onBlur: input.onBlur })}
             />
-            <div className="flex flex-col pt-1">
-              <Accordion className="border-border/70 w-full border-y" multiple>
-                <AccordionItem className="border-border/70" value="how-setup-script-works">
-                  <AccordionTrigger className="rounded-none border-0 px-0 py-2.5 text-sm font-medium hover:no-underline focus-visible:border-transparent focus-visible:ring-1">
-                    Setup script behavior
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-3">
-                    <div className="gap-3 flex flex-col">
-                      <div className="gap-1 flex flex-col">
-                        <FieldDescription>{SetupScriptTimingDescription}</FieldDescription>
-                        <FieldDescription>
-                          Repositories are cloned under the working directory, using their
-                          <InlineCode variant="muted">owner/repository</InlineCode> path.
-                        </FieldDescription>
-                        {setupScriptContext.repositoryLocationGroup === null ? (
+            {input.disabled === true ? null : (
+              <div className="flex flex-col pt-1">
+                <Accordion className="border-border/70 w-full border-y" multiple>
+                  <AccordionItem className="border-border/70" value="how-setup-script-works">
+                    <AccordionTrigger className="rounded-none border-0 px-0 py-2.5 text-sm font-medium hover:no-underline focus-visible:border-transparent focus-visible:ring-1">
+                      Setup script behavior
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-3">
+                      <div className="gap-3 flex flex-col">
+                        <div className="gap-1 flex flex-col">
+                          <FieldDescription>{SetupScriptTimingDescription}</FieldDescription>
                           <FieldDescription>
-                            For example,{" "}
-                            <InlineCode variant="muted">
-                              {setupScriptContext.repositoryLocationExample.handle}
-                            </InlineCode>{" "}
-                            is available at{" "}
-                            <InlineCode variant="muted">
-                              {setupScriptContext.repositoryLocationExample.path}
-                            </InlineCode>
-                            .
+                            Repositories are cloned under the working directory, using their
+                            <InlineCode variant="muted">owner/repository</InlineCode> path.
                           </FieldDescription>
-                        ) : null}
+                          {setupScriptContext.repositoryLocationGroup === null ? (
+                            <FieldDescription>
+                              For example,{" "}
+                              <InlineCode variant="muted">
+                                {setupScriptContext.repositoryLocationExample.handle}
+                              </InlineCode>{" "}
+                              is available at{" "}
+                              <InlineCode variant="muted">
+                                {setupScriptContext.repositoryLocationExample.path}
+                              </InlineCode>
+                              .
+                            </FieldDescription>
+                          ) : null}
+                        </div>
+
+                        {setupScriptContext.repositoryLocationGroup === null ? null : (
+                          <SetupScriptContextGroupRows
+                            group={setupScriptContext.repositoryLocationGroup}
+                          />
+                        )}
                       </div>
+                    </AccordionContent>
+                  </AccordionItem>
 
-                      {setupScriptContext.repositoryLocationGroup === null ? null : (
-                        <SetupScriptContextGroupRows
-                          group={setupScriptContext.repositoryLocationGroup}
-                        />
-                      )}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-
-                <AccordionItem className="border-border/70" value="environment-and-tools">
-                  <AccordionTrigger className="rounded-none border-0 px-0 py-2.5 text-sm font-medium hover:no-underline focus-visible:border-transparent focus-visible:ring-1">
-                    Environment and installed tools
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-3">
-                    <div className="gap-5 flex flex-col">
-                      {setupScriptContext.environmentAndToolGroups.map((group) => (
-                        <SetupScriptContextGroupRows group={group} key={group.id} />
-                      ))}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </div>
+                  <AccordionItem className="border-border/70" value="environment-and-tools">
+                    <AccordionTrigger className="rounded-none border-0 px-0 py-2.5 text-sm font-medium hover:no-underline focus-visible:border-transparent focus-visible:ring-1">
+                      Environment and installed tools
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-3">
+                      <div className="gap-5 flex flex-col">
+                        {setupScriptContext.environmentAndToolGroups.map((group) => (
+                          <SetupScriptContextGroupRows group={group} key={group.id} />
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </div>
+            )}
 
             {input.errorMessage ? (
               <div aria-live="polite" className="text-destructive text-xs" role="status">
