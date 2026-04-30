@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Mistle Control Plane API",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "components": {
     "schemas": {},
@@ -6203,9 +6203,438 @@
                                             }
                                           ]
                                         },
+                                        "providerAppSetup": {
+                                          "type": "object",
+                                          "properties": {
+                                            "description": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "existingApp": {
+                                              "type": "object",
+                                              "properties": {
+                                                "configFields": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "configKey": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "label": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "name": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "required": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "configKey",
+                                                      "label",
+                                                      "name",
+                                                      "required"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  },
+                                                  "minItems": 1
+                                                },
+                                                "connectLabel": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "description": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "installedDetection": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "configFields": {
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      }
+                                                    },
+                                                    "secretFields": {
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      }
+                                                    }
+                                                  },
+                                                  "required": ["configFields", "secretFields"],
+                                                  "additionalProperties": false
+                                                },
+                                                "saveErrorMessage": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "secretFields": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "inputType": {
+                                                        "type": "string",
+                                                        "enum": ["password", "textarea"]
+                                                      },
+                                                      "label": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "name": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "placeholder": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "rows": {
+                                                        "type": "integer",
+                                                        "minimum": 1
+                                                      },
+                                                      "required": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "secretLabel": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "inputType",
+                                                      "label",
+                                                      "name",
+                                                      "required",
+                                                      "secretLabel"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  },
+                                                  "minItems": 1
+                                                },
+                                                "startAction": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "expectedResultKind": {
+                                                      "type": "string",
+                                                      "enum": ["redirect"]
+                                                    },
+                                                    "installedDetection": {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "configFields": {
+                                                          "type": "array",
+                                                          "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                          }
+                                                        },
+                                                        "externalSubject": {
+                                                          "type": "boolean"
+                                                        }
+                                                      },
+                                                      "additionalProperties": false
+                                                    },
+                                                    "installedLabel": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "installedOpensInNewWindow": {
+                                                      "type": "boolean"
+                                                    },
+                                                    "pendingLabel": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "routeSegment": {
+                                                      "type": "string",
+                                                      "pattern": "^[a-z0-9][a-z0-9-]*$"
+                                                    },
+                                                    "startErrorMessage": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "unexpectedResultMessage": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "expectedResultKind",
+                                                    "routeSegment",
+                                                    "startErrorMessage",
+                                                    "unexpectedResultMessage"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                "title": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                }
+                                              },
+                                              "required": [
+                                                "configFields",
+                                                "connectLabel",
+                                                "description",
+                                                "installedDetection",
+                                                "saveErrorMessage",
+                                                "secretFields",
+                                                "title"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            "manifest": {
+                                              "type": "object",
+                                              "properties": {
+                                                "createErrorMessage": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "description": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "startAction": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "expectedResultKind": {
+                                                      "type": "string",
+                                                      "enum": ["form-post", "redirect"]
+                                                    },
+                                                    "manifestBodyField": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "unexpectedResultMessage": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "expectedResultKind",
+                                                    "manifestBodyField",
+                                                    "unexpectedResultMessage"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                "title": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                }
+                                              },
+                                              "required": [
+                                                "createErrorMessage",
+                                                "description",
+                                                "startAction",
+                                                "title"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            "title": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "urls": {
+                                              "type": "object",
+                                              "properties": {
+                                                "description": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "setupCallback": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "label": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "path": {
+                                                      "type": "string",
+                                                      "pattern": "^\\/[^\\s]*$"
+                                                    }
+                                                  },
+                                                  "required": ["label", "path"],
+                                                  "additionalProperties": false
+                                                },
+                                                "title": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "webhookCallback": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "errorTitle": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "label": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "missingMessage": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "missingTitle": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "errorTitle",
+                                                    "label",
+                                                    "missingMessage",
+                                                    "missingTitle"
+                                                  ],
+                                                  "additionalProperties": false
+                                                }
+                                              },
+                                              "required": [
+                                                "description",
+                                                "title",
+                                                "webhookCallback"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "required": [
+                                            "description",
+                                            "existingApp",
+                                            "manifest",
+                                            "title",
+                                            "urls"
+                                          ],
+                                          "additionalProperties": false
+                                        },
                                         "routeSegment": {
                                           "type": "string",
                                           "pattern": "^[a-z0-9][a-z0-9-]*$"
+                                        },
+                                        "setupPane": {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": ["provider-app"]
+                                            }
+                                          },
+                                          "required": ["kind"],
+                                          "additionalProperties": false
+                                        },
+                                        "startForm": {
+                                          "type": "object",
+                                          "properties": {
+                                            "fields": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "actions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "href": {
+                                                          "type": "string",
+                                                          "format": "uri"
+                                                        },
+                                                        "label": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "opensInNewWindow": {
+                                                          "type": "boolean"
+                                                        }
+                                                      },
+                                                      "required": ["href", "label"],
+                                                      "additionalProperties": false
+                                                    },
+                                                    "minItems": 1
+                                                  },
+                                                  "description": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "inputType": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "password",
+                                                      "radio",
+                                                      "text",
+                                                      "textarea"
+                                                    ]
+                                                  },
+                                                  "label": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "name": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "options": {
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "object",
+                                                      "properties": {
+                                                        "label": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        },
+                                                        "value": {
+                                                          "type": "string",
+                                                          "minLength": 1
+                                                        }
+                                                      },
+                                                      "required": ["label", "value"],
+                                                      "additionalProperties": false
+                                                    },
+                                                    "minItems": 1
+                                                  },
+                                                  "placeholder": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "required": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "visibleWhen": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "field": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "value": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      }
+                                                    },
+                                                    "required": ["field", "value"],
+                                                    "additionalProperties": false
+                                                  }
+                                                },
+                                                "required": ["inputType", "label", "name"],
+                                                "additionalProperties": false
+                                              },
+                                              "minItems": 1
+                                            },
+                                            "submitLabel": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": ["fields", "submitLabel"],
+                                          "additionalProperties": false
                                         }
                                       },
                                       "required": ["routeSegment"],

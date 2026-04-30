@@ -1,6 +1,7 @@
 import {
   IntegrationConnectionMethodIds,
   type IntegrationProviderAppSetupCapability,
+  type IntegrationProviderAppSetupCompleteResult,
 } from "@mistle/integrations-core";
 import { z } from "zod";
 
@@ -12,11 +13,14 @@ import {
   buildGitHubAppManifestConversionUrl,
   buildGitHubAppManifestSubmissionUrl,
   buildGitHubAppManifestWebhookTriggerCapabilitiesProviderMetadata,
-  GitHubAppManifestOwnerSchema,
   parseGitHubAppManifestConversionResponse,
 } from "./app-manifest.js";
 import type { GitHubConnectionConfig } from "./auth.js";
 import { parseGitHubAppInstallationConnectionConfig } from "./auth.js";
+import {
+  GitHubAppInstallationCallbackRouteKey,
+  GitHubAppManifestCallbackRouteKey,
+} from "./provider-app-setup-routes.js";
 import { GitHubCredentialSlotKeys } from "./slot-keys.js";
 import type { GitHubTargetConfig } from "./target-config-schema.js";
 import type { GitHubTargetSecrets } from "./target-secret-schema.js";
@@ -37,9 +41,20 @@ type GitHubProviderAppSetupCapabilityOptions = {
 const GitHubAppManifestStartBodySchema = z
   .object({
     manifest: z.record(z.string(), z.unknown()),
-    owner: GitHubAppManifestOwnerSchema,
+    organizationSlug: z.string().optional(),
+    ownerKind: z.enum(["organization", "personal"]),
   })
-  .strict();
+  .strict()
+  .transform((body) => ({
+    manifest: body.manifest,
+    owner:
+      body.ownerKind === "personal"
+        ? { kind: body.ownerKind }
+        : {
+            kind: body.ownerKind,
+            organizationSlug: z.string().min(1).parse(body.organizationSlug),
+          },
+  }));
 
 async function convertGitHubAppManifest(input: {
   apiBaseUrl: string;
@@ -69,6 +84,76 @@ async function convertGitHubAppManifest(input: {
   return parseGitHubAppManifestConversionResponse(responseJson);
 }
 
+function completeGitHubAppInstallation(input: {
+  connectionConfig: GitHubConnectionConfig;
+  query: URLSearchParams;
+}): IntegrationProviderAppSetupCompleteResult {
+  const installationId = input.query.get("installation_id");
+  if (installationId === null || installationId.length === 0) {
+    throw new Error("GitHub App installation callback query must include `installation_id`.");
+  }
+
+  const setupAction = input.query.get("setup_action");
+  const parsedConfig = parseGitHubAppInstallationConnectionConfig(input.connectionConfig);
+
+  return {
+    completionRedirect: {
+      kind: "connection-detail",
+      notice: "installed",
+    },
+    connection: {
+      externalSubjectId: installationId,
+      config: {
+        ...parsedConfig,
+        installation_id: installationId,
+        ...(setupAction === null ? {} : { setup_action: setupAction }),
+      },
+    },
+  };
+}
+
+export function buildCompletedGitHubAppManifestResult(input: {
+  conversion: ReturnType<typeof parseGitHubAppManifestConversionResponse>;
+  query: URLSearchParams;
+  supportsClientSecret: boolean;
+}): IntegrationProviderAppSetupCompleteResult {
+  const convertedConnectionConfig = parseGitHubAppInstallationConnectionConfig(
+    buildConvertedGitHubAppConnectionConfig({
+      conversion: input.conversion,
+    }),
+  );
+  const convertedConnectionSecrets = buildConvertedGitHubAppConnectionSecrets({
+    conversion: input.conversion,
+    supportsClientSecret: input.supportsClientSecret,
+  });
+
+  const installationId = input.query.get("installation_id");
+  if (installationId !== null && installationId.length > 0) {
+    const installationResult = completeGitHubAppInstallation({
+      connectionConfig: convertedConnectionConfig,
+      query: input.query,
+    });
+
+    return {
+      ...installationResult,
+      secrets: convertedConnectionSecrets,
+    };
+  }
+
+  return {
+    completionRedirect: {
+      kind: "setup-route",
+      query: {
+        githubAppManifest: "created",
+      },
+    },
+    connection: {
+      config: convertedConnectionConfig,
+    },
+    secrets: convertedConnectionSecrets,
+  };
+}
+
 export function createGitHubProviderAppSetupCapability(
   options: GitHubProviderAppSetupCapabilityOptions,
 ): IntegrationProviderAppSetupCapability<
@@ -79,8 +164,8 @@ export function createGitHubProviderAppSetupCapability(
   return {
     flows: [
       {
-        additionalCallbackRouteKeys: ["github-app-installation"],
-        callbackRouteKey: "github-app-manifest",
+        additionalCallbackRouteKeys: [GitHubAppInstallationCallbackRouteKey],
+        callbackRouteKey: GitHubAppManifestCallbackRouteKey,
         methodId: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
         requiresWebhookCallbackUrl: true,
         routeSegment: "github-app",
@@ -117,32 +202,11 @@ export function createGitHubProviderAppSetupCapability(
           };
         },
         async complete(input) {
-          if (input.callbackRouteKey === "github-app-installation") {
-            const installationId = input.query.get("installation_id");
-            if (installationId === null || installationId.length === 0) {
-              throw new Error(
-                "GitHub App installation callback query must include `installation_id`.",
-              );
-            }
-            const setupAction = input.query.get("setup_action");
-            const parsedConfig = parseGitHubAppInstallationConnectionConfig(
-              input.connection.config,
-            );
-
-            return {
-              completionRedirect: {
-                kind: "connection-detail",
-                notice: "installed",
-              },
-              connection: {
-                externalSubjectId: installationId,
-                config: {
-                  ...parsedConfig,
-                  installation_id: installationId,
-                  ...(setupAction === null ? {} : { setup_action: setupAction }),
-                },
-              },
-            };
+          if (input.callbackRouteKey === GitHubAppInstallationCallbackRouteKey) {
+            return completeGitHubAppInstallation({
+              connectionConfig: input.connection.config,
+              query: input.query,
+            });
           }
 
           const code = input.query.get("code");
@@ -155,27 +219,17 @@ export function createGitHubProviderAppSetupCapability(
             code,
           });
 
-          return {
-            completionRedirect: {
-              kind: "setup-route",
-              query: {
-                githubAppManifest: "created",
-              },
-            },
-            connection: {
-              config: buildConvertedGitHubAppConnectionConfig({ conversion }),
-            },
-            secrets: buildConvertedGitHubAppConnectionSecrets({
-              conversion,
-              supportsClientSecret: options.supportsClientSecret,
-            }),
-          };
+          return buildCompletedGitHubAppManifestResult({
+            conversion,
+            query: input.query,
+            supportsClientSecret: options.supportsClientSecret,
+          });
         },
       },
       {
-        callbackRouteKey: "github-app-installation",
+        callbackRouteKey: GitHubAppInstallationCallbackRouteKey,
         methodId: IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION,
-        routeSegment: "github-app-installation",
+        routeSegment: GitHubAppInstallationCallbackRouteKey,
         async start(input) {
           const parsedConfig = parseGitHubAppInstallationConnectionConfig(input.connection.config);
           for (const secret of options.requiredInstallationSecrets) {
@@ -195,30 +249,10 @@ export function createGitHubProviderAppSetupCapability(
           };
         },
         async complete(input) {
-          const installationId = input.query.get("installation_id");
-          if (installationId === null || installationId.length === 0) {
-            throw new Error(
-              "GitHub App installation callback query must include `installation_id`.",
-            );
-          }
-
-          const setupAction = input.query.get("setup_action");
-          const parsedConfig = parseGitHubAppInstallationConnectionConfig(input.connection.config);
-
-          return {
-            completionRedirect: {
-              kind: "connection-detail",
-              notice: "installed",
-            },
-            connection: {
-              externalSubjectId: installationId,
-              config: {
-                ...parsedConfig,
-                installation_id: installationId,
-                ...(setupAction === null ? {} : { setup_action: setupAction }),
-              },
-            },
-          };
+          return completeGitHubAppInstallation({
+            connectionConfig: input.connection.config,
+            query: input.query,
+          });
         },
       },
     ],

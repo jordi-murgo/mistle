@@ -3360,7 +3360,106 @@ export interface paths {
                               /** @enum {string} */
                               kind: "all-of";
                             };
+                        providerAppSetup?: {
+                          description: string;
+                          existingApp: {
+                            configFields: {
+                              configKey: string;
+                              label: string;
+                              name: string;
+                              required: boolean;
+                            }[];
+                            connectLabel: string;
+                            description: string;
+                            installedDetection: {
+                              configFields: string[];
+                              secretFields: string[];
+                            };
+                            saveErrorMessage: string;
+                            secretFields: {
+                              /** @enum {string} */
+                              inputType: "password" | "textarea";
+                              label: string;
+                              name: string;
+                              placeholder?: string;
+                              required: boolean;
+                              rows?: number;
+                              secretLabel: string;
+                            }[];
+                            startAction?: {
+                              /** @enum {string} */
+                              expectedResultKind: "redirect";
+                              installedDetection?: {
+                                configFields?: string[];
+                                externalSubject?: boolean;
+                              };
+                              installedLabel?: string;
+                              installedOpensInNewWindow?: boolean;
+                              pendingLabel?: string;
+                              routeSegment: string;
+                              startErrorMessage: string;
+                              unexpectedResultMessage: string;
+                            };
+                            title: string;
+                          };
+                          manifest: {
+                            createErrorMessage: string;
+                            description: string;
+                            startAction: {
+                              /** @enum {string} */
+                              expectedResultKind: "form-post" | "redirect";
+                              manifestBodyField: string;
+                              unexpectedResultMessage: string;
+                            };
+                            title: string;
+                          };
+                          title: string;
+                          urls: {
+                            description: string;
+                            setupCallback?: {
+                              label: string;
+                              path: string;
+                            };
+                            title: string;
+                            webhookCallback: {
+                              errorTitle: string;
+                              label: string;
+                              missingMessage: string;
+                              missingTitle: string;
+                            };
+                          };
+                        };
                         routeSegment: string;
+                        setupPane?: {
+                          /** @enum {string} */
+                          kind: "provider-app";
+                        };
+                        startForm?: {
+                          fields: {
+                            actions?: {
+                              /** Format: uri */
+                              href: string;
+                              label: string;
+                              opensInNewWindow?: boolean;
+                            }[];
+                            description?: string;
+                            /** @enum {string} */
+                            inputType: "password" | "radio" | "text" | "textarea";
+                            label: string;
+                            name: string;
+                            options?: {
+                              label: string;
+                              value: string;
+                            }[];
+                            placeholder?: string;
+                            required?: boolean;
+                            visibleWhen?: {
+                              field: string;
+                              value: string;
+                            };
+                          }[];
+                          submitLabel: string;
+                        };
                       };
                     }
                   | {

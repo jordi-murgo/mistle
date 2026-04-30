@@ -1,6 +1,6 @@
 import { Button, Notice } from "@mistle/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import { buildIntegrationCards } from "../integrations/directory-model.js";
@@ -18,7 +18,6 @@ export function IntegrationConnectionSetupPage(): React.JSX.Element {
   const breadcrumbs = useAppPageBreadcrumbs();
   const navigate = useNavigate();
   const params = useParams();
-  const [searchParams] = useSearchParams();
   const { title, description } = resolvePageFrameText(pageMeta, "Setup integration");
   const targetKey = params["targetKey"];
   const connectionId = params["connectionId"];
@@ -120,7 +119,6 @@ export function IntegrationConnectionSetupPage(): React.JSX.Element {
       {renderIntegrationConnectionSetupPane({
         connection,
         setupRoute,
-        searchParams,
       })}
     </PageFrame>
   );
