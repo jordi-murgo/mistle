@@ -11,9 +11,10 @@ import { readLatestSignInOtp } from "../integration/helpers/sign-in-otp.js";
 
 const it = createIntegrationTest({
   services: ["control-plane-api", "control-plane-worker"],
+  extraInfra: ["mailpit"],
 });
 
-describe("auth otp integration", () => {
+describe.concurrent("auth otp integration", () => {
   it("sends the sign-in OTP through the control-plane worker", async ({ env }) => {
     const email = `integration-new-auth-otp-${randomUUID()}@example.com`;
 

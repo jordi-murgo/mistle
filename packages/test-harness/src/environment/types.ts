@@ -1,4 +1,13 @@
-import type { RequestInit as TestHttpRequestInit, Response as TestHttpResponse } from "undici";
+import type {
+  BodyInit as UndiciBodyInit,
+  RequestInit as UndiciRequestInit,
+  Response as UndiciResponse,
+} from "undici";
+
+export type TestHttpRequestInit = Omit<UndiciRequestInit, "body"> & {
+  body?: UndiciBodyInit | globalThis.FormData | null;
+};
+export type TestHttpResponse = UndiciResponse;
 
 /**
  * How a Mistle app is started for a test environment.
@@ -149,6 +158,7 @@ export type TestEnvironmentRegistryInput<TRegistry extends TestServiceRegistry> 
   id?: string;
   registry: TRegistry;
   services: readonly TestServiceSelection<TRegistry>[];
+  extraInfra?: readonly TestInfraRequirement[];
 };
 
 export type SelectedTestServiceId<
