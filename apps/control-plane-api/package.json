@@ -74,8 +74,11 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@mistle/gateway-tunnel-auth": "workspace:*",
     "@mistle/test-harness": "workspace:*",
     "@types/pg": "^8.20.0",
-    "@types/sshpk": "^1.17.4"
+    "@types/sshpk": "^1.17.4",
+    "@types/ws": "^8.18.1",
+    "ws": "^8.20.0"
   }
 }
