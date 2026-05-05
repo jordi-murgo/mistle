@@ -154,6 +154,10 @@ import {
   SessionTerminalWorkspace,
   type SessionTerminalWorkspaceHandle,
 } from "./session-terminal-workspace.js";
+import {
+  buildSetupAssistantCollaborationModeSettings,
+  buildSetupAssistantInitialComposerText,
+} from "./setup-assistant-instructions.js";
 import { useSessionWorkbenchController } from "./use-session-workbench-controller.js";
 
 type SandboxProfileEditorPageProps =
@@ -182,7 +186,7 @@ type SetupScriptAssistantControl = {
   title: string;
 };
 type SetupScriptAssistantPanelState = {
-  initialPrompt: string;
+  initialComposerText: string;
   isOpen: boolean;
   sandboxInstanceId: string | null;
 };
@@ -239,33 +243,6 @@ const PublishSuccessNavigationState: SandboxProfileEditorNavigationState = {
 
 function createSandboxProfileDefaultPath(profileId: string): string {
   return `/sandbox-profiles/${profileId}/sandbox-profile`;
-}
-
-function createSetupAssistantPrompt(input: {
-  profileName: string;
-  setupScript: string;
-  version: number;
-}): string {
-  const trimmedSetupScript = input.setupScript.trim();
-  const currentDraft =
-    trimmedSetupScript.length === 0
-      ? "No setup script is currently configured."
-      : ["Current draft setup script:", "```sh", input.setupScript, "```"].join("\n");
-
-  return [
-    "Inspect this workspace and help write a setup script for this sandbox profile.",
-    "",
-    `Profile: ${input.profileName}`,
-    `Version: ${String(input.version)}`,
-    "",
-    currentDraft,
-    "",
-    "Do not run the setup script test yourself. Produce a script that I can paste into the profile editor and test there.",
-    "",
-    "The script should be repeatable, fail fast when required configuration is missing, and avoid relying on state from this Setup Assistant session.",
-    "",
-    "When finished, provide the complete setup script in one shell code block and list any required environment variables.",
-  ].join("\n");
 }
 
 function createSandboxProfileEditorPath(input: {
@@ -1203,14 +1180,10 @@ function ReadySandboxProfileEditorPage(input: {
     isStarting: startSetupAssistantMutation.isPending,
     onOpen: ({ setupScript }) => {
       setSetupAssistantError(null);
-      const initialPrompt = createSetupAssistantPrompt({
-        profileName: metaState.formState.displayName ?? metaState.pageTitle,
-        setupScript,
-        version: input.mode.version,
-      });
+      const initialComposerText = buildSetupAssistantInitialComposerText(setupScript);
 
       setSetupAssistantPanelState((currentState) => ({
-        initialPrompt,
+        initialComposerText,
         isOpen: true,
         sandboxInstanceId: currentState?.sandboxInstanceId ?? null,
       }));
@@ -1382,7 +1355,6 @@ function ReadySandboxProfileEditorPage(input: {
           minSize="360px"
         >
           <SetupScriptAssistantPanel
-            initialPrompt={setupAssistantPanelState.initialPrompt}
             onClose={() => {
               setSetupAssistantPanelState((currentState) =>
                 currentState === null
@@ -1394,6 +1366,7 @@ function ReadySandboxProfileEditorPage(input: {
               );
             }}
             sandboxInstanceId={setupAssistantPanelState.sandboxInstanceId}
+            initialComposerText={setupAssistantPanelState.initialComposerText}
           />
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -1402,14 +1375,14 @@ function ReadySandboxProfileEditorPage(input: {
 }
 
 function SetupScriptAssistantPanel(input: {
-  initialPrompt: string;
   onClose: () => void;
   sandboxInstanceId: string | null;
+  initialComposerText: string;
 }): React.JSX.Element {
   const { conversationPane, workbench } = useSessionWorkbenchController({
     sandboxInstanceId: input.sandboxInstanceId,
   });
-  const [composerText, setComposerText] = useState(input.initialPrompt);
+  const [composerText, setComposerText] = useState(input.initialComposerText);
   const [pendingDiffComments, setPendingDiffComments] = useState<
     readonly PendingSessionDiffComment[]
   >([]);
@@ -1446,8 +1419,8 @@ function SetupScriptAssistantPanel(input: {
   );
 
   useEffect(() => {
-    setComposerText(input.initialPrompt);
-  }, [input.initialPrompt]);
+    setComposerText(input.initialComposerText);
+  }, [input.initialComposerText]);
 
   function handleClearPendingDiffComments(): void {
     setPendingDiffComments([]);
@@ -1577,7 +1550,12 @@ function SetupScriptAssistantPanel(input: {
               <div className="shrink-0 border-t bg-background px-5 py-4">
                 <SessionConversationBottomPanelController
                   chatEntries={conversationPane.chatState.entries}
-                  composerStateInput={conversationPane.composerStateInput}
+                  composerStateInput={{
+                    ...conversationPane.composerStateInput,
+                    collaborationModeSettings: buildSetupAssistantCollaborationModeSettings(
+                      conversationPane.composerStateInput.collaborationModeSettings,
+                    ),
+                  }}
                   draftState={{
                     composerText,
                     pendingDiffComments,
