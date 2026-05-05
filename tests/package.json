@@ -5,12 +5,16 @@
   "scripts": {
     "lint": "oxlint --type-aware --deny-warnings .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:system:prepare": "node ./scripts/prepare-system.mjs",
-    "test:system:run": "node ./scripts/run-system.mjs",
-    "test:system": "pnpm run test:system:prepare && pnpm run test:system:run",
-    "test:system:docker": "MISTLE_TEST_SYSTEM_SANDBOX_PROVIDER=docker pnpm run test:system",
-    "test:system:e2b": "MISTLE_TEST_SYSTEM_SANDBOX_PROVIDER=e2b pnpm run test:system",
-    "test:system:all": "pnpm run test:system:docker && pnpm run test:system:e2b",
+    "test:system:prepare": "pnpm run test:system:legacy:prepare",
+    "test:system:run": "pnpm run test:system:legacy:run",
+    "test:system:runtime": "vitest run -c vitest.system-runtime.config.ts",
+    "test:system:legacy:prepare": "node ./scripts/prepare-system.mjs",
+    "test:system:legacy:run": "node ./scripts/run-system.mjs",
+    "test:system:legacy": "pnpm run test:system:legacy:prepare && pnpm run test:system:legacy:run",
+    "test:system": "pnpm run test:system:runtime && pnpm run test:system:legacy",
+    "test:system:docker": "MISTLE_TEST_SYSTEM_SANDBOX_PROVIDER=docker pnpm run test:system:legacy",
+    "test:system:e2b": "MISTLE_TEST_SYSTEM_SANDBOX_PROVIDER=e2b pnpm run test:system:legacy",
+    "test:system:all": "pnpm run test:system:runtime && pnpm run test:system:docker && pnpm run test:system:e2b",
     "test:e2e": "playwright test --config playwright.config.ts --pass-with-no-tests"
   },
   "devDependencies": {
@@ -27,6 +31,7 @@
     "e2b": "^2.19.0",
     "openapi-fetch": "^0.17.0",
     "pg": "^8.20.0",
+    "vite": "8.0.10",
     "ws": "^8.20.0",
     "zod": "^4.1.12"
   }

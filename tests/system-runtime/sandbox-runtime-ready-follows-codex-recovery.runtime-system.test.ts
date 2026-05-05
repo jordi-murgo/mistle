@@ -1,5 +1,5 @@
 /* eslint-disable jest/no-standalone-expect --
- * This suite uses an extended test `it` fixture imported from system test context.
+ * This suite uses an extended Vitest fixture created by the system test harness.
  */
 
 import { describe, expect } from "vitest";
@@ -10,18 +10,30 @@ import {
   prepareCodexSandbox,
   waitForCondition,
   waitForRuntimeReadyValue,
-} from "./helpers/codex-sandbox.js";
-import { it } from "./system-test-context.js";
+} from "../system/helpers/codex-sandbox.js";
+import { createRuntimeCodexSandboxFixture } from "./helpers/runtime-codex-sandbox.js";
+import { createSandboxSystemTest } from "./helpers/sandbox-system-test.js";
+
+const it = createSandboxSystemTest({
+  extraInfra: ["mailpit"],
+  sandboxProviders: ["docker", "e2b"],
+  publicAccess: {
+    provider: "cloudflare",
+    services: ["data-plane-gateway", "tokenizer-proxy"],
+  },
+});
 
 const SYSTEM_TEST_TIMEOUT_MS = 5 * 60_000;
 
-describe("system sandbox runtime.ready follows codex recovery", () => {
+describe("runtime system sandbox runtime.ready follows codex recovery", () => {
   it(
     "projects runtime.ready from supervised Codex health",
-    async ({ fixture }) => {
+    async ({ system }) => {
+      const fixture = createRuntimeCodexSandboxFixture(system);
+
       const { authenticatedSession, sandboxInstanceId } = await prepareCodexSandbox({
         fixture,
-        email: "sandbox-runtime-ready-follows-codex-recovery@example.com",
+        email: "runtime-sandbox-ready-follows-codex-recovery@example.com",
       });
       const attachedAgentSession = await connectCodexAgentSession({
         fixture,

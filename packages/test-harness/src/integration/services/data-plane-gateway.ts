@@ -11,6 +11,7 @@ import type {
   TestServiceStartInput,
 } from "../../environment/index.js";
 import { TestEnvironmentIdHeader } from "../../environment/test-isolation.js";
+import type { IntegrationServiceOptions, IntegrationSandboxOptions } from "./options.js";
 import { peers } from "./peers.js";
 import { ServiceIds } from "./service-ids.js";
 import {
@@ -27,6 +28,7 @@ const Host = "127.0.0.1";
 const InfraIds = {
   OTLP: "otlp",
   POSTGRES: "postgres.data-plane",
+  SANDBOX_BASE_IMAGE: "sandbox-base-image",
   VALKEY: "valkey",
 };
 
@@ -45,7 +47,17 @@ const OtlpValues = {
   METRICS_ENDPOINT: "metrics.endpoint",
 };
 
-export function service(infra: readonly TestInfraRequirement[]): TestServiceDefinition {
+const SandboxBaseImageValues = {
+  IMAGE_REF: "image.ref",
+};
+
+export function service(
+  infra: readonly TestInfraRequirement[],
+  options: IntegrationServiceOptions,
+): TestServiceDefinition {
+  const requiresEnvironmentScope =
+    options.sandbox !== undefined || infra.some((requirement) => requirement.id === InfraIds.OTLP);
+
   return {
     id: ServiceIds.DATA_PLANE_GATEWAY,
     infra,
@@ -55,16 +67,13 @@ export function service(infra: readonly TestInfraRequirement[]): TestServiceDefi
         host: Host,
       },
     },
-    ...(infra.some((requirement) => requirement.id === InfraIds.OTLP)
-      ? {
-          poolScope: "environment",
-        }
-      : {}),
+    ...(requiresEnvironmentScope ? { poolScope: "environment" } : {}),
     supportedModes: ["runtime"],
     healthCheck: async (runtime) => httpHealth(runtime, ServiceIds.DATA_PLANE_GATEWAY),
     start: start({
       postgresInfra: infraRequirement(infra, InfraIds.POSTGRES, ServiceIds.DATA_PLANE_GATEWAY),
       valkeyInfra: infraRequirement(infra, InfraIds.VALKEY, ServiceIds.DATA_PLANE_GATEWAY),
+      sandbox: options.sandbox,
     }),
   };
 }
@@ -72,12 +81,14 @@ export function service(infra: readonly TestInfraRequirement[]): TestServiceDefi
 function start(input: {
   postgresInfra: TestInfraRequirement;
   valkeyInfra: TestInfraRequirement;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): (startInput: TestServiceStartInput) => Promise<TestService> {
   return async (startInput) => {
     assertMode(startInput.mode, "runtime", ServiceIds.DATA_PLANE_GATEWAY);
 
     const postgres = resolvedInfra(startInput.infra, input.postgresInfra.id);
     const otlp = startInput.infra.get(InfraIds.OTLP);
+    const sandboxBaseImage = startInput.infra.get(InfraIds.SANDBOX_BASE_IMAGE);
     const valkey = resolvedInfra(startInput.infra, input.valkeyInfra.id);
     const endpoint = httpEndpoint(startInput, ServiceIds.DATA_PLANE_GATEWAY);
     const peer = peers(startInput.services, startInput.plannedEndpoints);
@@ -85,10 +96,15 @@ function start(input: {
       port: endpoint.port,
       postgres,
       otlp,
+      sandboxBaseImage,
       valkey,
       dataPlaneApiBaseUrl: peer.url(ServiceIds.DATA_PLANE_API),
       controlPlaneBaseUrl: peer.url(ServiceIds.CONTROL_PLANE_API),
-      gatewayWsUrl: peer.ws(ServiceIds.DATA_PLANE_GATEWAY, "/tunnel/sandbox"),
+      gatewayWsUrl: createGatewayWsUrl({
+        sandbox: input.sandbox,
+        peer,
+      }),
+      sandbox: input.sandbox,
     });
     const telemetry =
       otlp === undefined
@@ -130,10 +146,12 @@ function config(input: {
   port: number;
   postgres: ResolvedTestInfra;
   otlp: ResolvedTestInfra | undefined;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
   valkey: ResolvedTestInfra;
   dataPlaneApiBaseUrl: string;
   controlPlaneBaseUrl: string;
   gatewayWsUrl: string;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): DataPlaneGatewayConfig {
   return {
     server: {
@@ -163,8 +181,11 @@ function config(input: {
       serviceToken: "integration-new-internal-service-token",
     },
     sandbox: {
-      provider: "docker",
-      defaultBaseImage: getLocalDevDockerRegistrySandboxBaseImageRef(),
+      provider: input.sandbox?.provider ?? "docker",
+      defaultBaseImage: readSandboxBaseImageRef({
+        sandbox: input.sandbox,
+        sandboxBaseImage: input.sandboxBaseImage,
+      }),
       gatewayWsUrl: input.gatewayWsUrl,
       internalGatewayWsUrl: input.gatewayWsUrl,
       connect: {
@@ -215,4 +236,35 @@ function config(input: {
             resourceAttributes: "deployment.environment=integration-new",
           },
   };
+}
+
+function readSandboxBaseImageRef(input: {
+  sandbox: IntegrationSandboxOptions | undefined;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
+}): string {
+  if (input.sandbox?.defaultBaseImageRef !== undefined) {
+    return input.sandbox.defaultBaseImageRef;
+  }
+
+  if (input.sandboxBaseImage !== undefined) {
+    return infraValue(input.sandboxBaseImage, SandboxBaseImageValues.IMAGE_REF);
+  }
+
+  return getLocalDevDockerRegistrySandboxBaseImageRef();
+}
+
+function createGatewayWsUrl(input: {
+  sandbox: IntegrationSandboxOptions | undefined;
+  peer: ReturnType<typeof peers>;
+}): string {
+  const publicGatewayBaseUrl = input.sandbox?.publicServiceBaseUrls?.get(
+    ServiceIds.DATA_PLANE_GATEWAY,
+  );
+  if (publicGatewayBaseUrl === undefined) {
+    return input.peer.ws(ServiceIds.DATA_PLANE_GATEWAY, "/tunnel/sandbox");
+  }
+
+  const url = new URL("/tunnel/sandbox", publicGatewayBaseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }

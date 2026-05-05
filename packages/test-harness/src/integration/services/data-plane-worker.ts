@@ -12,6 +12,7 @@ import { withHostedOpenWorkflowRuntime } from "../../../../../apps/data-plane-wo
 import { DataPlaneWorkerWorkflows } from "../../../../../apps/data-plane-worker/openworkflow/workflows.js";
 import { runCleanupTasks } from "../../cleanup/index.js";
 import type {
+  ResolvedTestInfra,
   TestInfraRequirement,
   TestService,
   TestServiceDefinition,
@@ -21,7 +22,9 @@ import {
   TestEnvironmentIdHeader,
   createDataPlaneWorkflowNamespaceId,
 } from "../../environment/test-isolation.js";
+import { exposeHostPorts } from "../../network/expose-host-ports.js";
 import { startHostedOpenWorkflowWorker } from "./openworkflow-worker-host.js";
+import type { IntegrationServiceOptions, IntegrationSandboxOptions } from "./options.js";
 import { peers } from "./peers.js";
 import { leasePgPool, leasePostgresJsPool } from "./postgres-pools.js";
 import { ServiceIds } from "./service-ids.js";
@@ -44,9 +47,22 @@ const PostgresValues = {
 
 const InfraIds = {
   POSTGRES: "postgres.data-plane",
+  SANDBOX_BASE_IMAGE: "sandbox-base-image",
+  SANDBOX_DOCKER_NETWORK: "sandbox-docker-network",
 };
 
-export function service(infra: readonly TestInfraRequirement[]): TestServiceDefinition {
+const DockerNetworkValues = {
+  NETWORK_NAME: "network.name",
+};
+
+const SandboxBaseImageValues = {
+  IMAGE_REF: "image.ref",
+};
+
+export function service(
+  infra: readonly TestInfraRequirement[],
+  options: IntegrationServiceOptions,
+): TestServiceDefinition {
   return {
     id: ServiceIds.DATA_PLANE_WORKER,
     infra,
@@ -60,29 +76,46 @@ export function service(infra: readonly TestInfraRequirement[]): TestServiceDefi
     healthCheck: async (runtime) => processHealth(runtime, ServiceIds.DATA_PLANE_WORKER),
     start: start({
       postgresInfra: infraRequirement(infra, InfraIds.POSTGRES, ServiceIds.DATA_PLANE_WORKER),
+      sandbox: options.sandbox,
     }),
   };
 }
 
 function start(input: {
   postgresInfra: TestInfraRequirement;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): (startInput: TestServiceStartInput) => Promise<TestService> {
   return async (startInput) => {
+    const postgres = resolvedInfra(startInput.infra, input.postgresInfra.id);
+    const peer = peers(startInput.services, startInput.plannedEndpoints);
+    const sandboxBaseImage = startInput.infra.get(InfraIds.SANDBOX_BASE_IMAGE);
+    const sandboxDockerNetwork = startInput.infra.get(InfraIds.SANDBOX_DOCKER_NETWORK);
+    const sandboxEndpoints = await createSandboxReachableEndpoints({
+      environmentId: startInput.environmentId,
+      peer,
+      sandboxDockerNetwork,
+      sandbox: input.sandbox,
+    });
+
     if (startInput.mode === "runtime") {
       return startRuntimeDataPlaneWorker({
         startInput,
-        postgresInfra: input.postgresInfra,
+        postgres,
+        sandboxBaseImage,
+        sandboxEndpoints,
+        sandbox: input.sandbox,
       });
     }
 
     assertMode(startInput.mode, "process", ServiceIds.DATA_PLANE_WORKER);
 
-    const postgres = resolvedInfra(startInput.infra, input.postgresInfra.id);
-    const peer = peers(startInput.services, startInput.plannedEndpoints);
     const env = createDataPlaneWorkerEnv({
       environmentId: startInput.environmentId,
       postgres,
+      sandboxBaseImage,
+      sandboxEndpoints,
       peer,
+      sandbox: input.sandbox,
     });
 
     return processService({
@@ -106,21 +139,26 @@ function start(input: {
 
 async function startRuntimeDataPlaneWorker(input: {
   startInput: TestServiceStartInput;
-  postgresInfra: TestInfraRequirement;
+  postgres: ResolvedTestInfra;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
+  sandboxEndpoints: SandboxReachableEndpoints;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): Promise<TestService> {
-  const postgres = resolvedInfra(input.startInput.infra, input.postgresInfra.id);
   const peer = peers(input.startInput.services, input.startInput.plannedEndpoints);
   const env = createDataPlaneWorkerEnv({
     environmentId: input.startInput.environmentId,
-    postgres,
+    postgres: input.postgres,
+    sandboxBaseImage: input.sandboxBaseImage,
     peer,
+    sandboxEndpoints: input.sandboxEndpoints,
+    sandbox: input.sandbox,
   });
   const config = loadConfig({
     app: AppIds.DATA_PLANE_WORKER,
     env,
   }).app;
-  const appDatabaseUrl = infraValue(postgres, PostgresValues.HOST_POOLED_URL);
-  const workflowDatabaseUrl = infraValue(postgres, PostgresValues.HOST_DIRECT_URL);
+  const appDatabaseUrl = infraValue(input.postgres, PostgresValues.HOST_POOLED_URL);
+  const workflowDatabaseUrl = infraValue(input.postgres, PostgresValues.HOST_DIRECT_URL);
   const workflowNamespaceId = createDataPlaneWorkflowNamespaceId(input.startInput.environmentId);
   const workflowPool = leasePostgresJsPool({
     key: `${ServiceIds.DATA_PLANE_WORKER}:openworkflow:${workflowDatabaseUrl}`,
@@ -179,8 +217,12 @@ async function startRuntimeDataPlaneWorker(input: {
 function createDataPlaneWorkerEnv(input: {
   environmentId: string;
   postgres: ReturnType<typeof resolvedInfra>;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
   peer: ReturnType<typeof peers>;
+  sandboxEndpoints: SandboxReachableEndpoints;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): Record<string, string> {
+  const provider = input.sandbox?.provider ?? "docker";
   return {
     MISTLE_ENV: "development",
     NODE_ENV: "development",
@@ -199,21 +241,28 @@ function createDataPlaneWorkerEnv(input: {
     MISTLE_TEST_ENVIRONMENT_ID_HEADER: TestEnvironmentIdHeader,
     MISTLE_SERVICES_DATA_PLANE_WORKER_WORKFLOW_CONCURRENCY: "2",
     MISTLE_SERVICES_DATA_PLANE_GATEWAY_INTERNAL_URL: input.peer.url(ServiceIds.DATA_PLANE_GATEWAY),
-    MISTLE_SERVICES_DATA_PLANE_GATEWAY_SANDBOX_WS_INTERNAL_URL: input.peer.ws(
-      ServiceIds.DATA_PLANE_GATEWAY,
-      "/tunnel/sandbox",
-    ),
-    MISTLE_SERVICES_TOKENIZER_PROXY_EGRESS_URL: input.peer.url(ServiceIds.TOKENIZER_PROXY),
+    MISTLE_SERVICES_DATA_PLANE_GATEWAY_SANDBOX_WS_INTERNAL_URL: input.sandboxEndpoints.gatewayWsUrl,
+    MISTLE_SERVICES_TOKENIZER_PROXY_EGRESS_URL: input.sandboxEndpoints.tokenizerProxyEgressUrl,
     MISTLE_SERVICES_CONTROL_PLANE_API_INTERNAL_URL: input.peer.url(ServiceIds.CONTROL_PLANE_API),
     MISTLE_INTERNAL_AUTH_SHARED_TOKEN: "integration-new-internal-service-token",
-    MISTLE_SANDBOX_PROVIDER: "docker",
-    MISTLE_SANDBOX_DEFAULT_BASE_IMAGE: getLocalDevDockerRegistrySandboxBaseImageRef(),
-    MISTLE_SERVICES_DATA_PLANE_GATEWAY_SANDBOX_WS_PUBLIC_URL: input.peer.ws(
-      ServiceIds.DATA_PLANE_GATEWAY,
-      "/tunnel/sandbox",
-    ),
-    MISTLE_SANDBOX_DOCKER_SOCKET_PATH: DockerSocketPath,
-    MISTLE_SANDBOX_DOCKER_NETWORK_NAME: "mistle-sandbox-dev",
+    MISTLE_SANDBOX_PROVIDER: provider,
+    MISTLE_SANDBOX_DEFAULT_BASE_IMAGE: readSandboxBaseImageRef({
+      sandbox: input.sandbox,
+      sandboxBaseImage: input.sandboxBaseImage,
+    }),
+    MISTLE_SERVICES_DATA_PLANE_GATEWAY_SANDBOX_WS_PUBLIC_URL: input.sandboxEndpoints.gatewayWsUrl,
+    ...(provider === "docker"
+      ? {
+          MISTLE_SANDBOX_DOCKER_SOCKET_PATH: DockerSocketPath,
+        }
+      : {
+          ...createE2BEnv(input.sandbox),
+        }),
+    ...(input.sandboxEndpoints.dockerNetworkName === undefined
+      ? {}
+      : {
+          MISTLE_SANDBOX_DOCKER_NETWORK_NAME: input.sandboxEndpoints.dockerNetworkName,
+        }),
     MISTLE_SANDBOX_TOKENS_CONNECT_SECRET: "integration-new-connection-secret",
     MISTLE_SANDBOX_TOKENS_CONNECT_ISSUER: "integration-new-control-plane-api",
     MISTLE_SANDBOX_TOKENS_CONNECT_AUDIENCE: "integration-new-data-plane-gateway",
@@ -232,4 +281,135 @@ function createDataPlaneWorkerEnv(input: {
     MISTLE_TELEMETRY_ENABLED: "false",
     MISTLE_TELEMETRY_DEBUG: "false",
   };
+}
+
+type SandboxReachableEndpoints = {
+  gatewayWsUrl: string;
+  tokenizerProxyEgressUrl: string;
+  dockerNetworkName?: string;
+};
+
+async function createSandboxReachableEndpoints(input: {
+  environmentId: string;
+  peer: ReturnType<typeof peers>;
+  sandboxDockerNetwork: ResolvedTestInfra | undefined;
+  sandbox: IntegrationSandboxOptions | undefined;
+}): Promise<SandboxReachableEndpoints> {
+  const gatewayWsUrl = withTestEnvironmentIdQueryParam({
+    url: input.peer.ws(ServiceIds.DATA_PLANE_GATEWAY, "/tunnel/sandbox"),
+    environmentId: input.environmentId,
+  });
+  const tokenizerProxyEgressUrl = input.peer.url(ServiceIds.TOKENIZER_PROXY);
+  if (input.sandbox?.provider === "e2b") {
+    return createPublicSandboxReachableEndpoints({
+      environmentId: input.environmentId,
+      sandbox: input.sandbox,
+    });
+  }
+
+  if (input.sandboxDockerNetwork === undefined) {
+    return {
+      gatewayWsUrl,
+      tokenizerProxyEgressUrl,
+    };
+  }
+
+  const sandboxGatewayWsUrl = createHostDockerInternalUrl(gatewayWsUrl);
+  const sandboxTokenizerProxyEgressUrl = createHostDockerInternalUrl(tokenizerProxyEgressUrl);
+  await exposeHostPorts(
+    readUrlPort(sandboxGatewayWsUrl, "data-plane gateway sandbox websocket URL"),
+    readUrlPort(sandboxTokenizerProxyEgressUrl, "tokenizer proxy egress URL"),
+  );
+
+  return {
+    gatewayWsUrl: sandboxGatewayWsUrl,
+    tokenizerProxyEgressUrl: sandboxTokenizerProxyEgressUrl,
+    dockerNetworkName: infraValue(input.sandboxDockerNetwork, DockerNetworkValues.NETWORK_NAME),
+  };
+}
+
+function createPublicSandboxReachableEndpoints(input: {
+  environmentId: string;
+  sandbox: IntegrationSandboxOptions;
+}): SandboxReachableEndpoints {
+  const publicGatewayBaseUrl = input.sandbox.publicServiceBaseUrls?.get(
+    ServiceIds.DATA_PLANE_GATEWAY,
+  );
+  const publicTokenizerProxyBaseUrl = input.sandbox.publicServiceBaseUrls?.get(
+    ServiceIds.TOKENIZER_PROXY,
+  );
+  if (publicGatewayBaseUrl === undefined || publicTokenizerProxyBaseUrl === undefined) {
+    throw new Error(
+      "E2B runtime system tests require public access for data-plane-gateway and tokenizer-proxy.",
+    );
+  }
+
+  return {
+    gatewayWsUrl: withTestEnvironmentIdQueryParam({
+      url: createPublicGatewayWsUrl(publicGatewayBaseUrl),
+      environmentId: input.environmentId,
+    }),
+    tokenizerProxyEgressUrl: new URL("/tokenizer-proxy/egress", publicTokenizerProxyBaseUrl)
+      .toString()
+      .replace(/\/$/u, ""),
+  };
+}
+
+function readSandboxBaseImageRef(input: {
+  sandbox: IntegrationSandboxOptions | undefined;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
+}): string {
+  if (input.sandbox?.defaultBaseImageRef !== undefined) {
+    return input.sandbox.defaultBaseImageRef;
+  }
+
+  if (input.sandboxBaseImage !== undefined) {
+    return infraValue(input.sandboxBaseImage, SandboxBaseImageValues.IMAGE_REF);
+  }
+
+  return getLocalDevDockerRegistrySandboxBaseImageRef();
+}
+
+function createE2BEnv(input: IntegrationSandboxOptions | undefined): Record<string, string> {
+  if (input?.e2b === undefined) {
+    throw new Error("data-plane-worker requires E2B sandbox options when provider is e2b.");
+  }
+
+  return {
+    MISTLE_SANDBOX_E2B_API_KEY: input.e2b.apiKey,
+    ...(input.e2b.domain === undefined ? {} : { MISTLE_SANDBOX_E2B_DOMAIN: input.e2b.domain }),
+    ...(input.e2b.cpuCount === undefined
+      ? {}
+      : { MISTLE_SANDBOX_E2B_CPU_COUNT: input.e2b.cpuCount }),
+    ...(input.e2b.memoryMb === undefined
+      ? {}
+      : { MISTLE_SANDBOX_E2B_MEMORY_MB: input.e2b.memoryMb }),
+  };
+}
+
+function createPublicGatewayWsUrl(publicGatewayBaseUrl: string): string {
+  const url = new URL("/tunnel/sandbox", publicGatewayBaseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+function withTestEnvironmentIdQueryParam(input: { url: string; environmentId: string }): string {
+  const url = new URL(input.url);
+  url.searchParams.set(TestEnvironmentIdHeader, input.environmentId);
+  return url.toString();
+}
+
+function createHostDockerInternalUrl(value: string): string {
+  const url = new URL(value);
+  url.hostname = "host.docker.internal";
+  return url.toString().replace(/\/$/u, "");
+}
+
+function readUrlPort(value: string, description: string): number {
+  const port = Number(new URL(value).port);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`Expected ${description} to include a valid port.`);
+  }
+
+  return port;
 }

@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   AgentStreamClient,
   CodexJsonRpcClient,
-  createNodeCodexSessionRuntime,
 } from "@mistle/integrations-definitions/agent-runtimes/codex/server";
 import { systemSleeper } from "@mistle/time";
 import { z } from "zod";
@@ -12,8 +11,8 @@ import { CodexConversationProviderInitializeClientInfo } from "../../../packages
 import { ExecStreamClient } from "../../../packages/sandbox-session-client/src/exec-stream-client.js";
 import { createNodeSandboxSessionRuntime } from "../../../packages/sandbox-session-client/src/node.js";
 import { PtyStreamClient } from "../../../packages/sandbox-session-client/src/pty-stream-client.js";
+import type { SandboxSessionRuntime } from "../../../packages/sandbox-session-client/src/runtime.js";
 import { SandboxSessionTransport } from "../../../packages/sandbox-session-client/src/transport.js";
-import type { AuthenticatedSession, SystemTestFixture } from "../system-test-context.js";
 
 const OPENAI_TARGET_KEY = "openai-default";
 const OPENAI_CONNECTION_METHOD_ID = "api-key";
@@ -126,13 +125,51 @@ export type SandboxExecResult = {
   truncated: boolean;
 };
 
+export type CodexSandboxAuthenticatedSession = {
+  cookie: string;
+  organizationId: string;
+  userId: string;
+};
+
+export type CodexSandboxRuntimeState = {
+  attachment: {
+    ownerLeaseId: string;
+  } | null;
+  runtime: {
+    ready: boolean;
+  };
+};
+
+export type CodexSandboxHttpResponse = {
+  status: number;
+  text: () => Promise<string>;
+  json: () => Promise<unknown>;
+};
+
+export type CodexSandboxRequestInit = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+};
+
+export type CodexSandboxFixture = {
+  authSession: (input?: { email?: string }) => Promise<CodexSandboxAuthenticatedSession>;
+  request: (path: string, init?: CodexSandboxRequestInit) => Promise<CodexSandboxHttpResponse>;
+  dataPlaneApiBaseUrl: string;
+  dataPlaneApiHeaders?: Record<string, string>;
+  dataPlaneGatewayBaseUrl: string;
+  internalAuthServiceToken: string;
+  createSessionRuntime?: () => SandboxSessionRuntime;
+  readSandboxRuntimeState: (sandboxInstanceId: string) => Promise<CodexSandboxRuntimeState>;
+};
+
 const InternalAuthServiceTokenHeader = "x-mistle-service-token";
 
 export async function prepareCodexSandbox(input: {
-  fixture: SystemTestFixture;
+  fixture: CodexSandboxFixture;
   email?: string;
-  authenticatedSession?: AuthenticatedSession;
-}): Promise<{ authenticatedSession: AuthenticatedSession; sandboxInstanceId: string }> {
+  authenticatedSession?: CodexSandboxAuthenticatedSession;
+}): Promise<{ authenticatedSession: CodexSandboxAuthenticatedSession; sandboxInstanceId: string }> {
   const authenticatedSession =
     input.authenticatedSession ??
     (await input.fixture.authSession({
@@ -171,8 +208,8 @@ export async function prepareCodexSandbox(input: {
 }
 
 export async function mintSandboxConnectionUrl(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<string> {
   const connectionToken = await requestJsonOrThrow({
@@ -196,13 +233,13 @@ export async function mintSandboxConnectionUrl(input: {
 }
 
 export async function connectCodexAgentSession(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<ConnectedCodexAgentSession> {
   const connectionUrl = await mintSandboxConnectionUrl(input);
   const transport = new SandboxSessionTransport({
-    runtime: createNodeCodexSessionRuntime(),
+    runtime: createFixtureSessionRuntime(input.fixture),
     connectTimeoutMs: SANDBOX_SESSION_CONNECT_TIMEOUT_MS,
   });
   const sessionClient = new AgentStreamClient({
@@ -233,12 +270,13 @@ export async function connectCodexAgentSession(input: {
 }
 
 export async function killRawCodexAppServer(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<void> {
   const connectionUrl = await mintSandboxConnectionUrl(input);
   const result = await runSandboxExecCommand({
+    fixture: input.fixture,
     connectionUrl,
     command: "sh",
     args: [
@@ -259,8 +297,8 @@ export async function killRawCodexAppServer(input: {
 }
 
 export async function runSandboxExecCommandInSandbox(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
   command: string;
   args?: string[];
@@ -274,6 +312,7 @@ export async function runSandboxExecCommandInSandbox(input: {
   });
 
   return runSandboxExecCommand({
+    fixture: input.fixture,
     connectionUrl,
     command: input.command,
     ...(input.args === undefined ? {} : { args: input.args }),
@@ -283,8 +322,8 @@ export async function runSandboxExecCommandInSandbox(input: {
 }
 
 export async function triggerSandboxdEgressProxyKill(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<z.infer<typeof SandboxdFaultInjectionAcceptedResponseSchema>> {
   const result = await runSandboxExecCommandInSandbox({
@@ -314,8 +353,8 @@ export async function triggerSandboxdEgressProxyKill(input: {
 }
 
 export async function readSandboxHealthz(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<SandboxdHealthResponse> {
   const result = await runSandboxPtyCommand({
@@ -345,7 +384,7 @@ export async function readSandboxHealthz(input: {
 }
 
 export async function waitForRuntimeReadyValue(input: {
-  fixture: SystemTestFixture;
+  fixture: CodexSandboxFixture;
   sandboxInstanceId: string;
   expectedReady: boolean;
   timeoutMs: number;
@@ -370,8 +409,8 @@ export async function waitForRuntimeReadyValue(input: {
 }
 
 export async function waitForSandboxStatus(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
   expectedStatus: z.infer<typeof SandboxInstanceStatusResponseSchema>["status"];
 }): Promise<z.infer<typeof SandboxInstanceStatusResponseSchema>> {
@@ -410,8 +449,8 @@ export async function waitForSandboxStatus(input: {
 }
 
 export async function waitForSandboxConnectable(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
   expectedConnectable: boolean;
 }): Promise<z.infer<typeof SandboxInstanceStatusResponseSchema>> {
@@ -450,7 +489,7 @@ export async function waitForSandboxConnectable(input: {
 }
 
 export async function stopSandboxInstance(input: {
-  fixture: SystemTestFixture;
+  fixture: CodexSandboxFixture;
   sandboxInstanceId: string;
 }): Promise<void> {
   const runtimeState = await input.fixture.readSandboxRuntimeState(input.sandboxInstanceId);
@@ -472,6 +511,7 @@ export async function stopSandboxInstance(input: {
       headers: {
         "content-type": "application/json",
         [InternalAuthServiceTokenHeader]: input.fixture.internalAuthServiceToken,
+        ...input.fixture.dataPlaneApiHeaders,
       },
       body: JSON.stringify({
         stopReason: "idle",
@@ -483,8 +523,8 @@ export async function stopSandboxInstance(input: {
 }
 
 export async function resumeSandboxInstance(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<void> {
   await requestJsonOrThrow({
@@ -498,6 +538,7 @@ export async function resumeSandboxInstance(input: {
       headers: {
         "content-type": "application/json",
         [InternalAuthServiceTokenHeader]: input.fixture.internalAuthServiceToken,
+        ...input.fixture.dataPlaneApiHeaders,
       },
       body: JSON.stringify({
         organizationId: input.authenticatedSession.organizationId,
@@ -544,8 +585,8 @@ export async function waitForCondition<T>(input: {
 }
 
 async function createOpenAiConnection(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
 }): Promise<string> {
   const connection = await requestJsonOrThrow({
     request: input.fixture.request,
@@ -576,8 +617,8 @@ async function createOpenAiConnection(input: {
 }
 
 async function createSandboxProfile(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
 }): Promise<string> {
   const sandboxProfile = await requestJsonOrThrow({
     request: input.fixture.request,
@@ -601,8 +642,8 @@ async function createSandboxProfile(input: {
 }
 
 async function updateSandboxBindings(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxProfileId: string;
   openAiConnectionId: string;
 }): Promise<void> {
@@ -637,8 +678,8 @@ async function updateSandboxBindings(input: {
 }
 
 async function startSandboxInstance(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxProfileId: string;
 }): Promise<string> {
   const startedInstance = await requestJsonOrThrow({
@@ -659,8 +700,8 @@ async function startSandboxInstance(input: {
 }
 
 async function waitForSandboxReady(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
 }): Promise<void> {
   await waitForCondition({
@@ -713,6 +754,7 @@ async function waitForSandboxReady(input: {
 }
 
 async function runSandboxExecCommand(input: {
+  fixture: CodexSandboxFixture;
   connectionUrl: string;
   command: string;
   args?: string[];
@@ -720,7 +762,7 @@ async function runSandboxExecCommand(input: {
   timeoutMs?: number;
 }): Promise<SandboxExecResult> {
   const transport = new SandboxSessionTransport({
-    runtime: createNodeSandboxSessionRuntime(),
+    runtime: createFixtureSessionRuntime(input.fixture),
     connectTimeoutMs: SANDBOX_SESSION_CONNECT_TIMEOUT_MS,
   });
 
@@ -745,8 +787,8 @@ async function runSandboxExecCommand(input: {
 }
 
 export async function runSandboxPtyCommand(input: {
-  fixture: SystemTestFixture;
-  authenticatedSession: AuthenticatedSession;
+  fixture: CodexSandboxFixture;
+  authenticatedSession: CodexSandboxAuthenticatedSession;
   sandboxInstanceId: string;
   command: string;
   args?: string[];
@@ -759,7 +801,7 @@ export async function runSandboxPtyCommand(input: {
     sandboxInstanceId: input.sandboxInstanceId,
   });
   const transport = new SandboxSessionTransport({
-    runtime: createNodeSandboxSessionRuntime(),
+    runtime: createFixtureSessionRuntime(input.fixture),
     connectTimeoutMs: SANDBOX_SESSION_CONNECT_TIMEOUT_MS,
   });
 
@@ -768,6 +810,7 @@ export async function runSandboxPtyCommand(input: {
   });
 
   try {
+    const timeoutMs = input.timeoutMs ?? 30_000;
     const ptyClient = new PtyStreamClient({
       transport,
     });
@@ -777,10 +820,14 @@ export async function runSandboxPtyCommand(input: {
       output += Buffer.from(chunk).toString("utf8");
     });
 
-    await ptyClient.connect();
+    await withOperationTimeout({
+      operation: ptyClient.connect(),
+      timeoutMs,
+      description: "connecting sandbox PTY stream",
+    });
     const waitForExit = (): Promise<{ exitCode: number }> =>
       new Promise<{ exitCode: number }>((resolve, reject) => {
-        const timeoutSignal = AbortSignal.timeout(input.timeoutMs ?? 30_000);
+        const timeoutSignal = AbortSignal.timeout(timeoutMs);
         const removeExitListener = ptyClient.onExit((exitInfo) => {
           cleanup();
           resolve({
@@ -798,11 +845,7 @@ export async function runSandboxPtyCommand(input: {
 
         const onTimeout = (): void => {
           cleanup();
-          reject(
-            new Error(
-              `Timed out after ${String(input.timeoutMs ?? 30_000)}ms waiting for PTY command exit.`,
-            ),
-          );
+          reject(new Error(`Timed out after ${String(timeoutMs)}ms waiting for PTY command exit.`));
         };
 
         const cleanup = (): void => {
@@ -817,13 +860,17 @@ export async function runSandboxPtyCommand(input: {
     let exit;
 
     try {
-      await ptyClient.open({
-        ptySessionId: "terminal",
-        cols: 120,
-        rows: 40,
-        cwd: input.cwd ?? "/root",
-        command: input.command,
-        ...(input.args === undefined ? {} : { args: input.args }),
+      await withOperationTimeout({
+        operation: ptyClient.open({
+          ptySessionId: "terminal",
+          cols: 120,
+          rows: 40,
+          cwd: input.cwd ?? "/root",
+          command: input.command,
+          ...(input.args === undefined ? {} : { args: input.args }),
+        }),
+        timeoutMs,
+        description: "opening sandbox PTY session",
       });
 
       exit = await waitForExit();
@@ -844,10 +891,38 @@ export async function runSandboxPtyCommand(input: {
   }
 }
 
+async function withOperationTimeout<T>(input: {
+  operation: Promise<T>;
+  timeoutMs: number;
+  description: string;
+}): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+    const onTimeout = (): void => {
+      reject(new Error(`Timed out after ${String(input.timeoutMs)}ms ${input.description}.`));
+    };
+    const cleanup = (): void => {
+      timeoutSignal.removeEventListener("abort", onTimeout);
+    };
+
+    timeoutSignal.addEventListener("abort", onTimeout, { once: true });
+    input.operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 async function requestJsonOrThrow<TSchema extends z.ZodType>(input: {
-  request: (path: string, init?: RequestInit) => Promise<Response>;
+  request: (path: string, init?: CodexSandboxRequestInit) => Promise<CodexSandboxHttpResponse>;
   path: string;
-  init: RequestInit;
+  init: CodexSandboxRequestInit;
   expectedStatus: number;
   description: string;
   schema: TSchema;
@@ -873,6 +948,10 @@ async function requestJsonOrThrow<TSchema extends z.ZodType>(input: {
   return input.schema.parse(parsed);
 }
 
+function createFixtureSessionRuntime(fixture: CodexSandboxFixture): SandboxSessionRuntime {
+  return fixture.createSessionRuntime?.() ?? createNodeSandboxSessionRuntime();
+}
+
 function resolveGatewayWebSocketUrl(input: { mintedUrl: string; gatewayBaseUrl: string }): string {
   const mintedUrl = new URL(input.mintedUrl);
   const gatewayBaseUrl = new URL(input.gatewayBaseUrl);
@@ -887,6 +966,9 @@ function resolveGatewayWebSocketUrl(input: { mintedUrl: string; gatewayBaseUrl: 
 
   mintedUrl.hostname = gatewayBaseUrl.hostname;
   mintedUrl.port = gatewayBaseUrl.port;
+  for (const [key, value] of gatewayBaseUrl.searchParams.entries()) {
+    mintedUrl.searchParams.set(key, value);
+  }
 
   return mintedUrl.toString();
 }

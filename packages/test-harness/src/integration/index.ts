@@ -10,6 +10,7 @@ import type { DangerouslyIsolatedTestRegistry } from "../environment/registry.js
 import { startTestEnvironment } from "../environment/runtime.js";
 import { TestEnvironmentIdHeader } from "../environment/test-isolation.js";
 import type {
+  TestEnvironment,
   TestInfraRequirement,
   TestServiceLaunchMode,
   TestServiceDefinition,
@@ -17,6 +18,7 @@ import type {
   TestServiceSelection,
 } from "../environment/types.js";
 import type { IntegrationTestEnvironment } from "./environment.js";
+import type { IntegrationServiceOptions } from "./services/options.js";
 import { ServiceIds, type ServiceId } from "./services/service-ids.js";
 import {
   formatIntegrationDuration,
@@ -29,6 +31,11 @@ export type { IntegrationAuthenticatedSession, IntegrationAuth } from "./auth.js
 export type { IntegrationTestEnvironment } from "./environment.js";
 
 type MistleTestExtraInfraId = "mailpit" | "otlp" | "seaweedfs";
+
+type ServiceAttachableInfraId =
+  | MistleTestExtraInfraId
+  | "sandbox-base-image"
+  | "sandbox-docker-network";
 
 type IntegrationServiceSelection =
   | ServiceId
@@ -44,6 +51,18 @@ type CreateIntegrationTestInput = {
     google?: "simulated";
   };
   __dangerouslyIsolatedServices?: DangerouslyIsolatedTestRegistry;
+  __internalInfra?: readonly TestInfraRequirement[];
+  __afterStart?: (input: {
+    environment: TestEnvironment<ServiceId>;
+    integrationEnvironment: IntegrationTestEnvironment;
+  }) => Promise<void | (() => Promise<void>)>;
+  __serviceOptions?:
+    | {
+        sandbox?: IntegrationServiceOptions["sandbox"];
+      }
+    | (() => Promise<{
+        sandbox?: IntegrationServiceOptions["sandbox"];
+      }>);
 };
 
 type IntegrationTestFixture = {
@@ -90,6 +109,16 @@ export function createIntegrationTest(input: CreateIntegrationTestInput) {
         const integrationEnvironment = createIntegrationEnvironment({
           environment,
         });
+        const extraCleanupTasks: Array<() => Promise<void>> = [];
+        if (input.__afterStart !== undefined) {
+          const cleanup = await input.__afterStart({
+            environment,
+            integrationEnvironment,
+          });
+          if (cleanup !== undefined) {
+            extraCleanupTasks.unshift(cleanup);
+          }
+        }
         const setupDurationMs = Date.now() - setupStartedAt;
 
         writeIntegrationTimingLine(
@@ -104,6 +133,9 @@ export function createIntegrationTest(input: CreateIntegrationTestInput) {
           );
         } finally {
           const teardownStartedAt = Date.now();
+          for (const cleanup of extraCleanupTasks) {
+            await cleanup();
+          }
           await integrationEnvironment.stop();
           await environment.stop();
           writeIntegrationTimingLine(
@@ -153,7 +185,13 @@ async function registryFor(input: CreateIntegrationTestInput): Promise<TestServi
       : createTestExtraInfra({
           ids: input.extraInfra,
         });
+  const internalInfra = input.__internalInfra ?? [];
+  const attachableInfra = [...extraInfra, ...internalInfra];
   const services: Record<string, TestServiceDefinition> = {};
+  const inputServiceOptions =
+    typeof input.__serviceOptions === "function"
+      ? await input.__serviceOptions()
+      : input.__serviceOptions;
 
   for (const entry of serviceEntries) {
     const catalogService = serviceCatalog[entry.serviceId];
@@ -165,7 +203,7 @@ async function registryFor(input: CreateIntegrationTestInput): Promise<TestServi
         ...catalogService.infra,
         ...extraInfraForService({
           serviceId: entry.serviceId,
-          extraInfra,
+          extraInfra: attachableInfra,
         }),
       ],
       {
@@ -175,6 +213,11 @@ async function registryFor(input: CreateIntegrationTestInput): Promise<TestServi
             : {
                 googleAuth: input.auth.google,
               },
+        ...(inputServiceOptions?.sandbox === undefined
+          ? {}
+          : {
+              sandbox: inputServiceOptions?.sandbox,
+            }),
       },
     );
   }
@@ -197,16 +240,19 @@ function extraInfraForService(input: {
   return input.extraInfra.filter((infra) => supportedInfraIds.some((id) => id === infra.id));
 }
 
-function supportedExtraInfraIdsForService(serviceId: ServiceId): readonly MistleTestExtraInfraId[] {
+function supportedExtraInfraIdsForService(
+  serviceId: ServiceId,
+): readonly ServiceAttachableInfraId[] {
   switch (serviceId) {
     case ServiceIds.CONTROL_PLANE_API:
-      return ["seaweedfs"];
+      return ["sandbox-base-image", "seaweedfs"];
     case ServiceIds.CONTROL_PLANE_WORKER:
-      return ["mailpit"];
+      return ["mailpit", "sandbox-base-image"];
     case ServiceIds.DATA_PLANE_GATEWAY:
-      return ["otlp"];
-    case ServiceIds.DATA_PLANE_API:
+      return ["otlp", "sandbox-base-image"];
     case ServiceIds.DATA_PLANE_WORKER:
+      return ["sandbox-base-image", "sandbox-docker-network"];
+    case ServiceIds.DATA_PLANE_API:
     case ServiceIds.TOKENIZER_PROXY:
       return [];
   }
@@ -218,12 +264,6 @@ type IntegrationServiceEntry = {
     infra: TestServiceDefinition["infra"],
     options: IntegrationServiceOptions,
   ) => TestServiceDefinition;
-};
-
-type IntegrationServiceOptions = {
-  controlPlaneApi: {
-    googleAuth?: "simulated";
-  };
 };
 
 async function loadSelectedServices(

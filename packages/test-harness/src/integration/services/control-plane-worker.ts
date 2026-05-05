@@ -12,6 +12,7 @@ import { withHostedOpenWorkflowRuntime } from "../../../../../apps/control-plane
 import { ControlPlaneWorkerWorkflows } from "../../../../../apps/control-plane-worker/openworkflow/workflows.js";
 import { runCleanupTasks } from "../../cleanup/index.js";
 import type {
+  ResolvedTestInfra,
   TestInfraRequirement,
   TestService,
   TestServiceDefinition,
@@ -22,6 +23,7 @@ import {
   createControlPlaneWorkflowNamespaceId,
 } from "../../environment/test-isolation.js";
 import { startHostedOpenWorkflowWorker } from "./openworkflow-worker-host.js";
+import type { IntegrationServiceOptions, IntegrationSandboxOptions } from "./options.js";
 import { peers } from "./peers.js";
 import { leasePgPool, leasePostgresJsPool } from "./postgres-pools.js";
 import { ServiceIds } from "./service-ids.js";
@@ -39,6 +41,7 @@ const AppDir = fileURLToPath(new URL("../../../../../apps/control-plane-worker",
 const InfraIds = {
   POSTGRES: "postgres.control-plane",
   MAILPIT: "mailpit",
+  SANDBOX_BASE_IMAGE: "sandbox-base-image",
 };
 
 const PostgresValues = {
@@ -51,7 +54,14 @@ const MailpitValues = {
   SMTP_PORT: "smtp.port",
 };
 
-export function service(infra: readonly TestInfraRequirement[]): TestServiceDefinition {
+const SandboxBaseImageValues = {
+  IMAGE_REF: "image.ref",
+};
+
+export function service(
+  infra: readonly TestInfraRequirement[],
+  options: IntegrationServiceOptions,
+): TestServiceDefinition {
   return {
     id: ServiceIds.CONTROL_PLANE_WORKER,
     infra,
@@ -61,18 +71,21 @@ export function service(infra: readonly TestInfraRequirement[]): TestServiceDefi
     healthCheck: async (runtime) => processHealth(runtime, ServiceIds.CONTROL_PLANE_WORKER),
     start: start({
       postgresInfra: infraRequirement(infra, InfraIds.POSTGRES, ServiceIds.CONTROL_PLANE_WORKER),
+      sandbox: options.sandbox,
     }),
   };
 }
 
 function start(input: {
   postgresInfra: TestInfraRequirement;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): (startInput: TestServiceStartInput) => Promise<TestService> {
   return async (startInput) => {
     if (startInput.mode === "runtime") {
       return startRuntimeControlPlaneWorker({
         startInput,
         postgresInfra: input.postgresInfra,
+        sandbox: input.sandbox,
       });
     }
 
@@ -80,12 +93,15 @@ function start(input: {
 
     const postgres = resolvedInfra(startInput.infra, input.postgresInfra.id);
     const mailpit = startInput.infra.get(InfraIds.MAILPIT);
+    const sandboxBaseImage = startInput.infra.get(InfraIds.SANDBOX_BASE_IMAGE);
     const peer = peers(startInput.services, startInput.plannedEndpoints);
     const env = createControlPlaneWorkerEnv({
       environmentId: startInput.environmentId,
       postgres,
       mailpit,
+      sandboxBaseImage,
       peer,
+      sandbox: input.sandbox,
     });
 
     return processService({
@@ -110,15 +126,19 @@ function start(input: {
 async function startRuntimeControlPlaneWorker(input: {
   startInput: TestServiceStartInput;
   postgresInfra: TestInfraRequirement;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): Promise<TestService> {
   const postgres = resolvedInfra(input.startInput.infra, input.postgresInfra.id);
   const mailpit = input.startInput.infra.get(InfraIds.MAILPIT);
+  const sandboxBaseImage = input.startInput.infra.get(InfraIds.SANDBOX_BASE_IMAGE);
   const peer = peers(input.startInput.services, input.startInput.plannedEndpoints);
   const env = createControlPlaneWorkerEnv({
     environmentId: input.startInput.environmentId,
     postgres,
     mailpit,
+    sandboxBaseImage,
     peer,
+    sandbox: input.sandbox,
   });
   const config = loadConfig({
     app: AppIds.CONTROL_PLANE_WORKER,
@@ -185,7 +205,9 @@ function createControlPlaneWorkerEnv(input: {
   environmentId: string;
   postgres: ReturnType<typeof resolvedInfra>;
   mailpit: ReturnType<typeof resolvedInfra> | undefined;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
   peer: ReturnType<typeof peers>;
+  sandbox: IntegrationSandboxOptions | undefined;
 }): Record<string, string> {
   return {
     MISTLE_ENV: "development",
@@ -218,8 +240,12 @@ function createControlPlaneWorkerEnv(input: {
     MISTLE_SERVICES_DATA_PLANE_API_INTERNAL_URL: input.peer.url(ServiceIds.DATA_PLANE_API),
     MISTLE_SERVICES_CONTROL_PLANE_API_INTERNAL_URL: input.peer.url(ServiceIds.CONTROL_PLANE_API),
     MISTLE_INTERNAL_AUTH_SHARED_TOKEN: "integration-new-internal-service-token",
-    MISTLE_SANDBOX_PROVIDER: "docker",
-    MISTLE_SANDBOX_DEFAULT_BASE_IMAGE: getLocalDevDockerRegistrySandboxBaseImageRef(),
+    MISTLE_SANDBOX_PROVIDER: input.sandbox?.provider ?? "docker",
+    MISTLE_SANDBOX_DEFAULT_BASE_IMAGE: readSandboxBaseImageRef({
+      sandbox: input.sandbox,
+      sandboxBaseImage: input.sandboxBaseImage,
+    }),
+    ...(input.sandbox?.provider === "e2b" ? createE2BEnv(input.sandbox) : {}),
     MISTLE_SERVICES_DATA_PLANE_GATEWAY_SANDBOX_WS_PUBLIC_URL: input.peer.ws(
       ServiceIds.DATA_PLANE_GATEWAY,
       "/tunnel/sandbox",
@@ -246,4 +272,36 @@ function createControlPlaneWorkerEnv(input: {
     MISTLE_TELEMETRY_ENABLED: "false",
     MISTLE_TELEMETRY_DEBUG: "false",
   };
+}
+
+function createE2BEnv(input: IntegrationSandboxOptions): Record<string, string> {
+  if (input.e2b === undefined) {
+    throw new Error("control-plane-worker requires E2B sandbox options when provider is e2b.");
+  }
+
+  return {
+    MISTLE_SANDBOX_E2B_API_KEY: input.e2b.apiKey,
+    ...(input.e2b.domain === undefined ? {} : { MISTLE_SANDBOX_E2B_DOMAIN: input.e2b.domain }),
+    ...(input.e2b.cpuCount === undefined
+      ? {}
+      : { MISTLE_SANDBOX_E2B_CPU_COUNT: input.e2b.cpuCount }),
+    ...(input.e2b.memoryMb === undefined
+      ? {}
+      : { MISTLE_SANDBOX_E2B_MEMORY_MB: input.e2b.memoryMb }),
+  };
+}
+
+function readSandboxBaseImageRef(input: {
+  sandbox: IntegrationSandboxOptions | undefined;
+  sandboxBaseImage: ResolvedTestInfra | undefined;
+}): string {
+  if (input.sandbox?.defaultBaseImageRef !== undefined) {
+    return input.sandbox.defaultBaseImageRef;
+  }
+
+  if (input.sandboxBaseImage !== undefined) {
+    return infraValue(input.sandboxBaseImage, SandboxBaseImageValues.IMAGE_REF);
+  }
+
+  return getLocalDevDockerRegistrySandboxBaseImageRef();
 }
