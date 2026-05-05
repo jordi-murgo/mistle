@@ -222,7 +222,7 @@ describe("WebhookAutomationForm", () => {
     const { container } = renderForm("create");
     const currentForm = within(container);
 
-    expect(currentForm.getByRole("textbox", { name: "Message Template" })).toBeDefined();
+    expect(currentForm.getByRole("textbox", { name: "User message" })).toBeDefined();
     expect(
       currentForm.getByRole("textbox", { name: "Agent Instructions for Automation" }),
     ).toBeDefined();
@@ -234,28 +234,28 @@ describe("WebhookAutomationForm", () => {
     }
 
     expect(messageTemplateEditor.getAttribute("data-editor-state")).toBe("empty");
-    expect(currentForm.queryByRole("heading", { name: "Message Template" })).toBeNull();
+    expect(currentForm.queryByRole("heading", { name: "User message" })).toBeNull();
   });
 
-  it("renders triggers before the automation instructions editor and message template editor", () => {
+  it("renders events before the automation instructions editor and message template editor", () => {
     const { container } = renderFormWithOptions({
       mode: "create",
     });
 
     const currentForm = within(container);
-    const [triggersHeading] = currentForm.getAllByRole("heading", { name: "Triggers" });
+    const [eventsHeading] = currentForm.getAllByRole("heading", { name: "Events" });
     const automationInstructionsField = currentForm.getByRole("textbox", {
       name: "Agent Instructions for Automation",
     });
-    const inputTemplateField = currentForm.getByRole("textbox", { name: "Message Template" });
+    const inputTemplateField = currentForm.getByRole("textbox", { name: "User message" });
 
-    if (triggersHeading === undefined) {
-      throw new Error("Expected triggers heading to be rendered.");
+    if (eventsHeading === undefined) {
+      throw new Error("Expected events heading to be rendered.");
     }
 
     expect(
       Boolean(
-        triggersHeading.compareDocumentPosition(automationInstructionsField) &
+        eventsHeading.compareDocumentPosition(automationInstructionsField) &
         Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
@@ -265,12 +265,12 @@ describe("WebhookAutomationForm", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-    expect(container.textContent?.indexOf("Triggers")).toBeLessThan(
+    expect(container.textContent?.indexOf("Events")).toBeLessThan(
       container.textContent?.indexOf("Agent Instructions for Automation") ??
         Number.POSITIVE_INFINITY,
     );
     expect(container.textContent?.indexOf("Agent Instructions for Automation")).toBeLessThan(
-      container.textContent?.indexOf("Message Template") ?? Number.POSITIVE_INFINITY,
+      container.textContent?.indexOf("User message") ?? Number.POSITIVE_INFINITY,
     );
   });
 
@@ -297,7 +297,7 @@ describe("WebhookAutomationForm", () => {
     renderFormWithOptions({
       mode: "create",
       triggerPickerDisabledState: {
-        reason: "The selected profile has no bindings with automation triggers.",
+        reason: "The selected profile has no bindings with automation events.",
         variant: "default",
       },
       webhookEventOptions: [],
@@ -308,7 +308,7 @@ describe("WebhookAutomationForm", () => {
     });
 
     expect(
-      screen.getAllByText("The selected profile has no bindings with automation triggers.").length,
+      screen.getAllByText("The selected profile has no bindings with automation events.").length,
     ).toBeGreaterThan(0);
   });
 
@@ -321,7 +321,7 @@ describe("WebhookAutomationForm", () => {
             name: "Automation name is required.",
             sandboxProfileId: "Select a sandbox profile.",
             conversationKeyTemplate: "Select a supported conversation grouping.",
-            inputTemplate: "Input template is required.",
+            inputTemplate: "User message is required.",
           }}
           formError={null}
           validationSummaryError={null}
@@ -341,7 +341,7 @@ describe("WebhookAutomationForm", () => {
 
     const currentForm = within(container);
     const automationNameInput = currentForm.getByDisplayValue("Repo triage");
-    const inputTemplateEditor = currentForm.getByRole("textbox", { name: "Message Template" });
+    const inputTemplateEditor = currentForm.getByRole("textbox", { name: "User message" });
 
     expect(automationNameInput.getAttribute("aria-invalid")).toBe("true");
     expect(inputTemplateEditor.getAttribute("aria-invalid")).toBe("true");
@@ -359,8 +359,8 @@ describe("WebhookAutomationForm", () => {
           fieldErrors={{
             name: "Automation name is required.",
             sandboxProfileId: "Select a sandbox profile.",
-            triggerIds: "Please add a trigger",
-            inputTemplate: "Input template is required.",
+            triggerIds: "Please add an event",
+            inputTemplate: "User message is required.",
           }}
           formError={null}
           validationSummaryError="Please address the fields highlighted in red."
@@ -390,8 +390,8 @@ describe("WebhookAutomationForm", () => {
     expect(screen.getByText("Please address the fields highlighted in red.")).toBeDefined();
     expect(screen.queryByText("Automation name is required.")).toBeNull();
     expect(screen.queryByText("Select a sandbox profile.")).toBeNull();
-    expect(screen.getAllByText("Input template is required.").length).toBeGreaterThan(0);
-    expect(screen.getByText("Please add a trigger")).toBeDefined();
+    expect(screen.getAllByText("User message is required.").length).toBeGreaterThan(0);
+    expect(screen.getByText("Please add an event")).toBeDefined();
   });
 
   it("shows save failures at the top of the form", () => {

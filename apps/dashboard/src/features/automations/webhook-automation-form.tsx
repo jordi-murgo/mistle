@@ -17,6 +17,7 @@ import {
   cn,
 } from "@mistle/ui";
 import { TrashIcon } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 
 import { SingleSelectStringComboboxField } from "../forms/single-select-string-combobox-field.js";
 import { FormPageFooter, FormPageSection, FormPageStack } from "../shared/form-page.js";
@@ -62,6 +63,7 @@ type WebhookAutomationFormProps = {
   formError: string | null;
   isSaving: boolean;
   isDeleting: boolean;
+  automationTypeField?: ReactNode;
   onValueChange: (
     key: WebhookAutomationFormValueKey,
     value: string | boolean | string[] | WebhookAutomationTriggerParameterValueMap,
@@ -251,6 +253,9 @@ export function WebhookAutomationForm(input: WebhookAutomationFormProps): React.
             </Field>
           </div>
         ) : null}
+        {input.automationTypeField === undefined ? null : (
+          <div className="p-4">{input.automationTypeField}</div>
+        )}
         <div className="p-4">
           <SelectField
             error={input.fieldErrors.sandboxProfileId}
@@ -325,7 +330,7 @@ export function WebhookAutomationForm(input: WebhookAutomationFormProps): React.
         header={
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-1">
-              <h2 className="text-base font-semibold">Triggers</h2>
+              <h2 className="text-base font-semibold">Events</h2>
               {formState.triggerHeaderMessage === undefined ? null : (
                 <p className="text-destructive text-sm">{formState.triggerHeaderMessage}</p>
               )}
@@ -449,13 +454,10 @@ export function WebhookAutomationForm(input: WebhookAutomationFormProps): React.
           <Field>
             <FieldHeader>
               <div className="space-y-1">
-                <FieldLabel id={inputTemplateLabelId}>Message Template</FieldLabel>
+                <FieldLabel id={inputTemplateLabelId}>User message</FieldLabel>
                 {formState.hasSelectedTrigger ? (
                   <FieldDescription>
-                    <span className="block">
-                      Template for the message sent to the agent each time this automation is
-                      triggered.
-                    </span>
+                    <span className="block">Sent to the agent each time the automation runs.</span>
                     <span className="block">
                       Use <InlineCode variant="muted">{"{{ ... }}"}</InlineCode> to insert event
                       fields.
@@ -463,9 +465,7 @@ export function WebhookAutomationForm(input: WebhookAutomationFormProps): React.
                   </FieldDescription>
                 ) : (
                   <FieldDescription>
-                    <span className="block">
-                      Template for the message sent when this automation is triggered.
-                    </span>
+                    <span className="block">Sent to the agent each time the automation runs.</span>
                     <span className="block">Select a trigger to insert event fields.</span>
                   </FieldDescription>
                 )}

@@ -7,13 +7,13 @@ import {
   getControlPlaneDatabaseSchema,
 } from "@mistle/db/control-plane";
 import { eq, sql } from "drizzle-orm";
+import type { OpenWorkflow } from "openworkflow";
 
 import { claimScheduledActionForDispatch } from "./claim-scheduled-action.js";
+import { dispatchAutomationRunScheduledAction } from "./dispatch-automation-run.js";
 import { dispatchSnapshotRefreshScheduledAction } from "./dispatch-snapshot-refresh.js";
-import {
-  recordMissingScheduleTargetHandler,
-  recordScheduleTargetHandoffFailure,
-} from "./telemetry.js";
+import { ScheduleDispatchPermanentError } from "./schedule-dispatch-permanent-error.js";
+import { recordScheduleTargetHandoffFailure } from "./telemetry.js";
 
 export type ScheduleDispatchTargetHandlerInput = Readonly<{
   scheduledActionId: string;
@@ -31,12 +31,17 @@ export type DispatchScheduledActionResult = Readonly<{
   status: "dispatched" | "failed" | "skipped";
 }>;
 
+type WorkflowRunClient = Pick<OpenWorkflow, "runWorkflow">;
+
+type DispatchScheduledActionContext = Readonly<{
+  db: ControlPlaneDatabase;
+  dataPlaneClient: DataPlaneSandboxInstancesClient;
+  defaultBaseImage: string;
+  openWorkflow?: WorkflowRunClient;
+}>;
+
 export async function dispatchScheduledAction(
-  ctx: {
-    db: ControlPlaneDatabase;
-    dataPlaneClient: DataPlaneSandboxInstancesClient;
-    defaultBaseImage: string;
-  },
+  ctx: DispatchScheduledActionContext,
   input: {
     scheduledActionId: string;
     dispatchClaimKey: string;
@@ -82,18 +87,22 @@ export async function dispatchScheduledAction(
     scheduleId: claim.scheduleId,
     targetPayload: claim.targetPayload,
   };
-  if (!hasScheduleTargetHandler(targetType)) {
-    recordMissingScheduleTargetHandler({
-      scheduledActionId: claim.scheduledActionId,
-      targetType,
-    });
-    throw new Error(`No schedule dispatch target handler is registered for ${targetType}.`);
-  }
-
   let targetResult: ScheduleDispatchTargetHandlerResult;
   try {
     targetResult = await dispatchScheduleTarget(ctx, targetType, targetHandlerInput);
   } catch (error) {
+    if (error instanceof ScheduleDispatchPermanentError) {
+      await markScheduledActionFailed(ctx, {
+        scheduledActionId: claim.scheduledActionId,
+        failureCode: error.failureCode,
+        failureMessage: error.message,
+      });
+      return {
+        scheduledActionId: claim.scheduledActionId,
+        status: "failed",
+      };
+    }
+
     recordScheduleTargetHandoffFailure({
       error,
       scheduledActionId: claim.scheduledActionId,
@@ -114,23 +123,29 @@ export async function dispatchScheduledAction(
 }
 
 async function dispatchScheduleTarget(
-  ctx: {
-    db: ControlPlaneDatabase;
-    dataPlaneClient: DataPlaneSandboxInstancesClient;
-    defaultBaseImage: string;
-  },
+  ctx: DispatchScheduledActionContext,
   targetType: ScheduleTargetType,
   input: ScheduleDispatchTargetHandlerInput,
 ): Promise<ScheduleDispatchTargetHandlerResult> {
   if (targetType === ScheduleTargetTypes.SNAPSHOT_REFRESH) {
     return dispatchSnapshotRefreshScheduledAction(ctx, input);
   }
+  if (targetType === ScheduleTargetTypes.AUTOMATION_RUN) {
+    if (ctx.openWorkflow === undefined) {
+      throw new Error("Schedule automation run dispatch requires OpenWorkflow.");
+    }
 
-  throw new Error(`No schedule dispatch target handler is registered for ${targetType}.`);
-}
+    return dispatchAutomationRunScheduledAction(
+      {
+        db: ctx.db,
+        openWorkflow: ctx.openWorkflow,
+      },
+      input,
+    );
+  }
 
-function hasScheduleTargetHandler(targetType: ScheduleTargetType): boolean {
-  return targetType === ScheduleTargetTypes.SNAPSHOT_REFRESH;
+  targetType satisfies never;
+  throw new Error("No schedule dispatch target handler is registered.");
 }
 
 function parseScheduleTargetType(targetType: string): ScheduleTargetType | null {

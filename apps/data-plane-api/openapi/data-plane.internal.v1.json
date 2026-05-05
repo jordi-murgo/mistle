@@ -1414,7 +1414,7 @@
                   },
                   "source": {
                     "type": "string",
-                    "enum": ["dashboard", "webhook", "system"]
+                    "enum": ["dashboard", "webhook", "schedule", "system"]
                   },
                   "image": {
                     "type": "object",
@@ -1636,7 +1636,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["dashboard", "webhook", "system"]
+                            "enum": ["dashboard", "webhook", "schedule", "system"]
                           },
                           "createdAt": {
                             "type": "string",

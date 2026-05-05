@@ -137,7 +137,7 @@ export function validateWebhookAutomationFormValues(
   }
 
   if (values.triggerIds.length === 0) {
-    errors.triggerIds = "Please add a trigger";
+    errors.triggerIds = "Please add an event";
   } else {
     const selectedEventOptions = resolveSelectedWebhookAutomationEventOptions({
       eventOptions,
@@ -171,7 +171,7 @@ export function validateWebhookAutomationFormValues(
   }
 
   if (trimmedInputTemplate.length === 0) {
-    errors.inputTemplate = "Input template is required.";
+    errors.inputTemplate = "User message is required.";
   }
 
   if (values.conversationKeyTemplate.trim().length === 0) {

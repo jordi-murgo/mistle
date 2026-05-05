@@ -14,6 +14,7 @@ import {
   AuthSwitchOrganizationPage,
 } from "./features/auth/auth-switch-organization-page.js";
 import { ROUTE_HANDLES } from "./features/navigation/route-handles.js";
+import { AutomationCreatePage } from "./features/pages/automation-create-page.js";
 import { AutomationsPage } from "./features/pages/automations-page.js";
 import { HomePage } from "./features/pages/home-page.js";
 import { IntegrationConnectionCreatePage } from "./features/pages/integration-connection-create-page.js";
@@ -33,6 +34,7 @@ import {
   SandboxProfileEditorShell,
 } from "./features/pages/sandbox-profile-editor-page.js";
 import { SandboxProfilesPage } from "./features/pages/sandbox-profiles-page.js";
+import { ScheduledAutomationEditorPage } from "./features/pages/scheduled-automation-editor-page.js";
 import { SessionWorkbenchPage } from "./features/pages/session-workbench-page.js";
 import { SessionsPage } from "./features/pages/sessions-page.js";
 import { WebhookAutomationEditorPage } from "./features/pages/webhook-automation-editor-page.js";
@@ -108,9 +110,18 @@ export const APP_ROUTES = createRoutesFromElements(
         <Route element={<RouteOutlet />} handle={ROUTE_HANDLES.automations} path="automations">
           <Route element={<AutomationsPage />} index />
           <Route
-            element={<WebhookAutomationEditorPage mode="create" />}
+            element={<AutomationCreatePage />}
             handle={ROUTE_HANDLES.automationsNew}
             path="new"
+          />
+          <Route
+            element={<Navigate replace to="/automations/new?type=scheduled" />}
+            path="schedules/new"
+          />
+          <Route
+            element={<ScheduledAutomationEditorPage mode="edit" />}
+            handle={ROUTE_HANDLES.scheduledAutomationsDetail}
+            path="schedules/:automationId"
           />
           <Route
             element={<WebhookAutomationEditorPage mode="edit" />}

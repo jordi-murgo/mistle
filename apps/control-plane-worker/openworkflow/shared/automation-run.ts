@@ -7,6 +7,7 @@ import {
   AutomationConversationCreatedByKinds,
   AutomationConversationOwnerKinds,
   IntegrationBindingKinds,
+  ScheduleTargetTypes,
   getControlPlaneDatabaseSchema,
 } from "@mistle/db/control-plane";
 import { and, eq, sql } from "drizzle-orm";
@@ -41,9 +42,13 @@ export const AutomationRunFailureCodes = {
   AUTOMATION_NOT_FOUND: "automation_not_found",
   AUTOMATION_TARGET_REFERENCE_MISSING: "automation_target_reference_missing",
   AUTOMATION_TARGET_NOT_FOUND: "automation_target_not_found",
+  AUTOMATION_RUN_SOURCE_REFERENCE_MISSING: "automation_run_source_reference_missing",
   WEBHOOK_EVENT_REFERENCE_MISSING: "webhook_event_reference_missing",
   WEBHOOK_EVENT_NOT_FOUND: "webhook_event_not_found",
   WEBHOOK_AUTOMATION_NOT_FOUND: "webhook_automation_not_found",
+  SCHEDULE_NOT_FOUND: "schedule_not_found",
+  SCHEDULED_ACTION_NOT_FOUND: "scheduled_action_not_found",
+  SCHEDULE_AUTOMATION_NOT_FOUND: "schedule_automation_not_found",
   AGENT_BINDING_NOT_FOUND: "agent_binding_not_found",
   AGENT_BINDING_AMBIGUOUS: "agent_binding_ambiguous",
   AGENT_BINDING_CONNECTION_NOT_FOUND: "agent_binding_connection_not_found",
@@ -95,19 +100,7 @@ export function resolveAutomationRunFailure(input: unknown): { code: string; mes
 }
 
 function compileTemplates(input: {
-  webhookEvent: {
-    id: string;
-    eventType: string;
-    providerEventType: string;
-    externalEventId: string;
-    externalDeliveryId: string | null;
-    payload: Record<string, unknown>;
-  };
-  automationRun: {
-    id: string;
-    automationId: string;
-    automationTargetId: string;
-  };
+  context: Record<string, unknown>;
   templates: {
     inputTemplate: string;
     conversationKeyTemplate: string;
@@ -118,25 +111,9 @@ function compileTemplates(input: {
   renderedConversationKey: string;
   renderedIdempotencyKey: string | null;
 } {
-  const templateContext: Record<string, unknown> = {
-    webhookEvent: {
-      id: input.webhookEvent.id,
-      eventType: input.webhookEvent.eventType,
-      providerEventType: input.webhookEvent.providerEventType,
-      externalEventId: input.webhookEvent.externalEventId,
-      externalDeliveryId: input.webhookEvent.externalDeliveryId,
-    },
-    automationRun: {
-      id: input.automationRun.id,
-      automationId: input.automationRun.automationId,
-      automationTargetId: input.automationRun.automationTargetId,
-    },
-    payload: input.webhookEvent.payload,
-  };
-
   const renderedInput = renderTemplateString({
     template: input.templates.inputTemplate,
-    context: templateContext,
+    context: input.context,
   });
   if (renderedInput.trim().length === 0) {
     throw new AutomationRunExecutionError({
@@ -147,7 +124,7 @@ function compileTemplates(input: {
 
   const renderedConversationKey = renderTemplateString({
     template: input.templates.conversationKeyTemplate,
-    context: templateContext,
+    context: input.context,
   });
   if (renderedConversationKey.trim().length === 0) {
     throw new AutomationRunExecutionError({
@@ -160,7 +137,7 @@ function compileTemplates(input: {
   if (input.templates.idempotencyKeyTemplate !== null) {
     renderedIdempotencyKey = renderTemplateString({
       template: input.templates.idempotencyKeyTemplate,
-      context: templateContext,
+      context: input.context,
     });
     if (renderedIdempotencyKey.trim().length === 0) {
       throw new AutomationRunExecutionError({
@@ -250,6 +227,10 @@ function resolvePersistedPreparedAutomationRunSnapshot(input: {
     sandboxProfileId: input.automationTarget.sandboxProfileId,
     sandboxProfileVersion: input.automationTarget.sandboxProfileVersion,
     primaryRepositoryId: input.automationTarget.primaryRepositoryId,
+    sourceKind: "webhook",
+    sourceOrderKey: input.webhookEvent.sourceOrderKey ?? "",
+    sourceWebhookEventId: input.webhookEvent.id,
+    sourceScheduledActionId: undefined,
     integrationConnectionId: input.webhookEvent.integrationConnectionId,
     targetKey: input.webhookEvent.targetKey,
     webhookEventId: input.webhookEvent.id,
@@ -257,8 +238,11 @@ function resolvePersistedPreparedAutomationRunSnapshot(input: {
     webhookProviderEventType: input.webhookEvent.providerEventType,
     webhookExternalEventId: input.webhookEvent.externalEventId,
     webhookExternalDeliveryId: input.webhookEvent.externalDeliveryId,
-    webhookSourceOrderKey: input.webhookEvent.sourceOrderKey ?? "",
     webhookPayload: input.webhookEvent.payload,
+    scheduledActionId: undefined,
+    scheduledAt: undefined,
+    localScheduledDate: undefined,
+    localScheduledTime: undefined,
     ...(input.webhookEvent.resolvedUserId === null
       ? {}
       : { actingUserId: input.webhookEvent.resolvedUserId }),
@@ -392,14 +376,6 @@ export async function prepareAutomationRun(
     });
   }
 
-  const sourceWebhookEventId = automationRun.sourceWebhookEventId;
-  if (sourceWebhookEventId === null) {
-    throw new AutomationRunExecutionError({
-      code: AutomationRunFailureCodes.WEBHOOK_EVENT_REFERENCE_MISSING,
-      message: `Automation run '${input.automationRunId}' does not reference a source webhook event.`,
-    });
-  }
-
   const automationTarget = await ctx.db.query.automationTargets.findFirst({
     where: (table, { eq: whereEq }) => whereEq(table.id, automationTargetId),
   });
@@ -407,6 +383,42 @@ export async function prepareAutomationRun(
     throw new AutomationRunExecutionError({
       code: AutomationRunFailureCodes.AUTOMATION_TARGET_NOT_FOUND,
       message: `Automation target '${automationRun.automationTargetId}' was not found.`,
+    });
+  }
+
+  const sandboxProfileVersion = automationTarget.sandboxProfileVersion;
+  if (typeof sandboxProfileVersion !== "number") {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+      message: `Automation target '${automationTarget.id}' does not define a sandbox profile version.`,
+    });
+  }
+
+  const sourceWebhookEventId = automationRun.sourceWebhookEventId;
+  const sourceScheduledActionId = automationRun.sourceScheduledActionId;
+  if (
+    (sourceWebhookEventId === null && sourceScheduledActionId === null) ||
+    (sourceWebhookEventId !== null && sourceScheduledActionId !== null)
+  ) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_SOURCE_REFERENCE_MISSING,
+      message: `Automation run '${input.automationRunId}' must reference exactly one automation source.`,
+    });
+  }
+
+  if (sourceScheduledActionId !== null) {
+    return prepareScheduledAutomationRun(ctx, {
+      automation,
+      automationRun,
+      automationTarget,
+      sandboxProfileVersion,
+      sourceScheduledActionId,
+    });
+  }
+  if (sourceWebhookEventId === null) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.WEBHOOK_EVENT_REFERENCE_MISSING,
+      message: `Automation run '${input.automationRunId}' does not reference a source webhook event.`,
     });
   }
 
@@ -427,14 +439,6 @@ export async function prepareAutomationRun(
     throw new AutomationRunExecutionError({
       code: AutomationRunFailureCodes.WEBHOOK_EVENT_NOT_FOUND,
       message: `Webhook event '${sourceWebhookEventId}' was not found.`,
-    });
-  }
-
-  const sandboxProfileVersion = automationTarget.sandboxProfileVersion;
-  if (typeof sandboxProfileVersion !== "number") {
-    throw new AutomationRunExecutionError({
-      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
-      message: `Automation target '${automationTarget.id}' does not define a sandbox profile version.`,
     });
   }
 
@@ -472,7 +476,7 @@ export async function prepareAutomationRun(
     },
   });
   if (persistedSnapshot !== null) {
-    if (persistedSnapshot.webhookSourceOrderKey.length === 0) {
+    if (persistedSnapshot.sourceOrderKey.length === 0) {
       throw new AutomationRunExecutionError({
         code: AutomationRunFailureCodes.WEBHOOK_EVENT_SOURCE_ORDER_KEY_MISSING,
         message: `Webhook event '${webhookEvent.id}' is missing source order key.`,
@@ -491,8 +495,8 @@ export async function prepareAutomationRun(
   }
 
   const idempotencyKeyTemplate = webhookAutomation.idempotencyKeyTemplate;
-  const webhookSourceOrderKey = webhookEvent.sourceOrderKey;
-  if (webhookSourceOrderKey === null || webhookSourceOrderKey.trim().length === 0) {
+  const sourceOrderKey = webhookEvent.sourceOrderKey;
+  if (sourceOrderKey === null || sourceOrderKey.trim().length === 0) {
     throw new AutomationRunExecutionError({
       code: AutomationRunFailureCodes.WEBHOOK_EVENT_SOURCE_ORDER_KEY_MISSING,
       message: `Webhook event '${webhookEvent.id}' is missing source order key.`,
@@ -502,18 +506,20 @@ export async function prepareAutomationRun(
   let compiledTemplates: ReturnType<typeof compileTemplates>;
   try {
     compiledTemplates = compileTemplates({
-      webhookEvent: {
-        id: webhookEvent.id,
-        eventType: webhookEvent.eventType,
-        providerEventType: webhookEvent.providerEventType,
-        externalEventId: webhookEvent.externalEventId,
-        externalDeliveryId: webhookEvent.externalDeliveryId,
+      context: {
+        webhookEvent: {
+          id: webhookEvent.id,
+          eventType: webhookEvent.eventType,
+          providerEventType: webhookEvent.providerEventType,
+          externalEventId: webhookEvent.externalEventId,
+          externalDeliveryId: webhookEvent.externalDeliveryId,
+        },
+        automationRun: {
+          id: automationRun.id,
+          automationId: automationRun.automationId,
+          automationTargetId: automationTarget.id,
+        },
         payload: webhookEvent.payload,
-      },
-      automationRun: {
-        id: automationRun.id,
-        automationId: automationRun.automationId,
-        automationTargetId: automationTarget.id,
       },
       templates: {
         inputTemplate: webhookAutomation.inputTemplate,
@@ -581,6 +587,10 @@ export async function prepareAutomationRun(
     sandboxProfileId: automationTarget.sandboxProfileId,
     sandboxProfileVersion,
     primaryRepositoryId: automationTarget.primaryRepositoryId,
+    sourceKind: "webhook",
+    sourceOrderKey,
+    sourceWebhookEventId: webhookEvent.id,
+    sourceScheduledActionId: undefined,
     integrationConnectionId: webhookEvent.integrationConnectionId,
     targetKey: webhookEvent.targetKey,
     webhookEventId: webhookEvent.id,
@@ -588,8 +598,11 @@ export async function prepareAutomationRun(
     webhookProviderEventType: webhookEvent.providerEventType,
     webhookExternalEventId: webhookEvent.externalEventId,
     webhookExternalDeliveryId: webhookEvent.externalDeliveryId,
-    webhookSourceOrderKey,
     webhookPayload: webhookEvent.payload,
+    scheduledActionId: undefined,
+    scheduledAt: undefined,
+    localScheduledDate: undefined,
+    localScheduledTime: undefined,
     ...(webhookEvent.resolvedUserId === null ? {} : { actingUserId: webhookEvent.resolvedUserId }),
     renderedInput: compiledTemplates.renderedInput,
     renderedConversationKey: compiledTemplates.renderedConversationKey,
@@ -602,6 +615,242 @@ export async function prepareAutomationRun(
             developerInstructions: webhookAutomation.instructions,
           },
   };
+}
+
+async function prepareScheduledAutomationRun(
+  ctx: {
+    db: ControlPlaneDatabase;
+  },
+  input: {
+    automation: {
+      organizationId: string;
+    };
+    automationRun: {
+      id: string;
+      createdAt: string;
+      automationId: string;
+      conversationId: string | null;
+      renderedInput: string | null;
+      renderedConversationKey: string | null;
+      renderedIdempotencyKey: string | null;
+      instructions: string | null;
+    };
+    automationTarget: {
+      id: string;
+      sandboxProfileId: string;
+      sandboxProfileVersion: number;
+      primaryRepositoryId: string | null;
+    };
+    sandboxProfileVersion: number;
+    sourceScheduledActionId: string;
+  },
+): Promise<PreparedAutomationRun> {
+  const scheduledAction = await ctx.db.query.scheduledActions.findFirst({
+    where: (table, { eq: whereEq }) => whereEq(table.id, input.sourceScheduledActionId),
+  });
+  if (scheduledAction === undefined) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.SCHEDULED_ACTION_NOT_FOUND,
+      message: `Scheduled action '${input.sourceScheduledActionId}' was not found.`,
+    });
+  }
+  if (scheduledAction.organizationId !== input.automation.organizationId) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+      message: `Scheduled action '${scheduledAction.id}' organization does not match automation run '${input.automationRun.id}'.`,
+    });
+  }
+
+  const schedule = await ctx.db.query.schedules.findFirst({
+    where: (table, { eq: whereEq }) => whereEq(table.id, scheduledAction.scheduleId),
+  });
+  if (schedule === undefined) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.SCHEDULE_NOT_FOUND,
+      message: `Schedule '${scheduledAction.scheduleId}' for scheduled action '${scheduledAction.id}' was not found.`,
+    });
+  }
+  if (schedule.organizationId !== input.automation.organizationId) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+      message: `Schedule '${schedule.id}' organization does not match automation run '${input.automationRun.id}'.`,
+    });
+  }
+  if (schedule.targetType !== ScheduleTargetTypes.AUTOMATION_RUN) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+      message: `Schedule '${schedule.id}' target type '${schedule.targetType}' does not match automation run '${input.automationRun.id}'.`,
+    });
+  }
+
+  const scheduleAutomation = await ctx.db.query.scheduleAutomations.findFirst({
+    where: (table, { eq: whereEq }) => whereEq(table.scheduleId, scheduledAction.scheduleId),
+  });
+  if (scheduleAutomation === undefined) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.SCHEDULE_AUTOMATION_NOT_FOUND,
+      message: `Schedule automation target for schedule '${scheduledAction.scheduleId}' was not found.`,
+    });
+  }
+  if (scheduleAutomation.automationId !== input.automationRun.automationId) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+      message: `Schedule automation '${scheduleAutomation.automationId}' does not match automation run '${input.automationRun.id}'.`,
+    });
+  }
+
+  const scheduledAt = normalizeScheduledAt(scheduledAction.scheduledAt, scheduledAction.id);
+  const sourceOrderKey = `${scheduledAt}#${scheduledAction.id}`;
+  const preparedRunBase = {
+    automationRunId: input.automationRun.id,
+    automationRunCreatedAt: input.automationRun.createdAt,
+    automationId: input.automationRun.automationId,
+    automationTargetId: input.automationTarget.id,
+    organizationId: input.automation.organizationId,
+    sandboxProfileId: input.automationTarget.sandboxProfileId,
+    sandboxProfileVersion: input.sandboxProfileVersion,
+    primaryRepositoryId: input.automationTarget.primaryRepositoryId,
+    sourceKind: "schedule",
+    sourceOrderKey,
+    sourceWebhookEventId: undefined,
+    sourceScheduledActionId: scheduledAction.id,
+    integrationConnectionId: undefined,
+    targetKey: undefined,
+    webhookEventId: undefined,
+    webhookEventType: undefined,
+    webhookProviderEventType: undefined,
+    webhookExternalEventId: undefined,
+    webhookExternalDeliveryId: undefined,
+    webhookPayload: undefined,
+    scheduledActionId: scheduledAction.id,
+    scheduledAt,
+    localScheduledDate: scheduledAction.localScheduledDate,
+    localScheduledTime: scheduledAction.localScheduledTime,
+    instructions: null,
+    collaborationModeSettings: null,
+  } satisfies Omit<
+    PreparedAutomationRun,
+    "conversationId" | "renderedInput" | "renderedConversationKey" | "renderedIdempotencyKey"
+  >;
+  const hasPersistedSnapshot =
+    input.automationRun.renderedInput !== null ||
+    input.automationRun.renderedConversationKey !== null ||
+    input.automationRun.renderedIdempotencyKey !== null;
+  if (hasPersistedSnapshot) {
+    if (
+      input.automationRun.conversationId === null ||
+      input.automationRun.renderedInput === null ||
+      input.automationRun.renderedConversationKey === null
+    ) {
+      throw new AutomationRunExecutionError({
+        code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+        message: `Automation run '${input.automationRun.id}' is missing persisted prepared state.`,
+      });
+    }
+
+    return {
+      ...preparedRunBase,
+      conversationId: input.automationRun.conversationId,
+      renderedInput: input.automationRun.renderedInput,
+      renderedConversationKey: input.automationRun.renderedConversationKey,
+      renderedIdempotencyKey: input.automationRun.renderedIdempotencyKey,
+    };
+  }
+
+  let compiledTemplates: ReturnType<typeof compileTemplates>;
+  try {
+    compiledTemplates = compileTemplates({
+      context: {
+        schedule: {
+          id: schedule.id,
+          scheduledActionId: scheduledAction.id,
+          scheduledAt,
+          localScheduledDate: scheduledAction.localScheduledDate,
+          localScheduledTime: scheduledAction.localScheduledTime,
+          timezone: schedule.timezone,
+        },
+        automationRun: {
+          id: input.automationRun.id,
+          automationId: input.automationRun.automationId,
+          automationTargetId: input.automationTarget.id,
+        },
+        payload: {},
+      },
+      templates: {
+        inputTemplate: scheduleAutomation.inputTemplate,
+        conversationKeyTemplate: scheduleAutomation.conversationKeyTemplate,
+        idempotencyKeyTemplate: scheduleAutomation.idempotencyKeyTemplate,
+      },
+    });
+  } catch (error) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.TEMPLATE_RENDER_FAILED,
+      message: error instanceof Error ? error.message : "Template rendering failed.",
+      cause: error,
+    });
+  }
+
+  const bindingContext = await resolveAutomationConversationBindingContext(ctx.db, {
+    automationRunId: input.automationRun.id,
+    organizationId: input.automation.organizationId,
+    sandboxProfileId: input.automationTarget.sandboxProfileId,
+    sandboxProfileVersion: input.sandboxProfileVersion,
+  });
+
+  const claimedConversationId = await ctx.db.transaction(async (tx) => {
+    const tables = getControlPlaneDatabaseSchema(tx);
+
+    const claimedAutomationConversation = await claimAutomationConversation(
+      {
+        db: tx,
+      },
+      {
+        organizationId: input.automation.organizationId,
+        ownerKind: AutomationConversationOwnerKinds.AUTOMATION_TARGET,
+        ownerId: input.automationTarget.id,
+        createdByKind: AutomationConversationCreatedByKinds.SCHEDULE,
+        createdById: scheduledAction.id,
+        conversationKey: compiledTemplates.renderedConversationKey,
+        sandboxProfileId: input.automationTarget.sandboxProfileId,
+        integrationFamilyId: bindingContext.integrationFamilyId,
+        runtimeId: bindingContext.runtimeId,
+      },
+    );
+
+    await tx
+      .update(tables.automationRuns)
+      .set({
+        conversationId: claimedAutomationConversation.id,
+        renderedInput: compiledTemplates.renderedInput,
+        renderedConversationKey: compiledTemplates.renderedConversationKey,
+        renderedIdempotencyKey: compiledTemplates.renderedIdempotencyKey,
+        instructions: null,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(tables.automationRuns.id, input.automationRun.id));
+
+    return claimedAutomationConversation.id;
+  });
+
+  return {
+    ...preparedRunBase,
+    conversationId: claimedConversationId,
+    renderedInput: compiledTemplates.renderedInput,
+    renderedConversationKey: compiledTemplates.renderedConversationKey,
+    renderedIdempotencyKey: compiledTemplates.renderedIdempotencyKey,
+  };
+}
+
+function normalizeScheduledAt(scheduledAt: string, scheduledActionId: string): string {
+  const timestamp = new Date(scheduledAt);
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new AutomationRunExecutionError({
+      code: AutomationRunFailureCodes.AUTOMATION_RUN_EXECUTION_FAILED,
+      message: `Scheduled action '${scheduledActionId}' has invalid scheduled_at '${scheduledAt}'.`,
+    });
+  }
+
+  return timestamp.toISOString();
 }
 
 export async function ensureAutomationSandbox(
@@ -637,7 +886,7 @@ export async function ensureAutomationSandbox(
       kind: "system",
       id: input.preparedAutomationRun.automationRunId,
     },
-    source: "webhook",
+    source: input.preparedAutomationRun.sourceKind,
     ...(input.preparedAutomationRun.actingUserId === undefined
       ? {}
       : {

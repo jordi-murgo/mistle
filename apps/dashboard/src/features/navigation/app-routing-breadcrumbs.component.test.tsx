@@ -155,6 +155,11 @@ describe("app routing breadcrumb integration", () => {
         <Route element={<PageHarness />} handle={ROUTE_HANDLES.automationsNew} path="new" />
         <Route
           element={<PageHarness />}
+          handle={ROUTE_HANDLES.scheduledAutomationsDetail}
+          path="schedules/:automationId"
+        />
+        <Route
+          element={<PageHarness />}
           handle={ROUTE_HANDLES.automationsDetail}
           path=":automationId"
         />
@@ -423,7 +428,7 @@ describe("app routing breadcrumb integration", () => {
 
     expectMarkupNotToContainBreadcrumbs(markup);
     expectMarkupToContainMetaTitle(markup, "Automations");
-    expectMarkupToContainMetaDescription(markup, "Manage webhook automations.");
+    expectMarkupToContainMetaDescription(markup, "Manage automations.");
 
     await router.navigate("/automations/new");
     markup = renderRoutingMarkup(router);

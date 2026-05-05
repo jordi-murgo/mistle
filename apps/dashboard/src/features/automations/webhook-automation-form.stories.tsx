@@ -1,10 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { withDashboardPageStory } from "../../storybook/decorators.js";
 import type { IntegrationConnectionResources } from "../integrations/integrations-service.js";
 import { PageFrame } from "../shared/page-frame.js";
+import { AutomationTypeDisplayField, AutomationTypeSelectField } from "./automation-type-field.js";
 import { validateWebhookAutomationFormValues } from "./webhook-automation-form-helpers.js";
 import {
   WebhookAutomationForm,
@@ -391,6 +392,7 @@ function StoryHarness(input: {
   primaryRepositoryOptions?: readonly WebhookAutomationFormOption[];
   webhookEventOptions?: readonly WebhookAutomationEventOption[];
   enableSubmitValidation?: boolean;
+  automationTypeField?: ReactNode;
 }): React.JSX.Element {
   const [queryClient] = useState(() => createWebhookAutomationStoryQueryClient());
   const [values, setValues] = useState(input.values);
@@ -403,6 +405,13 @@ function StoryHarness(input: {
     input.validationSummaryError ?? null,
   );
   const pageTitle = input.mode === "create" ? "Create automation" : "";
+  const automationTypeField =
+    input.automationTypeField ??
+    (input.mode === "create" ? (
+      <AutomationTypeSelectField value="trigger" />
+    ) : (
+      <AutomationTypeDisplayField value="trigger" />
+    ));
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -414,6 +423,7 @@ function StoryHarness(input: {
           validationSummaryError={validationSummaryError}
           isDeleting={input.isDeleting ?? false}
           isSaving={input.isSaving ?? false}
+          automationTypeField={automationTypeField}
           mode={input.mode}
           onDelete={input.onDelete ?? null}
           onSubmit={() => {
@@ -456,7 +466,7 @@ function StoryHarness(input: {
 }
 
 const meta = {
-  title: "Dashboard/Automations/WebhookAutomation/Form",
+  title: "Dashboard/Automations/Event/Form",
   component: StoryHarness,
   decorators: [withDashboardPageStory],
   parameters: {
@@ -472,7 +482,7 @@ export const CreatePageLayout: Story = {
   args: {
     mode: "create",
     triggerPickerDisabledState: {
-      reason: "Select a sandbox profile to choose triggers.",
+      reason: "Select a sandbox profile to choose events.",
       variant: "default",
     },
     values: EmptyCreateValues,
@@ -492,7 +502,7 @@ export const ValidationErrors: Story = {
     mode: "create",
     validationSummaryError: "Please address the fields highlighted in red.",
     fieldErrors: {
-      triggerIds: "Please add a trigger",
+      triggerIds: "Please add an event",
       name: "Required field.",
       sandboxProfileId: "Required field.",
       inputTemplate: "Required field.",
@@ -523,11 +533,11 @@ export const Saving: Story = {
   },
 };
 
-export const NoTriggersAvailable: Story = {
+export const NoEventsAvailable: Story = {
   args: {
     mode: "create",
     triggerPickerDisabledState: {
-      reason: "The selected profile has no bindings with automation triggers.",
+      reason: "The selected profile has no bindings with automation events.",
       variant: "default",
     },
     values: {
@@ -621,7 +631,7 @@ export const WrongProfileSavedEvent: Story = {
     mode: "edit",
     onDelete: function onDelete() {},
     fieldErrors: {
-      triggerIds: "Trigger is unavailable for the selected sandbox profile.",
+      triggerIds: "Event is unavailable for the selected sandbox profile.",
     },
     values: {
       ...ExistingAutomationValues,
@@ -633,7 +643,7 @@ export const WrongProfileSavedEvent: Story = {
       {
         ...GitHubWebhookEventOptions[0]!,
         availability: "wrong_profile",
-        description: "Trigger is unavailable for the selected sandbox profile.",
+        description: "Event is unavailable for the selected sandbox profile.",
       },
     ],
   },

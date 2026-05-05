@@ -1,10 +1,20 @@
-import { bigint, index, text, timestamp, uniqueIndex, type PgSchema } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import {
+  bigint,
+  check,
+  index,
+  text,
+  timestamp,
+  uniqueIndex,
+  type PgSchema,
+} from "drizzle-orm/pg-core";
 import { typeid } from "typeid-js";
 
 import { automationConversations } from "./automation-conversations.js";
 import { automationRuns } from "./automation-runs.js";
 import { integrationWebhookEvents } from "./integration-webhook-events.js";
 import { controlPlaneSchema } from "./namespace.js";
+import { scheduledActions } from "./scheduled-actions.js";
 
 export const AutomationConversationDeliveryTaskStatuses = {
   QUEUED: "queued",
@@ -31,9 +41,14 @@ export function defineAutomationConversationDeliveryTasks(schema: PgSchema) {
       automationRunId: text("automation_run_id")
         .notNull()
         .references(() => automationRuns.id, { onDelete: "cascade" }),
-      sourceWebhookEventId: text("source_webhook_event_id")
-        .notNull()
-        .references(() => integrationWebhookEvents.id, { onDelete: "cascade" }),
+      sourceWebhookEventId: text("source_webhook_event_id").references(
+        () => integrationWebhookEvents.id,
+        { onDelete: "cascade" },
+      ),
+      sourceScheduledActionId: text("source_scheduled_action_id").references(
+        () => scheduledActions.id,
+        { onDelete: "cascade" },
+      ),
       sourceOrderKey: text("source_order_key").notNull(),
       processorGeneration: bigint("processor_generation", { mode: "number" }),
       status: text("status")
@@ -66,6 +81,9 @@ export function defineAutomationConversationDeliveryTasks(schema: PgSchema) {
       index("automation_conversation_delivery_tasks_source_webhook_event_id_idx").on(
         table.sourceWebhookEventId,
       ),
+      index("automation_conversation_delivery_tasks_source_scheduled_action_id_idx")
+        .on(table.sourceScheduledActionId)
+        .where(sql`${table.sourceScheduledActionId} is not null`),
       index("automation_conversation_delivery_tasks_status_idx").on(table.status),
       index("automation_conversation_delivery_tasks_dequeue_idx").on(
         table.conversationId,
@@ -73,6 +91,10 @@ export function defineAutomationConversationDeliveryTasks(schema: PgSchema) {
         table.sourceOrderKey,
         table.createdAt,
         table.id,
+      ),
+      check(
+        "automation_conversation_delivery_tasks_exactly_one_source_check",
+        sql`(${table.sourceWebhookEventId} is not null and ${table.sourceScheduledActionId} is null) or (${table.sourceWebhookEventId} is null and ${table.sourceScheduledActionId} is not null)`,
       ),
     ],
   );

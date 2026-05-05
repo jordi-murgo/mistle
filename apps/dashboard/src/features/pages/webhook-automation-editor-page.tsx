@@ -1,8 +1,10 @@
 import { Button, Notice } from "@mistle/ui";
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
+import { AutomationTypeDisplayField } from "../automations/automation-type-field.js";
 import { DeleteWebhookAutomationDialog } from "../automations/delete-webhook-automation-dialog.js";
 import {
   resolveWebhookAutomationEditInitialValues,
@@ -74,8 +76,9 @@ function renderWebhookAutomationEditorError(input: {
   );
 }
 
-function CreateWebhookAutomationEditor(input: {
+export function CreateWebhookAutomationEditor(input: {
   navigate: (to: string) => void | Promise<void>;
+  automationTypeField?: ReactNode;
 }): React.JSX.Element | null {
   const prerequisites = useWebhookAutomationPrerequisites();
 
@@ -98,6 +101,7 @@ function CreateWebhookAutomationEditor(input: {
       key="create"
       mode="create"
       automationId={undefined}
+      automationTypeField={input.automationTypeField}
       navigate={input.navigate}
       initialValues={toWebhookAutomationFormValues(null)}
       connectionOptions={prerequisites.connectionOptions}
@@ -174,6 +178,7 @@ function EditWebhookAutomationEditor(input: {
       key={input.automationId}
       mode="edit"
       automationId={input.automationId}
+      automationTypeField={<AutomationTypeDisplayField value="trigger" />}
       navigate={input.navigate}
       initialValues={initialValues}
       preservedWebhookSourceId={automationQuery.data.integrationWebhookSourceId}
@@ -188,6 +193,7 @@ function EditWebhookAutomationEditor(input: {
 function LoadedWebhookAutomationEditor(input: {
   mode: "create" | "edit";
   automationId: string | undefined;
+  automationTypeField?: ReactNode;
   navigate: (to: string) => void | Promise<void>;
   initialValues: ReturnType<typeof toWebhookAutomationFormValues>;
   connectionOptions: ReturnType<typeof useWebhookAutomationPrerequisites>["connectionOptions"];
@@ -209,6 +215,7 @@ function LoadedWebhookAutomationEditor(input: {
         validationSummaryError={state.validationSummaryError}
         isDeleting={state.isDeleting}
         isSaving={state.isSaving}
+        automationTypeField={input.automationTypeField}
         mode={input.mode}
         onDelete={state.onRequestDelete}
         onSubmit={state.onSubmit}

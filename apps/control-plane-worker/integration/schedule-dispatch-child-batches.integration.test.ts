@@ -5,6 +5,7 @@
 import { createDataPlaneSandboxInstancesClient } from "@mistle/data-plane-internal-client";
 import {
   AutomationKinds,
+  AutomationRunStatuses,
   SandboxProfileVersionSnapshotJobStates,
   SandboxProfileVersionSnapshotJobTriggers,
   ScheduledActionStatuses,
@@ -16,8 +17,11 @@ import {
   TestEnvironmentIdHeader,
   type IntegrationTestEnvironment,
 } from "@mistle/test-harness/integration";
-import { ScheduleDispatchBatchWorkflowSpec } from "@mistle/workflow-registry/control-plane";
-import { sql } from "drizzle-orm";
+import {
+  HandleAutomationRunWorkflowSpec,
+  ScheduleDispatchBatchWorkflowSpec,
+} from "@mistle/workflow-registry/control-plane";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect } from "vitest";
 import { z } from "zod";
 
@@ -320,6 +324,237 @@ describe.concurrent("control-plane worker schedule dispatch child batches", () =
     expect(firstScan).toEqual(secondScan);
   });
 
+  it("creates one automation run and starts the automation run workflow for scheduled automation actions", async ({
+    env,
+  }) => {
+    await seedAutomationSchedule({
+      env,
+      organizationId: "org_integration_new_schedule_batch_automation_run",
+      automationId: "atm_integration_new_schedule_batch_automation_run",
+      scheduleId: "sch_integration_new_schedule_batch_automation_run",
+      includeAutomationTarget: true,
+    });
+    await seedScheduledAction({
+      env,
+      id: "sca_integration_new_schedule_batch_automation_run",
+      organizationId: "org_integration_new_schedule_batch_automation_run",
+      scheduleId: "sch_integration_new_schedule_batch_automation_run",
+      targetPayloadAutomationId: "atm_integration_new_schedule_batch_automation_run",
+    });
+
+    const result = await dispatchScheduledAction(createDispatchContext(env), {
+      scheduledActionId: "sca_integration_new_schedule_batch_automation_run",
+      dispatchClaimKey: "schedule-dispatch-batch:integration-new-automation-run",
+      staleDispatchingBefore: new Date("2026-04-28T01:00:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      scheduledActionId: "sca_integration_new_schedule_batch_automation_run",
+      status: "dispatched",
+    });
+
+    const automationRunsForAction = await env.controlPlaneDb.query.automationRuns.findMany({
+      where: (table, { eq }) =>
+        eq(table.sourceScheduledActionId, "sca_integration_new_schedule_batch_automation_run"),
+    });
+    expect(automationRunsForAction).toHaveLength(1);
+    expect(automationRunsForAction[0]).toEqual(
+      expect.objectContaining({
+        automationId: "atm_integration_new_schedule_batch_automation_run",
+        automationTargetId: "atg_atm_integration_new_schedule_batch_automation_run",
+        status: AutomationRunStatuses.QUEUED,
+        sourceScheduledActionId: "sca_integration_new_schedule_batch_automation_run",
+      }),
+    );
+
+    const automationRun = automationRunsForAction[0];
+    if (automationRun === undefined) {
+      throw new Error("Expected scheduled automation run to be created.");
+    }
+    const automationWorkflowRun = await readControlPlaneWorkflowRunByIdempotencyKey(env, {
+      workflowName: HandleAutomationRunWorkflowSpec.name,
+      idempotencyKey: automationRun.id,
+    });
+    expect(automationWorkflowRun).toEqual(
+      expect.objectContaining({
+        workflow_name: HandleAutomationRunWorkflowSpec.name,
+        status: "pending",
+        input: {
+          automationRunId: automationRun.id,
+        },
+      }),
+    );
+
+    const persistedAction = await env.controlPlaneDb.query.scheduledActions.findFirst({
+      where: (table, { eq }) => eq(table.id, "sca_integration_new_schedule_batch_automation_run"),
+    });
+    expect(persistedAction).toEqual(
+      expect.objectContaining({
+        status: ScheduledActionStatuses.DISPATCHED,
+        dispatchClaimKey: "schedule-dispatch-batch:integration-new-automation-run",
+        targetWorkflowId: automationWorkflowRun?.id,
+      }),
+    );
+    expect(persistedAction?.dispatchedAt).not.toBeNull();
+  });
+
+  it("reuses the automation run and workflow when retrying the same scheduled automation action", async ({
+    env,
+  }) => {
+    await seedAutomationSchedule({
+      env,
+      organizationId: "org_integration_new_schedule_batch_automation_retry",
+      automationId: "atm_integration_new_schedule_batch_automation_retry",
+      scheduleId: "sch_integration_new_schedule_batch_automation_retry",
+      includeAutomationTarget: true,
+    });
+    await seedScheduledAction({
+      env,
+      id: "sca_integration_new_schedule_batch_automation_retry",
+      organizationId: "org_integration_new_schedule_batch_automation_retry",
+      scheduleId: "sch_integration_new_schedule_batch_automation_retry",
+      targetPayloadAutomationId: "atm_integration_new_schedule_batch_automation_retry",
+    });
+
+    await dispatchScheduledAction(createDispatchContext(env), {
+      scheduledActionId: "sca_integration_new_schedule_batch_automation_retry",
+      dispatchClaimKey: "schedule-dispatch-batch:integration-new-automation-retry",
+      staleDispatchingBefore: new Date("2026-04-28T01:00:00.000Z"),
+    });
+    const [firstAutomationRun] = await env.controlPlaneDb.query.automationRuns.findMany({
+      where: (table, { eq }) =>
+        eq(table.sourceScheduledActionId, "sca_integration_new_schedule_batch_automation_retry"),
+    });
+    if (firstAutomationRun === undefined) {
+      throw new Error("Expected first scheduled automation run to be created.");
+    }
+    const firstWorkflowRun = await readControlPlaneWorkflowRunByIdempotencyKey(env, {
+      workflowName: HandleAutomationRunWorkflowSpec.name,
+      idempotencyKey: firstAutomationRun.id,
+    });
+
+    await env.controlPlaneDb
+      .update(env.controlPlaneTables.scheduledActions)
+      .set({
+        status: ScheduledActionStatuses.DISPATCHING,
+        dispatchedAt: null,
+        targetWorkflowId: null,
+        targetWorkflowStartedAt: null,
+      })
+      .where(
+        eq(
+          env.controlPlaneTables.scheduledActions.id,
+          "sca_integration_new_schedule_batch_automation_retry",
+        ),
+      );
+
+    await dispatchScheduledAction(createDispatchContext(env), {
+      scheduledActionId: "sca_integration_new_schedule_batch_automation_retry",
+      dispatchClaimKey: "schedule-dispatch-batch:integration-new-automation-retry",
+      staleDispatchingBefore: new Date("2026-04-28T01:00:00.000Z"),
+    });
+
+    const automationRunsForAction = await env.controlPlaneDb.query.automationRuns.findMany({
+      where: (table, { eq }) =>
+        eq(table.sourceScheduledActionId, "sca_integration_new_schedule_batch_automation_retry"),
+    });
+    expect(automationRunsForAction).toHaveLength(1);
+
+    const persistedAction = await env.controlPlaneDb.query.scheduledActions.findFirst({
+      where: (table, { eq }) => eq(table.id, "sca_integration_new_schedule_batch_automation_retry"),
+    });
+    expect(persistedAction).toEqual(
+      expect.objectContaining({
+        status: ScheduledActionStatuses.DISPATCHED,
+        targetWorkflowId: firstWorkflowRun?.id,
+      }),
+    );
+  });
+
+  it("marks deterministic scheduled automation handoff failures as terminal", async ({ env }) => {
+    const cases = [
+      {
+        id: "missing_target",
+        seed: {
+          includeScheduleAutomation: false,
+        },
+        expectedFailureCode: "schedule_automation_not_found",
+      },
+      {
+        id: "disabled_automation",
+        seed: {
+          automationEnabled: false,
+          includeAutomationTarget: true,
+        },
+        expectedFailureCode: "automation_disabled",
+      },
+      {
+        id: "disabled_schedule",
+        seed: {
+          includeAutomationTarget: true,
+          scheduleEnabled: false,
+        },
+        expectedFailureCode: "schedule_disabled",
+      },
+      {
+        id: "deleted_schedule",
+        seed: {
+          includeAutomationTarget: true,
+          scheduleDeletedAt: "2026-04-28T00:00:00.000Z",
+        },
+        expectedFailureCode: "schedule_deleted",
+      },
+      {
+        id: "missing_automation_target",
+        seed: {},
+        expectedFailureCode: "automation_target_not_found",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const organizationId = `org_integration_new_schedule_batch_${testCase.id}`;
+      const automationId = `atm_integration_new_schedule_batch_${testCase.id}`;
+      const scheduleId = `sch_integration_new_schedule_batch_${testCase.id}`;
+      const scheduledActionId = `sca_integration_new_schedule_batch_${testCase.id}`;
+      await seedAutomationSchedule({
+        env,
+        organizationId,
+        automationId,
+        scheduleId,
+        ...testCase.seed,
+      });
+      await seedScheduledAction({
+        env,
+        id: scheduledActionId,
+        organizationId,
+        scheduleId,
+        targetPayloadAutomationId: automationId,
+      });
+
+      const result = await dispatchScheduledAction(createDispatchContext(env), {
+        scheduledActionId,
+        dispatchClaimKey: `schedule-dispatch-batch:integration-new-${testCase.id}`,
+        staleDispatchingBefore: new Date("2026-04-28T01:00:00.000Z"),
+      });
+
+      expect(result).toEqual({
+        scheduledActionId,
+        status: "failed",
+      });
+
+      const persistedAction = await env.controlPlaneDb.query.scheduledActions.findFirst({
+        where: (table, { eq }) => eq(table.id, scheduledActionId),
+      });
+      expect(persistedAction).toEqual(
+        expect.objectContaining({
+          status: ScheduledActionStatuses.FAILED,
+          failureCode: testCase.expectedFailureCode,
+        }),
+      );
+      expect(persistedAction?.failedAt).not.toBeNull();
+    }
+  });
+
   it("hands scheduled snapshot refreshes off to the real data-plane API", async ({ env }) => {
     await seedSnapshotRefreshScheduledAction({
       env,
@@ -375,6 +610,11 @@ async function seedAutomationSchedule(input: {
   organizationId: string;
   automationId: string;
   scheduleId: string;
+  automationEnabled?: boolean;
+  includeAutomationTarget?: boolean;
+  includeScheduleAutomation?: boolean;
+  scheduleDeletedAt?: string | null;
+  scheduleEnabled?: boolean;
 }): Promise<void> {
   await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.organizations).values({
     id: input.organizationId,
@@ -384,10 +624,25 @@ async function seedAutomationSchedule(input: {
   await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.automations).values({
     id: input.automationId,
     organizationId: input.organizationId,
-    kind: AutomationKinds.WEBHOOK,
+    kind: AutomationKinds.SCHEDULE,
     name: input.automationId,
-    enabled: true,
+    enabled: input.automationEnabled ?? true,
   });
+  if (input.includeAutomationTarget ?? false) {
+    const sandboxProfileId = `sbp_${input.automationId}`;
+    await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.sandboxProfiles).values({
+      id: sandboxProfileId,
+      organizationId: input.organizationId,
+      displayName: sandboxProfileId,
+      status: "active",
+    });
+    await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.automationTargets).values({
+      id: `atg_${input.automationId}`,
+      automationId: input.automationId,
+      sandboxProfileId,
+      sandboxProfileVersion: 1,
+    });
+  }
   await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.schedules).values({
     id: input.scheduleId,
     organizationId: input.organizationId,
@@ -395,16 +650,19 @@ async function seedAutomationSchedule(input: {
     name: input.scheduleId,
     cronExpression: "0 9 * * *",
     timezone: "Asia/Singapore",
-    enabled: true,
+    enabled: input.scheduleEnabled ?? true,
     nextScheduledAt: "2026-04-29T01:00:00.000Z",
+    deletedAt: input.scheduleDeletedAt,
   });
-  await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.scheduleAutomations).values({
-    scheduleId: input.scheduleId,
-    automationId: input.automationId,
-    inputTemplate: "{}",
-    conversationKeyTemplate: `conversation-${input.scheduleId}`,
-    idempotencyKeyTemplate: `idempotency-${input.scheduleId}`,
-  });
+  if (input.includeScheduleAutomation ?? true) {
+    await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.scheduleAutomations).values({
+      scheduleId: input.scheduleId,
+      automationId: input.automationId,
+      inputTemplate: "{}",
+      conversationKeyTemplate: `conversation-${input.scheduleId}`,
+      idempotencyKeyTemplate: `idempotency-${input.scheduleId}`,
+    });
+  }
 }
 
 async function seedScheduledAction(input: {
@@ -417,6 +675,7 @@ async function seedScheduledAction(input: {
   dispatchingAt?: string | null;
   scheduledAt?: string;
   localScheduledTime?: string;
+  targetPayloadAutomationId?: string;
 }): Promise<void> {
   await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.scheduledActions).values({
     id: input.id,
@@ -424,7 +683,7 @@ async function seedScheduledAction(input: {
     organizationId: input.organizationId,
     targetType: ScheduleTargetTypes.AUTOMATION_RUN,
     targetPayload: {
-      automationId: "atm_integration_new_schedule_batch_claim",
+      automationId: input.targetPayloadAutomationId ?? "atm_integration_new_schedule_batch_claim",
     },
     scheduledAt: input.scheduledAt ?? "2030-01-01T00:00:00.000Z",
     localScheduledDate: "2026-04-28",
@@ -496,6 +755,7 @@ function createDispatchContext(env: IntegrationTestEnvironment) {
       testEnvironmentIdHeader: TestEnvironmentIdHeader,
     }),
     defaultBaseImage: "registry:3",
+    openWorkflow: env.controlPlaneWorkflow,
   };
 }
 

@@ -24,27 +24,47 @@ describe("control-plane worker schedule dispatch claims", () => {
     await seedOrganizationAndAutomation({
       env,
       organizationId: "org_integration_new_schedule_claim",
-      automationId: "atm_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_due",
+    });
+    await seedAutomation({
+      env,
+      organizationId: "org_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_future",
+    });
+    await seedAutomation({
+      env,
+      organizationId: "org_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_disabled",
+    });
+    await seedAutomation({
+      env,
+      organizationId: "org_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_deleted",
+    });
+    await seedAutomation({
+      env,
+      organizationId: "org_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_no_next",
     });
     await seedAutomationSchedule({
       env,
       scheduleId: "sch_integration_new_schedule_due",
       organizationId: "org_integration_new_schedule_claim",
-      automationId: "atm_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_due",
       nextScheduledAt: "2026-04-28T01:00:00.000Z",
     });
     await seedAutomationSchedule({
       env,
       scheduleId: "sch_integration_new_schedule_future",
       organizationId: "org_integration_new_schedule_claim",
-      automationId: "atm_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_future",
       nextScheduledAt: "2026-04-29T01:00:00.000Z",
     });
     await seedAutomationSchedule({
       env,
       scheduleId: "sch_integration_new_schedule_disabled",
       organizationId: "org_integration_new_schedule_claim",
-      automationId: "atm_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_disabled",
       enabled: false,
       nextScheduledAt: "2026-04-28T01:00:00.000Z",
     });
@@ -52,7 +72,7 @@ describe("control-plane worker schedule dispatch claims", () => {
       env,
       scheduleId: "sch_integration_new_schedule_deleted",
       organizationId: "org_integration_new_schedule_claim",
-      automationId: "atm_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_deleted",
       deletedAt: "2026-04-27T00:00:00.000Z",
       nextScheduledAt: "2026-04-28T01:00:00.000Z",
     });
@@ -60,7 +80,7 @@ describe("control-plane worker schedule dispatch claims", () => {
       env,
       scheduleId: "sch_integration_new_schedule_no_next",
       organizationId: "org_integration_new_schedule_claim",
-      automationId: "atm_integration_new_schedule_claim",
+      automationId: "atm_integration_new_schedule_claim_no_next",
       nextScheduledAt: null,
     });
 
@@ -87,7 +107,7 @@ describe("control-plane worker schedule dispatch claims", () => {
         organizationId: "org_integration_new_schedule_claim",
         targetType: ScheduleTargetTypes.AUTOMATION_RUN,
         targetPayload: {
-          automationId: "atm_integration_new_schedule_claim",
+          automationId: "atm_integration_new_schedule_claim_due",
         },
         scheduledAt: "2026-04-28 01:00:00+00",
         localScheduledDate: "2026-04-28",
@@ -270,6 +290,14 @@ async function seedOrganizationAndAutomation(input: {
     name: input.organizationId,
     slug: input.organizationId,
   });
+  await seedAutomation(input);
+}
+
+async function seedAutomation(input: {
+  env: IntegrationTestEnvironment;
+  organizationId: string;
+  automationId: string;
+}): Promise<void> {
   await input.env.controlPlaneDb.insert(input.env.controlPlaneTables.automations).values({
     id: input.automationId,
     organizationId: input.organizationId,

@@ -4,7 +4,7 @@ import { withDashboardCenteredStory } from "../../storybook/decorators.js";
 import { DeleteWebhookAutomationDialog } from "./delete-webhook-automation-dialog.js";
 
 const meta = {
-  title: "Dashboard/Automations/WebhookAutomation/DeleteDialog",
+  title: "Dashboard/Automations/Event/DeleteDialog",
   component: DeleteWebhookAutomationDialog,
   decorators: [withDashboardCenteredStory],
   parameters: {
