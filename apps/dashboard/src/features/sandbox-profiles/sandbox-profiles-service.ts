@@ -18,6 +18,7 @@ import type {
   SandboxProfileVersionAutomationConfig,
   SandboxProfileVersionRefreshSchedule,
   SandboxProfileVersionSetupScript,
+  SandboxProfileSetupAssistant,
   SandboxProfileSetupScriptTestRun,
   SandboxProfilesListResult,
   PublishSandboxProfileVersionResult,
@@ -438,13 +439,16 @@ const SandboxProfileVersionSetupScriptResponseSchema = z
   })
   .strict();
 
-const SandboxProfileSetupScriptTestRunResponseSchema = z
+const SandboxProfileAcceptedStartResponseSchema = z
   .object({
     status: z.literal("accepted"),
     workflowRunId: z.string().min(1),
     sandboxInstanceId: z.string().min(1),
   })
   .strict();
+
+const SandboxProfileSetupScriptTestRunResponseSchema = SandboxProfileAcceptedStartResponseSchema;
+const SandboxProfileSetupAssistantResponseSchema = SandboxProfileAcceptedStartResponseSchema;
 
 export async function listSandboxProfileVersions(input: {
   profileId: string;
@@ -994,6 +998,49 @@ export async function startSandboxProfileSetupScriptTestRun(input: {
         operation: "startSandboxProfileSetupScriptTestRun",
         error,
         fallbackMessage: "Could not start setup script test run.",
+      }),
+    );
+  }
+}
+
+export async function startSandboxProfileSetupAssistant(input: {
+  profileId: string;
+  version: number;
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+}): Promise<SandboxProfileSetupAssistant> {
+  try {
+    const response = await requestControlPlane({
+      operation: "startSandboxProfileSetupAssistant",
+      method: "POST",
+      pathname: `/v1/sandbox/profiles/${encodeURIComponent(input.profileId)}/versions/${String(
+        input.version,
+      )}/setup-script/assistant`,
+      body: {
+        ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      },
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      fallbackMessage: "Could not start Setup Assistant.",
+    });
+
+    const responseBody = await response.json();
+    const parsedResponse = SandboxProfileSetupAssistantResponseSchema.safeParse(responseBody);
+    if (!parsedResponse.success) {
+      throw new SandboxProfilesApiError({
+        operation: "startSandboxProfileSetupAssistant",
+        status: 500,
+        body: responseBody,
+        message: "Setup Assistant response payload is invalid.",
+      });
+    }
+
+    return parsedResponse.data;
+  } catch (error) {
+    throw new SandboxProfilesApiError(
+      normalizeHttpApiError({
+        operation: "startSandboxProfileSetupAssistant",
+        error,
+        fallbackMessage: "Could not start Setup Assistant.",
       }),
     );
   }

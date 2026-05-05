@@ -24,12 +24,22 @@ import {
   Label,
   MoreActionsMenu,
   Notice,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
 } from "@mistle/ui";
-import { CheckCircleIcon, SpinnerGapIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import {
+  CheckCircleIcon,
+  SidebarSimpleIcon,
+  SpinnerGapIcon,
+  TerminalIcon,
+  WarningCircleIcon,
+} from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type Key,
   type ReactNode,
@@ -68,6 +78,7 @@ import {
   listSandboxProfileVersions,
   publishSandboxProfileVersion,
   refreshSandboxProfileVersion,
+  startSandboxProfileSetupAssistant,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
 import type {
   SandboxProfile,
@@ -125,6 +136,18 @@ import {
   type SnapshotPanelState,
 } from "./sandbox-profile-snapshot-panel.js";
 import { SandboxSetupScriptEditor } from "./sandbox-setup-script-editor.js";
+import { SessionCliPanel } from "./session-cli-panel.js";
+import {
+  SessionConversationBottomPanelController,
+  SessionConversationMainContent,
+} from "./session-conversation-pane.js";
+import type { PendingSessionDiffComment } from "./session-diff-comment.js";
+import { SessionStartupStatus } from "./session-startup-status.js";
+import {
+  SessionTerminalWorkspace,
+  type SessionTerminalWorkspaceHandle,
+} from "./session-terminal-workspace.js";
+import { useSessionWorkbenchController } from "./use-session-workbench-controller.js";
 
 type SandboxProfileEditorPageProps =
   | {
@@ -144,6 +167,18 @@ type SandboxProfileDraftSectionState = {
   integrationRows?: readonly SandboxProfileBindingEditorRow[] | null;
   isSaving: boolean;
 };
+type SetupScriptAssistantControl = {
+  disabled: boolean;
+  errorMessage: string | null;
+  isStarting: boolean;
+  onOpen: (input: { setupScript: string }) => void;
+  title: string;
+};
+type SetupScriptAssistantPanelState = {
+  initialPrompt: string;
+  isOpen: boolean;
+  sandboxInstanceId: string | null;
+};
 
 function createIdleSandboxProfileDraftSectionState(): SandboxProfileDraftSectionState {
   return {
@@ -151,6 +186,34 @@ function createIdleSandboxProfileDraftSectionState(): SandboxProfileDraftSection
     hasUnpersistedChanges: false,
     isSaving: false,
   };
+}
+
+const AgentRuntimeRequiredErrorCode = "AGENT_RUNTIME_REQUIRED";
+const SetupAssistantAgentRuntimeRequiredMessage =
+  "Add an agent integration before using Setup Assistant.";
+
+function hasConfiguredAgentRuntime(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  if (!("runtimeId" in value)) {
+    return false;
+  }
+
+  return typeof value.runtimeId === "string" && value.runtimeId.trim().length > 0;
+}
+
+function hasSetupAssistantAgentRuntime(
+  integrationRows: readonly SandboxProfileBindingEditorRow[] | null,
+): boolean {
+  if (integrationRows === null) {
+    return false;
+  }
+
+  return integrationRows.some(
+    (row) => row.kind === "agent" && hasConfiguredAgentRuntime(row.config["runtime"]),
+  );
 }
 
 const SetupScriptPlaceholder = `#!/usr/bin/env bash
@@ -169,6 +232,33 @@ const PublishSuccessNavigationState: SandboxProfileEditorNavigationState = {
 
 function createSandboxProfileDefaultPath(profileId: string): string {
   return `/sandbox-profiles/${profileId}/sandbox-profile`;
+}
+
+function createSetupAssistantPrompt(input: {
+  profileName: string;
+  setupScript: string;
+  version: number;
+}): string {
+  const trimmedSetupScript = input.setupScript.trim();
+  const currentDraft =
+    trimmedSetupScript.length === 0
+      ? "No setup script is currently configured."
+      : ["Current draft setup script:", "```sh", input.setupScript, "```"].join("\n");
+
+  return [
+    "Inspect this workspace and help write a setup script for this sandbox profile.",
+    "",
+    `Profile: ${input.profileName}`,
+    `Version: ${String(input.version)}`,
+    "",
+    currentDraft,
+    "",
+    "Do not run the setup script test yourself. Produce a script that I can paste into the profile editor and test there.",
+    "",
+    "The script should be repeatable, fail fast when required configuration is missing, and avoid relying on state from this Setup Assistant session.",
+    "",
+    "When finished, provide the complete setup script in one shell code block and list any required environment variables.",
+  ].join("\n");
 }
 
 function createSandboxProfileEditorPath(input: {
@@ -1012,10 +1102,13 @@ function ReadySandboxProfileEditorPage(input: {
   const isSavingDraftChanges = integrationDraftState.isSaving || setupScriptDraftState.isSaving;
   const [publishRequestIsPending, setPublishRequestIsPending] = useState(false);
   const [publishFlushError, setPublishFlushError] = useState<string | null>(null);
+  const [setupAssistantError, setSetupAssistantError] = useState<string | null>(null);
   const [publishSuccessNoticeKey, setPublishSuccessNoticeKey] = useState(0);
   const [showPublishSuccessMessage, setShowPublishSuccessMessage] = useState(
     input.publishSuccessMessage,
   );
+  const [setupAssistantPanelState, setSetupAssistantPanelState] =
+    useState<SetupScriptAssistantPanelState | null>(null);
   const activeSectionId = input.routeSectionId;
   const draftFieldsAreDisabled =
     input.mode.kind !== "draft" || isSavingDraftChanges || publishRequestIsPending;
@@ -1024,6 +1117,12 @@ function ReadySandboxProfileEditorPage(input: {
   const editorSections = createSandboxProfileEditorSections({
     snapshotState: snapshotPanelState,
   });
+  const setupAssistantIntegrationRows = resolveSandboxProfileSetupScriptIntegrationRows(
+    integrationsLoader.initialRows,
+    integrationDraftState.integrationRows,
+  );
+  const setupAssistantHasAgentRuntime =
+    input.mode.kind === "draft" && hasSetupAssistantAgentRuntime(setupAssistantIntegrationRows);
   const metaState = useEditSandboxProfileMetaState({
     profileId: input.profileId,
     loadedProfile: input.profile,
@@ -1040,6 +1139,87 @@ function ReadySandboxProfileEditorPage(input: {
       }),
     [input.profileId],
   );
+  const startSetupAssistantMutation = useMutation({
+    mutationFn: async () =>
+      startSandboxProfileSetupAssistant({
+        idempotencyKey: crypto.randomUUID(),
+        profileId: input.profileId,
+        version: input.mode.version,
+      }),
+    onSuccess: (result) => {
+      setSetupAssistantError(null);
+      setSetupAssistantPanelState((currentState) => {
+        if (currentState === null) {
+          return currentState;
+        }
+
+        return {
+          ...currentState,
+          sandboxInstanceId: result.sandboxInstanceId,
+        };
+      });
+    },
+    onError: (error: unknown) => {
+      setSetupAssistantPanelState((currentState) =>
+        currentState === null
+          ? currentState
+          : {
+              ...currentState,
+              isOpen: false,
+            },
+      );
+      setSetupAssistantError(
+        error instanceof SandboxProfilesApiError && error.code === AgentRuntimeRequiredErrorCode
+          ? SetupAssistantAgentRuntimeRequiredMessage
+          : resolveApiErrorMessage({
+              error,
+              fallbackMessage: "Could not start Setup Assistant.",
+            }),
+      );
+    },
+  });
+  const setupAssistantDisabledReason =
+    input.mode.kind !== "draft"
+      ? "Setup Assistant is only available while editing a draft."
+      : setupAssistantIntegrationRows === null
+        ? "Integration bindings are still loading."
+        : !setupAssistantHasAgentRuntime
+          ? SetupAssistantAgentRuntimeRequiredMessage
+          : draftFieldsAreDisabled
+            ? "Setup Assistant is unavailable while draft changes are saving."
+            : startSetupAssistantMutation.isPending
+              ? "Setup Assistant is starting."
+              : null;
+  const setupAssistantControl: SetupScriptAssistantControl = {
+    disabled: setupAssistantDisabledReason !== null,
+    errorMessage: setupAssistantError,
+    isStarting: startSetupAssistantMutation.isPending,
+    onOpen: ({ setupScript }) => {
+      setSetupAssistantError(null);
+      const initialPrompt = createSetupAssistantPrompt({
+        profileName: metaState.formState.displayName ?? metaState.pageTitle,
+        setupScript,
+        version: input.mode.version,
+      });
+
+      setSetupAssistantPanelState((currentState) => ({
+        initialPrompt,
+        isOpen: true,
+        sandboxInstanceId: currentState?.sandboxInstanceId ?? null,
+      }));
+
+      if (
+        (setupAssistantPanelState !== null &&
+          setupAssistantPanelState.sandboxInstanceId !== null) ||
+        startSetupAssistantMutation.isPending
+      ) {
+        return;
+      }
+
+      startSetupAssistantMutation.mutate();
+    },
+    title: setupAssistantDisabledReason ?? "Open the right panel to write this setup script.",
+  };
 
   useEffect(() => {
     if (input.publishSuccessNavigationKey !== null) {
@@ -1088,7 +1268,7 @@ function ReadySandboxProfileEditorPage(input: {
     }
   }
 
-  return (
+  const editorView = (
     <SandboxProfileEditorView
       activeSectionId={activeSectionId}
       hasUnpersistedIntegrationChanges={integrationDraftState.hasUnpersistedChanges}
@@ -1159,6 +1339,7 @@ function ReadySandboxProfileEditorPage(input: {
           }}
           onRefreshSnapshot={input.onRefreshSnapshot}
           onSetupScriptDraftStateChange={setSetupScriptDraftState}
+          setupAssistantControl={setupAssistantControl}
           profileId={input.profileId}
           publishSuccessMessage={showPublishSuccessMessage}
           publishSuccessMessageKey={publishSuccessNoticeKey}
@@ -1171,6 +1352,304 @@ function ReadySandboxProfileEditorPage(input: {
       sections={editorSections}
     />
   );
+
+  if (setupAssistantPanelState === null || !setupAssistantPanelState.isOpen) {
+    return editorView;
+  }
+
+  return (
+    <div className="sticky top-0 h-svh overflow-hidden">
+      <ResizablePanelGroup
+        className="h-full min-h-0 overflow-hidden"
+        id="sandbox-profile-setup-assistant-panel-group"
+        orientation="horizontal"
+      >
+        <ResizablePanel defaultSize="72%" id="sandbox-profile-editor-main-panel" minSize="45%">
+          <div className="h-full min-h-0 overflow-y-auto overscroll-contain">{editorView}</div>
+        </ResizablePanel>
+        <ResizableHandle id="sandbox-profile-setup-assistant-resize-handle" />
+        <ResizablePanel
+          defaultSize="28%"
+          id="sandbox-profile-setup-assistant-panel"
+          minSize="360px"
+        >
+          <SetupScriptAssistantPanel
+            initialPrompt={setupAssistantPanelState.initialPrompt}
+            onClose={() => {
+              setSetupAssistantPanelState((currentState) =>
+                currentState === null
+                  ? currentState
+                  : {
+                      ...currentState,
+                      isOpen: false,
+                    },
+              );
+            }}
+            sandboxInstanceId={setupAssistantPanelState.sandboxInstanceId}
+          />
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
+  );
+}
+
+function SetupScriptAssistantPanel(input: {
+  initialPrompt: string;
+  onClose: () => void;
+  sandboxInstanceId: string | null;
+}): React.JSX.Element {
+  const { conversationPane, workbench } = useSessionWorkbenchController({
+    sandboxInstanceId: input.sandboxInstanceId,
+  });
+  const [composerText, setComposerText] = useState(input.initialPrompt);
+  const [pendingDiffComments, setPendingDiffComments] = useState<
+    readonly PendingSessionDiffComment[]
+  >([]);
+  const conversationScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const terminalWorkspaceRef = useRef<SessionTerminalWorkspaceHandle | null>(null);
+  const terminalPanelKey = input.sandboxInstanceId ?? "setup-assistant-missing-sandbox";
+  const isTerminalOpenDisabled =
+    !workbench.terminalPanelState.isVisible && !workbench.connectionReadiness.canConnect;
+  const cliButtonTitle = workbench.primaryPanelState.isCliToggleActive
+    ? "Return to chat"
+    : (workbench.primaryPanelState.disabledReason ?? "Open Setup Assistant TUI");
+  const terminalButtonTitle = isTerminalOpenDisabled
+    ? (workbench.stoppedSessionMessage ?? "Terminal is available after the Setup Assistant starts.")
+    : workbench.terminalPanelState.isVisible
+      ? "Terminal"
+      : "Open terminal";
+  const headerStatusKind = workbench.workbenchStatus.kind;
+  const headerStatusLabel =
+    headerStatusKind === "error" ? "Error" : (workbench.sandboxLifecycleStatus ?? "Starting");
+  const unmatchedServerRequests = conversationPane.serverRequestsState.pendingServerRequests.filter(
+    (entry) => {
+      if (entry.kind !== "command-approval" && entry.kind !== "file-change-approval") {
+        return true;
+      }
+
+      return !conversationPane.chatState.entries.some((chatEntry) => {
+        if (chatEntry.kind !== "semantic-group") {
+          return false;
+        }
+
+        return chatEntry.items.some((item) => item.id === entry.requestId);
+      });
+    },
+  );
+
+  useEffect(() => {
+    setComposerText(input.initialPrompt);
+  }, [input.initialPrompt]);
+
+  function handleClearPendingDiffComments(): void {
+    setPendingDiffComments([]);
+  }
+
+  return (
+    <aside className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden overscroll-contain">
+      <Button
+        aria-label="Close Setup Assistant panel"
+        className="absolute top-3 left-1 size-8 px-0"
+        onClick={input.onClose}
+        title="Close right panel"
+        type="button"
+        variant="ghost"
+      >
+        <SidebarSimpleIcon aria-hidden className="size-4 -scale-x-100" />
+      </Button>
+      <div className="flex min-h-14 items-center justify-between gap-3 border-b pr-5 pl-9">
+        <h2 className="truncate text-sm font-semibold tracking-normal">Setup Assistant</h2>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            aria-label={headerStatusLabel}
+            className={[
+              "inline-block size-2.5 rounded-full border",
+              headerStatusKind === "connected"
+                ? "border-emerald-700 bg-emerald-600"
+                : "border-stone-300 bg-stone-300",
+            ].join(" ")}
+            role="status"
+            title={headerStatusLabel}
+          />
+          <span aria-hidden className="h-5 w-px bg-stone-200" />
+          <Button
+            aria-label="TUI"
+            aria-pressed={workbench.primaryPanelState.isCliToggleActive}
+            className={
+              workbench.primaryPanelState.isCliToggleActive
+                ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
+                : "bg-transparent text-foreground shadow-none hover:bg-stone-100"
+            }
+            disabled={
+              !workbench.primaryPanelState.canEnterCli &&
+              !workbench.primaryPanelState.isCliToggleActive
+            }
+            onClick={() => {
+              if (workbench.primaryPanelState.isCliToggleActive) {
+                void workbench.primaryPanelState.exitCliMode();
+                return;
+              }
+
+              void workbench.primaryPanelState.enterCliMode();
+            }}
+            size="sm"
+            title={cliButtonTitle}
+            type="button"
+            variant="ghost"
+          >
+            TUI
+          </Button>
+          <Button
+            aria-label={workbench.terminalPanelState.isVisible ? "Terminal" : "Open terminal"}
+            aria-pressed={workbench.terminalPanelState.isVisible}
+            className={
+              workbench.terminalPanelState.isVisible
+                ? "bg-stone-200 text-stone-950 shadow-none hover:bg-stone-300"
+                : "bg-transparent text-foreground shadow-none hover:bg-stone-100"
+            }
+            disabled={isTerminalOpenDisabled}
+            onClick={() => {
+              if (workbench.terminalPanelState.isVisible) {
+                workbench.terminalPanelState.closePanel();
+                return;
+              }
+
+              workbench.terminalPanelState.openPanel();
+              terminalWorkspaceRef.current?.ensureTerminalWorkspace();
+            }}
+            size="icon-sm"
+            title={terminalButtonTitle}
+            type="button"
+            variant="ghost"
+          >
+            <TerminalIcon aria-hidden className="size-4" />
+          </Button>
+        </div>
+      </div>
+      <ResizablePanelGroup
+        className="min-h-0 flex-1"
+        id="setup-assistant-body-panel-group"
+        orientation="vertical"
+      >
+        <ResizablePanel id="setup-assistant-conversation-panel" minSize="40%">
+          <div className="flex h-full min-h-0 flex-col">
+            <div
+              aria-label="Setup Assistant conversation"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5"
+              ref={conversationScrollContainerRef}
+              role="region"
+            >
+              {renderSetupAssistantMainContent({
+                conversation: {
+                  activeTurnId: conversationPane.chatState.activeTurnId,
+                  isTurnInProgress: conversationPane.chatState.status === "inProgress",
+                  pendingTurnId: conversationPane.chatState.pendingTurnId,
+                  scrollBehavior: "follow-streaming-at-bottom",
+                  chatEntries: conversationPane.chatState.entries,
+                  onUserMessageAction: conversationPane.dismissUserMessageAction,
+                  isRespondingToServerRequest:
+                    conversationPane.serverRequestsState.isRespondingToServerRequest,
+                  onRespondToServerRequest:
+                    conversationPane.serverRequestsState.respondToServerRequest,
+                  scrollContainerRef: conversationScrollContainerRef,
+                  serverRequestPanelEntries: unmatchedServerRequests,
+                },
+                cli: {
+                  ptyState: workbench.cliPtyState,
+                  refitKey: workbench.terminalPanelState.isVisible
+                    ? "setup-assistant-cli:terminal-open"
+                    : "setup-assistant-cli:terminal-closed",
+                },
+                initialEntryStartupState: workbench.initialEntryStartupState,
+                transitionState: workbench.primaryPanelState.transitionState,
+              })}
+            </div>
+            {workbench.primaryPanelState.showsChatComposer &&
+            workbench.initialEntryStartupState === null ? (
+              <div className="shrink-0 border-t bg-background px-5 py-4">
+                <SessionConversationBottomPanelController
+                  chatEntries={conversationPane.chatState.entries}
+                  composerStateInput={conversationPane.composerStateInput}
+                  draftState={{
+                    composerText,
+                    pendingDiffComments,
+                    clearPendingDiffComments: handleClearPendingDiffComments,
+                    setComposerText,
+                  }}
+                  isRespondingToServerRequest={
+                    conversationPane.serverRequestsState.isRespondingToServerRequest
+                  }
+                  onRespondToServerRequest={
+                    conversationPane.serverRequestsState.respondToServerRequest
+                  }
+                  key={input.sandboxInstanceId ?? "missing-setup-assistant"}
+                  serverRequestPanelEntries={unmatchedServerRequests}
+                  showWorkingIndicator={
+                    conversationPane.chatState.activeTurnId !== null &&
+                    conversationPane.chatState.status === "inProgress"
+                  }
+                />
+              </div>
+            ) : null}
+          </div>
+        </ResizablePanel>
+        {!workbench.terminalPanelState.isVisible || input.sandboxInstanceId === null ? null : (
+          <>
+            <ResizableHandle id="setup-assistant-terminal-resize-handle" />
+            <ResizablePanel id="setup-assistant-terminal-panel" minSize="180px">
+              <SessionTerminalWorkspace
+                key={terminalPanelKey}
+                cwd={workbench.primaryRepositoryState.selectedRepositoryPath}
+                ensureTransportConnected={workbench.ensureTransportConnected}
+                isConnectionReady={workbench.connectionReadiness.canConnect}
+                isVisible={workbench.terminalPanelState.isVisible}
+                onTerminalReset={workbench.handleTerminalWorkspaceReset}
+                onWorkspaceEmpty={() => {
+                  workbench.terminalPanelState.closePanel();
+                }}
+                ref={terminalWorkspaceRef}
+                sandboxStatus={workbench.sandboxLifecycleStatus}
+                sandboxInstanceId={input.sandboxInstanceId}
+              />
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+    </aside>
+  );
+}
+
+type SetupAssistantConversationContent = React.ComponentProps<
+  typeof SessionConversationMainContent
+>;
+
+function renderSetupAssistantMainContent(input: {
+  cli: React.ComponentProps<typeof SessionCliPanel>;
+  conversation: SetupAssistantConversationContent;
+  initialEntryStartupState: ReturnType<
+    typeof useSessionWorkbenchController
+  >["workbench"]["initialEntryStartupState"];
+  transitionState: ReturnType<
+    typeof useSessionWorkbenchController
+  >["workbench"]["primaryPanelState"]["transitionState"];
+}): React.JSX.Element {
+  if (input.initialEntryStartupState !== null) {
+    return (
+      <div className="mx-auto flex h-full w-full max-w-5xl items-center justify-center px-4 py-6">
+        <SessionStartupStatus state={input.initialEntryStartupState} />
+      </div>
+    );
+  }
+
+  switch (input.transitionState) {
+    case "switching_to_cli":
+    case "restoring_chat":
+      return <></>;
+    case "stable_cli":
+      return <SessionCliPanel {...input.cli} />;
+    case "stable_chat":
+      return <SessionConversationMainContent {...input.conversation} />;
+  }
 }
 
 function SandboxProfileEditorSectionPanels(input: {
@@ -1186,6 +1665,7 @@ function SandboxProfileEditorSectionPanels(input: {
   onPublishSuccessMessageDismiss: () => void;
   onRefreshSnapshot: (version: number) => void;
   onSetupScriptDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
+  setupAssistantControl: SetupScriptAssistantControl;
   profileId: string;
   publishSuccessMessage: boolean;
   publishSuccessMessageKey: Key;
@@ -1238,6 +1718,7 @@ function SandboxProfileEditorSectionPanels(input: {
           profileId={input.profileId}
           invalidateVersionSetupScript={input.invalidateVersionSetupScript}
           onDraftStateChange={input.onSetupScriptDraftStateChange}
+          setupAssistantControl={input.setupAssistantControl}
           isDraft={input.mode.kind === "draft"}
           version={input.mode.version}
         />
@@ -1774,6 +2255,7 @@ function LoadedSandboxProfileSetupScriptSection(input: {
   loader: ReturnType<typeof useSandboxProfileSetupScriptLoader>;
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   isDraft: boolean;
+  setupAssistantControl: SetupScriptAssistantControl;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element {
   if (input.loader.setupScriptQuery.isPending) {
@@ -1803,6 +2285,7 @@ function LoadedSandboxProfileSetupScriptSection(input: {
       integrationRows={input.integrationRows}
       setupScript={input.loader.setupScript}
       version={input.version}
+      setupAssistantControl={input.setupAssistantControl}
       {...(input.onDraftStateChange === undefined
         ? {}
         : { onDraftStateChange: input.onDraftStateChange })}
@@ -1818,6 +2301,7 @@ function ReadySandboxProfileSetupScriptSection(input: {
   setupScript: string | null;
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   isDraft: boolean;
+  setupAssistantControl: SetupScriptAssistantControl;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element {
   const setupScriptState = useLoadedSandboxProfileSetupScriptState({
@@ -1849,18 +2333,37 @@ function ReadySandboxProfileSetupScriptSection(input: {
   ]);
 
   return (
-    <SandboxProfileSetupScriptPanel
-      errorMessage={setupScriptState.errorMessage}
-      isSaving={setupScriptState.isSaving}
-      onBlur={setupScriptState.onBlur}
-      onChange={setupScriptState.onChange}
-      saveStatus={setupScriptState.saveStatus}
-      testControl={<SandboxProfileSetupScriptTestButton {...setupScriptTest.buttonProps} />}
-      testPanel={<SandboxProfileSetupScriptTestPanel {...setupScriptTest.panelProps} />}
-      value={setupScriptState.draftValue}
-      disabled={input.disabled}
-      repositoryHandles={resolveSandboxBaseRepositoryHandles(input.integrationRows)}
-    />
+    <div className="flex flex-col gap-4">
+      {input.setupAssistantControl.errorMessage === null ? null : (
+        <Notice variant="alert">{input.setupAssistantControl.errorMessage}</Notice>
+      )}
+      <SandboxProfileSetupScriptPanel
+        errorMessage={setupScriptState.errorMessage}
+        isSaving={setupScriptState.isSaving}
+        onBlur={setupScriptState.onBlur}
+        onChange={setupScriptState.onChange}
+        saveStatus={setupScriptState.saveStatus}
+        testControl={
+          <SandboxProfileSetupScriptTestButton
+            {...setupScriptTest.buttonProps}
+            setupAssistant={{
+              disabled: input.setupAssistantControl.disabled,
+              isStarting: input.setupAssistantControl.isStarting,
+              onClick: () => {
+                input.setupAssistantControl.onOpen({
+                  setupScript: setupScriptState.draftValue,
+                });
+              },
+              title: input.setupAssistantControl.title,
+            }}
+          />
+        }
+        testPanel={<SandboxProfileSetupScriptTestPanel {...setupScriptTest.panelProps} />}
+        value={setupScriptState.draftValue}
+        disabled={input.disabled}
+        repositoryHandles={resolveSandboxBaseRepositoryHandles(input.integrationRows)}
+      />
+    </div>
   );
 }
 
