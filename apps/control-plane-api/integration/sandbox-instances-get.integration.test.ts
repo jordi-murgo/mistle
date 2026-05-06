@@ -9,7 +9,7 @@ import {
   AutomationConversationStatuses,
   SandboxProfileStatuses,
 } from "@mistle/db/control-plane";
-import { SandboxInstanceStatuses } from "@mistle/db/data-plane";
+import { SandboxInstancePurposes, SandboxInstanceStatuses } from "@mistle/db/data-plane";
 import {
   createIntegrationTest,
   type IntegrationTestEnvironment,
@@ -221,6 +221,42 @@ describe.concurrent("sandbox instances get integration", () => {
       primaryRepositoryRoot: "/root/acme/repo-1",
     });
   });
+
+  it("returns setup-check sandbox instances for dashboard polling", async ({ env }) => {
+    const session = await env.auth.createSession({
+      email: "integration-new-sandbox-instances-get-setup-check@example.com",
+    });
+
+    await insertSandboxInstance(env, {
+      organizationId: session.organizationId,
+      sandboxInstanceId: "sbi_cp_get_setup_check_001",
+      title: "Setup check run",
+      purpose: SandboxInstancePurposes.SETUP_CHECK,
+    });
+
+    const response = await env.controlPlaneApi.http.fetch(
+      "/v1/sandbox/instances/sbi_cp_get_setup_check_001",
+      {
+        headers: {
+          cookie: session.cookie,
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = SandboxInstanceStatusResponseSchema.parse(await response.json());
+
+    expect(body).toEqual({
+      id: "sbi_cp_get_setup_check_001",
+      title: "Setup check run",
+      status: SandboxInstanceStatuses.PENDING,
+      connectable: false,
+      failureCode: null,
+      failureMessage: null,
+      runtimeContext: null,
+      automationConversation: null,
+    });
+  });
 });
 
 async function insertSandboxInstance(
@@ -229,6 +265,7 @@ async function insertSandboxInstance(
     organizationId: string;
     sandboxInstanceId: string;
     title: string | null;
+    purpose?: typeof SandboxInstancePurposes.SETUP_CHECK;
   },
 ): Promise<void> {
   await env.dataPlaneDb.insert(env.dataPlaneTables.sandboxInstances).values({
@@ -243,6 +280,7 @@ async function insertSandboxInstance(
     startedByKind: "user",
     startedById: "usr_cp_get",
     source: "dashboard",
+    ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
     createdAt: "2026-03-21T00:00:00.000Z",
     updatedAt: "2026-03-21T00:00:00.000Z",
   });
