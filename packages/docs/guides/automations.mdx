@@ -1,0 +1,72 @@
+---
+title: Automations
+description: Trigger agent work from external events
+---
+
+## Overview
+
+Automations start agent work in response to external events, such as webhook deliveries from connected systems.
+
+Use automations when a team wants Mistle to react to provider activity without a user manually starting every session.
+
+Examples include:
+
+- responding to Slack app mentions
+- reacting to GitHub events
+- starting triage or follow-up work from integration webhooks
+
+## Requirements
+
+Automations depend on the same building blocks as interactive sessions:
+
+- a sandbox profile that defines the agent environment
+- integrations that connect the external systems involved
+- webhook or callback configuration for providers that send events to Mistle
+- account linking when provider activity should be attributed to a specific Mistle user
+
+## Automation Types
+
+Mistle supports two automation shapes:
+
+- Event-triggered automations respond to provider events, such as Slack app mentions or GitHub webhooks.
+- Scheduled automations run on a saved schedule and start work without waiting for a provider event.
+
+Both shapes use a sandbox profile to define the environment where agent work runs.
+
+## Create An Automation
+
+To create an automation:
+
+1. Open **Automations**.
+2. Create a new automation.
+3. Choose whether it should be event-triggered or scheduled.
+4. Select the integration event or schedule.
+5. Choose the sandbox profile version that should run the work.
+6. Describe the task or instructions the agent should follow.
+7. Save the automation.
+
+For event-triggered automations, make sure the provider integration has webhook delivery configured and can reach Mistle.
+
+## Event Flow
+
+A typical automation flow is:
+
+1. A provider sends an event to Mistle.
+2. Mistle validates the event and resolves the relevant organization, integration, resource, and requester context.
+3. Mistle starts agent work using the configured sandbox profile.
+4. The agent uses configured integrations to complete the task and report back through the appropriate system.
+
+When automation work writes back to supported external systems, those updates can include a [session link](/guides/sessions#external-activity-links) so teammates can open the Mistle session behind the update.
+
+## Attribution
+
+When an automation is triggered by a provider user, Mistle can use account linking to resolve that provider identity back to a Mistle user.
+
+Read [Account Linking](/guides/account-linking) for identity attribution across providers.
+
+## Next Steps
+
+- Read [Integrations](/guides/integrations) for the provider connection model.
+- Read [Account Linking](/guides/account-linking) for requester attribution.
+- Read [Sandbox Profiles](/guides/sandbox-profiles) and [Sessions](/guides/sessions) for the execution environment used by automation runs.
+- For self-hosted deployments, read [Webhook And Callback URLs](/guides/self-hosted-webhook-callbacks).
