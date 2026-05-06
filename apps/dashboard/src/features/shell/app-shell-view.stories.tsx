@@ -160,7 +160,8 @@ const meta = {
     },
     showHeader: {
       control: "boolean",
-      description: "Toggles whether the sticky app shell header is rendered.",
+      description:
+        "Toggles route-owned sticky header content. The sidebar trigger can still render shell chrome when enabled.",
     },
     contentInsetOwner: {
       control: "inline-radio",
@@ -183,6 +184,11 @@ const meta = {
     mainContent: {
       control: false,
       description: "Primary page content rendered inside the shell content region.",
+    },
+    renderSidebarTrigger: {
+      control: "boolean",
+      description:
+        "Allows the shell sticky header to render the sidebar trigger when navigation access is not owned by child content.",
     },
     showHeaderLeadingContent: {
       control: "boolean",
@@ -233,6 +239,7 @@ const meta = {
         "headerActions",
         "autosaveIndicator",
         "mainContent",
+        "renderSidebarTrigger",
         "sidebarHeaderContent",
         "sidebarContent",
         "sidebarFooterContent",
@@ -259,6 +266,7 @@ const meta = {
         </p>
       </div>
     ),
+    renderSidebarTrigger: true,
     showHeader: true,
     showHeaderLeadingContent: true,
     showSessionsSidebar: false,

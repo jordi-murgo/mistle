@@ -4,10 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SessionsShellSidebar } from "../navigation/sessions-shell-sidebar.js";
 import { resolveAppShellFrame } from "./app-shell-frame.js";
 import { resolveAppShellRouteState } from "./app-shell-route-state.js";
-import {
-  shouldRenderAppShellSidebarTrigger,
-  shouldRenderAppShellStickyHeader,
-} from "./app-shell-view.js";
+import { shouldRenderAppShellStickyHeader } from "./app-shell-view.js";
 
 describe("resolveAppShellFrame", () => {
   it("uses the dedicated sessions sidebar only when the toggle is enabled on sessions routes", () => {
@@ -64,6 +61,7 @@ describe("resolveAppShellFrame", () => {
     }
     expect(sessionsSidebarElement.type).toBe(SessionsShellSidebar);
     expect(frame.sidebarHeaderContent).toBeNull();
+    expect(frame.renderSidebarTrigger).toBe(false);
   });
 
   it("keeps the normal app sidebar when the sessions toggle is disabled", () => {
@@ -110,6 +108,7 @@ describe("resolveAppShellFrame", () => {
     }
     expect(frame.sidebarContent.type).not.toBe(SessionsShellSidebar);
     expect(frame.sidebarHeaderContent).not.toBeNull();
+    expect(frame.renderSidebarTrigger).toBe(false);
   });
 
   it("keeps the app shell header hidden when route metadata does not opt in", () => {
@@ -152,6 +151,7 @@ describe("resolveAppShellFrame", () => {
 
     expect(frame.showHeader).toBe(false);
     expect(frame.showHeaderLeadingContent).toBe(false);
+    expect(frame.renderSidebarTrigger).toBe(true);
   });
 });
 
@@ -172,25 +172,5 @@ describe("app shell sticky header visibility", () => {
         hasSidebarTrigger: false,
       }),
     ).toBe(false);
-  });
-
-  it("renders the sidebar trigger on mobile when the mobile sidebar is closed", () => {
-    expect(
-      shouldRenderAppShellSidebarTrigger({
-        isMobile: true,
-        openMobile: false,
-        sidebarState: "expanded",
-      }),
-    ).toBe(true);
-  });
-
-  it("renders the sidebar trigger on desktop when the sidebar is collapsed", () => {
-    expect(
-      shouldRenderAppShellSidebarTrigger({
-        isMobile: false,
-        openMobile: false,
-        sidebarState: "collapsed",
-      }),
-    ).toBe(true);
   });
 });
