@@ -29,6 +29,7 @@ import {
   applyPublishedSandboxProfileVersionToProfile,
   applyPublishedSandboxProfileVersionToVersions,
   createTimezoneOptions,
+  formatCronExpressionBreakdownDiagram,
   resolveCronExpressionBreakdown,
   resolveSandboxProfileEditorVersionMode,
   resolveSandboxProfileSetupScriptIntegrationRows,
@@ -991,6 +992,23 @@ describe("SandboxProfileEditorPage", () => {
       dayOfWeek: "Monday, Wednesday, Friday",
     });
 
+    const hourlyBreakdown = resolveCronExpressionBreakdown("15 * * * *");
+    expect(hourlyBreakdown).not.toBeNull();
+    if (hourlyBreakdown === null) {
+      throw new Error("Expected hourly cron breakdown to resolve.");
+    }
+    const hourlyDiagram = formatCronExpressionBreakdownDiagram(hourlyBreakdown);
+    expect(hourlyDiagram).toContain("| hour: every hour");
+    expect(hourlyDiagram).toContain("minute: at minute 15");
+
+    const intervalBreakdown = resolveCronExpressionBreakdown("*/30 9-17 * * 1-5");
+    if (intervalBreakdown === null) {
+      throw new Error("Expected interval cron breakdown to resolve.");
+    }
+    expect(intervalBreakdown.dayOfWeek).toBe("Monday-Friday");
+    const intervalDiagram = formatCronExpressionBreakdownDiagram(intervalBreakdown);
+    expect(intervalDiagram).toContain("minute: every 30 minutes");
+
     expect(resolveCronExpressionBreakdown("not a cron expression")).toBeNull();
   });
 
@@ -1009,7 +1027,7 @@ describe("SandboxProfileEditorPage", () => {
         cronExpression: "*/15 9 * * *",
         timezone: "Asia/Singapore",
       }),
-    ).toBe("Enter a valid cron expression and timezone to preview the schedule.");
+    ).toBe("Next refresh: 2026-04-28 09:00 Asia/Singapore.");
   });
 
   it("keeps persisted timezone values selectable when the browser list does not include them", () => {
