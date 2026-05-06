@@ -27,10 +27,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  Switch,
 } from "@mistle/ui";
 import {
-  CheckCircleIcon,
   SidebarSimpleIcon,
   SpinnerGapIcon,
   TerminalIcon,
@@ -92,6 +90,7 @@ import {
 } from "../settings/organization/sandbox-storage-service.js";
 import { AutoSaveTitleHeading } from "../shared/auto-save-inline-heading.js";
 import { PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
+import { SettingsSwitchField } from "../shared/settings-switch-field.js";
 import { useRequiredOrganizationId } from "../shell/require-auth.js";
 import {
   createSandboxBaseSetupScriptContextFromGeneratedInventory,
@@ -176,7 +175,10 @@ type SandboxProfileDraftSectionState = {
   flushDraftChanges: () => Promise<boolean>;
   hasUnpersistedChanges: boolean;
   integrationRows?: readonly SandboxProfileBindingEditorRow[] | null;
-  isSaving: boolean;
+};
+type SandboxProfilePersistenceDraftState = {
+  flushDraftChanges: () => Promise<boolean>;
+  hasUnpersistedChanges: boolean;
 };
 type SetupScriptAssistantControl = {
   disabled: boolean;
@@ -195,7 +197,13 @@ function createIdleSandboxProfileDraftSectionState(): SandboxProfileDraftSection
   return {
     flushDraftChanges: async () => true,
     hasUnpersistedChanges: false,
-    isSaving: false,
+  };
+}
+
+function createIdleSandboxProfilePersistenceDraftState(): SandboxProfilePersistenceDraftState {
+  return {
+    flushDraftChanges: async () => true,
+    hasUnpersistedChanges: false,
   };
 }
 
@@ -1083,8 +1091,11 @@ function ReadySandboxProfileEditorPage(input: {
   const [setupScriptDraftState, setSetupScriptDraftState] = useState(
     createIdleSandboxProfileDraftSectionState,
   );
-  const isSavingDraftChanges = integrationDraftState.isSaving || setupScriptDraftState.isSaving;
+  const [persistenceDraftState, setPersistenceDraftState] = useState(
+    createIdleSandboxProfilePersistenceDraftState,
+  );
   const [publishRequestIsPending, setPublishRequestIsPending] = useState(false);
+  const [saveDraftRequestIsPending, setSaveDraftRequestIsPending] = useState(false);
   const [publishFlushError, setPublishFlushError] = useState<string | null>(null);
   const [setupAssistantError, setSetupAssistantError] = useState<string | null>(null);
   const [publishSuccessNoticeKey, setPublishSuccessNoticeKey] = useState(0);
@@ -1094,8 +1105,7 @@ function ReadySandboxProfileEditorPage(input: {
   const [setupAssistantPanelState, setSetupAssistantPanelState] =
     useState<SetupScriptAssistantPanelState | null>(null);
   const activeSectionId = input.routeSectionId;
-  const draftFieldsAreDisabled =
-    input.mode.kind !== "draft" || isSavingDraftChanges || publishRequestIsPending;
+  const draftFieldsAreReadOnly = input.mode.kind !== "draft" || publishRequestIsPending;
   const snapshotVersion = resolveLatestPublishedSandboxProfileVersion(input.versions);
   const snapshotPanelState = resolveSnapshotPanelState(snapshotVersion);
   const editorSections = createSandboxProfileEditorSections({
@@ -1169,7 +1179,7 @@ function ReadySandboxProfileEditorPage(input: {
         ? "Integration bindings are still loading."
         : !setupAssistantHasAgentRuntime
           ? SetupAssistantAgentRuntimeRequiredMessage
-          : draftFieldsAreDisabled
+          : draftFieldsAreReadOnly
             ? "Setup Assistant is unavailable while draft changes are saving."
             : startSetupAssistantMutation.isPending
               ? "Setup Assistant is starting."
@@ -1231,26 +1241,45 @@ function ReadySandboxProfileEditorPage(input: {
     setShowPublishSuccessMessage(true);
   }, [input.publishSuccessMessage]);
 
-  async function handlePublish(version: number): Promise<void> {
+  async function saveDraftChanges(): Promise<boolean> {
     setPublishFlushError(null);
-    const shouldFlushDraft =
-      integrationDraftState.hasUnpersistedChanges ||
-      integrationDraftState.isSaving ||
-      setupScriptDraftState.hasUnpersistedChanges ||
-      setupScriptDraftState.isSaving;
+    const shouldSavePersistence = persistenceDraftState.hasUnpersistedChanges;
+    const shouldSaveIntegrations = integrationDraftState.hasUnpersistedChanges;
+    const shouldSaveSetupScript = setupScriptDraftState.hasUnpersistedChanges;
 
+    if (!shouldSavePersistence && !shouldSaveIntegrations && !shouldSaveSetupScript) {
+      return true;
+    }
+
+    const [persistenceSaved, integrationsSaved, setupScriptSaved] = await Promise.all([
+      shouldSavePersistence ? persistenceDraftState.flushDraftChanges() : Promise.resolve(true),
+      shouldSaveIntegrations ? integrationDraftState.flushDraftChanges() : Promise.resolve(true),
+      shouldSaveSetupScript ? setupScriptDraftState.flushDraftChanges() : Promise.resolve(true),
+    ]);
+
+    if (!persistenceSaved || !integrationsSaved || !setupScriptSaved) {
+      setPublishFlushError(DraftSaveErrorMessage);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function handleSaveDraft(): Promise<void> {
+    setSaveDraftRequestIsPending(true);
+    try {
+      await saveDraftChanges();
+    } finally {
+      setSaveDraftRequestIsPending(false);
+    }
+  }
+
+  async function handlePublish(version: number): Promise<void> {
     setPublishRequestIsPending(true);
     try {
-      if (shouldFlushDraft) {
-        const [integrationsSaved, setupScriptSaved] = await Promise.all([
-          integrationDraftState.flushDraftChanges(),
-          setupScriptDraftState.flushDraftChanges(),
-        ]);
-
-        if (!integrationsSaved || !setupScriptSaved) {
-          setPublishFlushError(DraftFlushBeforePublishErrorMessage);
-          return;
-        }
+      const draftSaved = await saveDraftChanges();
+      if (!draftSaved) {
+        return;
       }
 
       await input.onPublish(version);
@@ -1266,6 +1295,7 @@ function ReadySandboxProfileEditorPage(input: {
   const editorView = (
     <SandboxProfileEditorView
       activeSectionId={activeSectionId}
+      hasUnpersistedPersistenceChanges={persistenceDraftState.hasUnpersistedChanges}
       hasUnpersistedIntegrationChanges={integrationDraftState.hasUnpersistedChanges}
       hasUnpersistedSetupScriptChanges={setupScriptDraftState.hasUnpersistedChanges}
       isSavingProfileName={metaState.isUpdating}
@@ -1282,6 +1312,9 @@ function ReadySandboxProfileEditorPage(input: {
       onDiscardChangesAndLeaveDraft={input.onDiscardChangesAndLeaveDraft}
       onPublish={(version) => {
         void handlePublish(version);
+      }}
+      onSaveDraft={() => {
+        void handleSaveDraft();
       }}
       onActiveSectionIdChange={(sectionId) => {
         if (
@@ -1315,6 +1348,7 @@ function ReadySandboxProfileEditorPage(input: {
       profileName={metaState.formState.displayName}
       profileNameFallback={metaState.pageTitle}
       publishRequestIsPending={publishRequestIsPending}
+      saveDraftRequestIsPending={saveDraftRequestIsPending}
       versionActionError={publishFlushError ?? input.versionActionError}
       versionActionIsPending={input.versionActionIsPending}
       isDeleteProfileDialogOpen={input.isDeleteProfileDialogOpen}
@@ -1322,13 +1356,12 @@ function ReadySandboxProfileEditorPage(input: {
         <SandboxProfileEditorSectionPanels
           activeSectionId={sectionId}
           currentVersion={input.currentVersion}
-          draftFieldsAreDisabled={draftFieldsAreDisabled}
+          draftFieldsAreReadOnly={draftFieldsAreReadOnly}
           integrationDraftState={integrationDraftState}
           integrationsLoader={integrationsLoader}
           invalidateProfileVersions={input.invalidateProfileVersions}
-          invalidateVersionBindings={input.invalidateVersionBindings}
-          invalidateVersionSetupScript={input.invalidateVersionSetupScript}
           mode={input.mode}
+          onPersistenceDraftStateChange={setPersistenceDraftState}
           onIntegrationDraftStateChange={setIntegrationDraftState}
           onPublishSuccessMessageDismiss={() => {
             setShowPublishSuccessMessage(false);
@@ -1656,13 +1689,12 @@ function renderSetupAssistantMainContent(input: {
 function SandboxProfileEditorSectionPanels(input: {
   activeSectionId: SandboxProfileEditorSectionId;
   currentVersion: SandboxProfileVersion | null;
-  draftFieldsAreDisabled: boolean;
+  draftFieldsAreReadOnly: boolean;
   integrationDraftState: SandboxProfileDraftSectionState;
   integrationsLoader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
   invalidateProfileVersions: (profileId: string) => Promise<void>;
-  invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
-  invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   mode: SandboxProfileEditorVersionMode;
+  onPersistenceDraftStateChange: (state: SandboxProfilePersistenceDraftState) => void;
   onIntegrationDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
   onPublishSuccessMessageDismiss: () => void;
   onRefreshSnapshot: (version: number) => void;
@@ -1699,29 +1731,18 @@ function SandboxProfileEditorSectionPanels(input: {
 
   return (
     <div className="flex w-full flex-col gap-8">
-      {input.currentVersion === null ? null : (
-        <SandboxProfilePanelSection>
-          <SandboxProfilePersistenceModeSection
-            disabled={input.draftFieldsAreDisabled}
-            invalidateProfileVersions={input.invalidateProfileVersions}
-            isDraft={input.mode.kind === "draft"}
-            profileId={input.profileId}
-            version={input.currentVersion}
-          />
-        </SandboxProfilePanelSection>
-      )}
       <LoadedSandboxProfileIntegrationSetupSection
         key={`${input.profileId}:integration-setup`}
         loader={input.integrationsLoader}
         onDraftStateChange={input.onIntegrationDraftStateChange}
         profileId={input.profileId}
-        disabled={input.draftFieldsAreDisabled}
+        disabled={input.draftFieldsAreReadOnly}
+        readOnly={input.draftFieldsAreReadOnly}
         version={input.mode.version}
-        invalidateVersionBindings={input.invalidateVersionBindings}
       />
       <SandboxProfilePanelSection>
         <LoadedSandboxProfileSetupScriptSection
-          disabled={input.draftFieldsAreDisabled}
+          disabled={input.draftFieldsAreReadOnly}
           key={`${input.profileId}:${String(input.mode.version)}:setup-script`}
           integrationRows={resolveSandboxProfileSetupScriptIntegrationRows(
             input.integrationsLoader.initialRows,
@@ -1729,13 +1750,24 @@ function SandboxProfileEditorSectionPanels(input: {
           )}
           loader={input.setupScriptLoader}
           profileId={input.profileId}
-          invalidateVersionSetupScript={input.invalidateVersionSetupScript}
           onDraftStateChange={input.onSetupScriptDraftStateChange}
           setupAssistantControl={input.setupAssistantControl}
           isDraft={input.mode.kind === "draft"}
           version={input.mode.version}
         />
       </SandboxProfilePanelSection>
+      {input.currentVersion === null ? null : (
+        <SandboxProfilePanelSection>
+          <SandboxProfilePersistenceModeSection
+            disabled={input.draftFieldsAreReadOnly}
+            invalidateProfileVersions={input.invalidateProfileVersions}
+            isDraft={input.mode.kind === "draft"}
+            onDraftStateChange={input.onPersistenceDraftStateChange}
+            profileId={input.profileId}
+            version={input.currentVersion}
+          />
+        </SandboxProfilePanelSection>
+      )}
     </div>
   );
 }
@@ -1748,11 +1780,23 @@ function SandboxProfilePersistenceModeSection(input: {
   disabled: boolean;
   invalidateProfileVersions: (profileId: string) => Promise<void>;
   isDraft: boolean;
+  onDraftStateChange: (state: SandboxProfilePersistenceDraftState) => void;
   profileId: string;
   version: SandboxProfileVersion;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const activeOrganizationId = useRequiredOrganizationId();
   const queryClient = useQueryClient();
+  const { disabled, invalidateProfileVersions, isDraft, onDraftStateChange, profileId, version } =
+    input;
+  const [draftPersistenceMode, setDraftPersistenceMode] = useState(version.defaultPersistenceMode);
+  const [persistedPersistenceMode, setPersistedPersistenceMode] = useState(
+    version.defaultPersistenceMode,
+  );
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const draftPersistenceModeRef = useRef(draftPersistenceMode);
+  const persistedPersistenceModeRef = useRef(persistedPersistenceMode);
+  draftPersistenceModeRef.current = draftPersistenceMode;
+  persistedPersistenceModeRef.current = persistedPersistenceMode;
   const organizationSandboxStorageSettingsQuery = useQuery({
     queryKey: organizationSandboxStorageSettingsQueryKey(activeOrganizationId),
     queryFn: async () => getOrganizationSandboxStorageSettings(),
@@ -1760,13 +1804,34 @@ function SandboxProfilePersistenceModeSection(input: {
   const persistenceModeMutation = useMutation({
     mutationFn: async (defaultPersistenceMode: SandboxProfileVersion["defaultPersistenceMode"]) =>
       putSandboxProfileVersionPersistenceMode({
-        profileId: input.profileId,
-        version: input.version.version,
+        profileId,
+        version: version.version,
         defaultPersistenceMode,
       }),
-    onSuccess: async (result) => {
+  });
+  const persistenceModeMutationIsPending = persistenceModeMutation.isPending;
+  const persistenceModeMutationMutateAsync = persistenceModeMutation.mutateAsync;
+  const persistDraftChanges = useCallback(async (): Promise<boolean> => {
+    if (persistenceModeMutationIsPending) {
+      return false;
+    }
+
+    const nextPersistenceMode = draftPersistenceModeRef.current;
+    if (nextPersistenceMode === persistedPersistenceModeRef.current) {
+      setSaveErrorMessage(null);
+      return true;
+    }
+
+    setSaveErrorMessage(null);
+    try {
+      const result = await persistenceModeMutationMutateAsync(nextPersistenceMode);
+      if (draftPersistenceModeRef.current !== nextPersistenceMode) {
+        return false;
+      }
+
+      setPersistedPersistenceMode(result.defaultPersistenceMode);
       queryClient.setQueryData(
-        sandboxProfileVersionsQueryKey(input.profileId),
+        sandboxProfileVersionsQueryKey(profileId),
         (currentData: { versions: SandboxProfileVersion[] } | undefined) =>
           currentData === undefined
             ? currentData
@@ -1778,28 +1843,49 @@ function SandboxProfilePersistenceModeSection(input: {
                 ),
               },
       );
-      await input.invalidateProfileVersions(input.profileId);
-    },
-  });
-  const selectedMode = persistenceModeMutation.isPending
-    ? persistenceModeMutation.variables
-    : input.version.defaultPersistenceMode;
-  const persistentModeIsEnabled = selectedMode === "persistent";
-  const fieldIsDisabled = input.disabled || !input.isDraft || persistenceModeMutation.isPending;
-  const orgPersistenceIsDisabled =
-    organizationSandboxStorageSettingsQuery.data?.persistentSandboxesEnabled === false;
-  const saveErrorMessage =
-    persistenceModeMutation.error === null || persistenceModeMutation.error === undefined
-      ? null
-      : resolveApiErrorMessage({
-          error: persistenceModeMutation.error,
+      await invalidateProfileVersions(profileId);
+      return true;
+    } catch (error: unknown) {
+      setSaveErrorMessage(
+        resolveApiErrorMessage({
+          error,
           fallbackMessage: "Could not save sandbox profile persistence mode.",
-        });
+        }),
+      );
+      return false;
+    }
+  }, [
+    invalidateProfileVersions,
+    persistenceModeMutationIsPending,
+    persistenceModeMutationMutateAsync,
+    profileId,
+    queryClient,
+  ]);
+
+  useEffect(() => {
+    setDraftPersistenceMode(version.defaultPersistenceMode);
+    setPersistedPersistenceMode(version.defaultPersistenceMode);
+    setSaveErrorMessage(null);
+  }, [version.defaultPersistenceMode, version.version]);
+
+  useEffect(() => {
+    onDraftStateChange({
+      flushDraftChanges: persistDraftChanges,
+      hasUnpersistedChanges: draftPersistenceMode !== persistedPersistenceMode,
+    });
+  }, [draftPersistenceMode, onDraftStateChange, persistDraftChanges, persistedPersistenceMode]);
+
+  const persistentModeIsEnabled = draftPersistenceMode === "persistent";
+  const fieldIsReadOnly = disabled || !isDraft;
+
+  if (organizationSandboxStorageSettingsQuery.data?.persistentSandboxesEnabled !== true) {
+    return null;
+  }
 
   return (
     <div className="space-y-2">
       {saveErrorMessage === null ? null : <Notice variant="alert">{saveErrorMessage}</Notice>}
-      {fieldIsDisabled ? (
+      {fieldIsReadOnly ? (
         <div className="flex w-fit items-center gap-2">
           <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
             Use persistent sandboxes:
@@ -1807,27 +1893,23 @@ function SandboxProfilePersistenceModeSection(input: {
           <span className="text-sm font-medium">{persistentModeIsEnabled ? "Yes" : "No"}</span>
         </div>
       ) : (
-        <div className="flex w-fit items-center gap-3">
-          <FieldHeader>
-            <FieldLabel htmlFor="sandbox-profile-persistent-mode">
-              Use persistent sandboxes
-            </FieldLabel>
-          </FieldHeader>
-          <Switch
-            checked={persistentModeIsEnabled}
-            id="sandbox-profile-persistent-mode"
-            onCheckedChange={(checked) => {
-              persistenceModeMutation.mutate(checked ? "persistent" : "ephemeral");
-            }}
-          />
+        <div className="flex max-w-5xl flex-col gap-2">
+          <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Experimental
+          </h2>
+          <div className="rounded-md border bg-background p-4">
+            <SettingsSwitchField
+              checked={persistentModeIsEnabled}
+              id="sandbox-profile-persistent-mode"
+              label="Use persistent sandboxes"
+              onCheckedChange={(checked) => {
+                setDraftPersistenceMode(checked ? "persistent" : "ephemeral");
+                setSaveErrorMessage(null);
+              }}
+            />
+          </div>
         </div>
       )}
-      {persistentModeIsEnabled && orgPersistenceIsDisabled ? (
-        <Notice variant="warning">
-          Organization persistence is disabled. Sessions from this profile will still be created in
-          non-persistent mode.
-        </Notice>
-      ) : null}
     </div>
   );
 }
@@ -1866,8 +1948,7 @@ function createSandboxProfileEditorSections(input: {
   );
 }
 
-const DraftFlushBeforePublishErrorMessage =
-  "Could not save draft changes before publishing. Check your draft changes and try again.";
+const DraftSaveErrorMessage = "Could not save draft changes. Check your changes and try again.";
 
 function DeleteSandboxProfileDialog(input: {
   automationUsages: readonly WebhookAutomationSandboxProfileUsage[];
@@ -1961,9 +2042,11 @@ export function SandboxProfileEditorView(input: {
   versionActionError: string | null;
   versionActionIsPending: boolean;
   publishRequestIsPending?: boolean;
+  saveDraftRequestIsPending?: boolean;
   isDeleteProfileDialogOpen: boolean;
   shouldBlockUnpersistedChangesNavigation?: BlockerFunction;
   onPublish: (version: number) => void;
+  onSaveDraft: () => void;
   onConfirmDeleteProfile: () => void;
   onDiscardChangesAndLeaveDraft: (input: { draftVersion: number }) => void;
   onDeleteProfileDialogOpenChange: (open: boolean) => void;
@@ -1975,13 +2058,15 @@ export function SandboxProfileEditorView(input: {
   onActiveSectionIdChange: (sectionId: SandboxProfileEditorSectionId) => void;
   renderSectionPanel: (sectionId: SandboxProfileEditorSectionId) => React.JSX.Element;
   versionActions?: React.JSX.Element;
+  hasUnpersistedPersistenceChanges?: boolean;
   hasUnpersistedIntegrationChanges?: boolean;
   hasUnpersistedSetupScriptChanges?: boolean;
   isSavingProfileName?: boolean;
 }): React.JSX.Element {
   const hasUnpersistedDraftChanges =
     input.mode.kind === "draft" &&
-    ((input.hasUnpersistedIntegrationChanges ?? false) ||
+    ((input.hasUnpersistedPersistenceChanges ?? false) ||
+      (input.hasUnpersistedIntegrationChanges ?? false) ||
       (input.hasUnpersistedSetupScriptChanges ?? false));
   const deleteProfileMenuItem = (
     <DropdownMenuItem
@@ -1993,6 +2078,11 @@ export function SandboxProfileEditorView(input: {
       Delete profile
     </DropdownMenuItem>
   );
+  const profileActions =
+    input.versionActions ??
+    (input.deleteProfileIsPending ? null : (
+      <MoreActionsMenu triggerLabel="More actions">{deleteProfileMenuItem}</MoreActionsMenu>
+    ));
 
   return (
     <>
@@ -2018,12 +2108,7 @@ export function SandboxProfileEditorView(input: {
       />
 
       <PageFrame
-        headerActions={
-          input.versionActions ??
-          (input.deleteProfileIsPending ? null : (
-            <MoreActionsMenu triggerLabel="More actions">{deleteProfileMenuItem}</MoreActionsMenu>
-          ))
-        }
+        headerActions={profileActions}
         titleSlot={
           <div className="min-w-0">
             <AutoSaveTitleHeading
@@ -2061,9 +2146,11 @@ export function SandboxProfileEditorView(input: {
                   onDiscardChangesAndLeaveDraft={input.onDiscardChangesAndLeaveDraft}
                   onMakeChanges={input.onMakeChanges}
                   onPublish={input.onPublish}
+                  onSaveDraft={input.onSaveDraft}
                   onViewActive={input.onViewActive}
                   onViewDraft={input.onViewDraft}
                   publishRequestIsPending={input.publishRequestIsPending === true}
+                  saveDraftRequestIsPending={input.saveDraftRequestIsPending === true}
                   versionActionIsPending={input.versionActionIsPending}
                 />
                 {input.renderSectionPanel(sectionId)}
@@ -2099,14 +2186,19 @@ function SandboxProfileLifecycleActions(input: {
   mode: SandboxProfileEditorVersionMode;
   hasUnpersistedDraftChanges: boolean;
   publishRequestIsPending: boolean;
+  saveDraftRequestIsPending: boolean;
   versionActionIsPending: boolean;
   onPublish: (version: number) => void;
+  onSaveDraft: () => void;
   onDiscardChangesAndLeaveDraft: (input: { draftVersion: number }) => void;
   onMakeChanges: () => void;
   onViewActive: () => void;
   onViewDraft: () => void;
 }): React.JSX.Element {
-  const versionActionIsDisabled = input.versionActionIsPending || input.publishRequestIsPending;
+  const versionActionIsDisabled =
+    input.versionActionIsPending ||
+    input.publishRequestIsPending ||
+    input.saveDraftRequestIsPending;
   const discardChangesInput = resolveDiscardDraftInput(input.mode);
   const discardChangesMenuItem =
     discardChangesInput === null ? null : (
@@ -2129,28 +2221,38 @@ function SandboxProfileLifecycleActions(input: {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <SandboxProfileVersionStatusBadge mode={input.mode} />
       {input.mode.kind === "draft" ? (
-        <ButtonGroup>
+        <div className="flex items-center gap-2">
           <Button
-            disabled={versionActionIsDisabled}
-            onClick={() => {
-              input.onPublish(input.mode.version);
-            }}
+            disabled={!input.hasUnpersistedDraftChanges || versionActionIsDisabled}
+            onClick={input.onSaveDraft}
             type="button"
+            variant="outline"
           >
-            {input.publishRequestIsPending ? "Publishing..." : "Publish"}
+            {input.saveDraftRequestIsPending ? "Saving..." : "Save draft"}
           </Button>
-          {hasDraftMenuItems ? (
-            <MoreActionsMenu
+          <ButtonGroup>
+            <Button
               disabled={versionActionIsDisabled}
-              triggerIconVariant="chevron-down"
-              triggerLabel="Sandbox profile actions"
-              triggerVariant="default"
+              onClick={() => {
+                input.onPublish(input.mode.version);
+              }}
+              type="button"
             >
-              {viewPublishedMenuItem}
-              {discardChangesMenuItem}
-            </MoreActionsMenu>
-          ) : null}
-        </ButtonGroup>
+              {input.publishRequestIsPending ? "Publishing..." : "Publish"}
+            </Button>
+            {hasDraftMenuItems ? (
+              <MoreActionsMenu
+                disabled={versionActionIsDisabled}
+                triggerIconVariant="chevron-down"
+                triggerLabel="Sandbox profile actions"
+                triggerVariant="default"
+              >
+                {viewPublishedMenuItem}
+                {discardChangesMenuItem}
+              </MoreActionsMenu>
+            ) : null}
+          </ButtonGroup>
+        </div>
       ) : (
         <ButtonGroup>
           <Button
@@ -2198,8 +2300,8 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   profileId: string;
   version: number;
   disabled: boolean;
+  readOnly: boolean;
   loader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
-  invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element {
   const showBindingsUnavailableNotice = input.loader.integrationBindingsQuery.isError;
@@ -2239,7 +2341,7 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
       availableConnections={input.loader.availableConnections}
       availableTargets={input.loader.availableTargets}
       disabled={input.disabled}
-      invalidateVersionBindings={input.invalidateVersionBindings}
+      readOnly={input.readOnly}
       integrationDirectoryQuery={input.loader.integrationDirectoryQuery}
       {...(input.onDraftStateChange === undefined
         ? {}
@@ -2292,7 +2394,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
   availableConnections: readonly IntegrationConnectionSummary[];
   availableTargets: readonly IntegrationTargetSummary[];
   disabled: boolean;
-  invalidateVersionBindings: (input: { profileId: string; version: number }) => Promise<void>;
+  readOnly: boolean;
   integrationDirectoryQuery: ReturnType<
     typeof useSandboxProfileIntegrationsLoader
   >["integrationDirectoryQuery"];
@@ -2304,7 +2406,6 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
     initialRows: input.initialRows,
     availableConnections: input.availableConnections,
     availableTargets: input.availableTargets,
-    invalidateVersionBindings: input.invalidateVersionBindings,
   });
   const onDraftStateChange = input.onDraftStateChange;
 
@@ -2313,14 +2414,12 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
       flushDraftChanges: integrationsState.flushDraftChanges,
       hasUnpersistedChanges: integrationsState.hasUnsavedChanges,
       integrationRows: integrationsState.integrationRows,
-      isSaving: integrationsState.isSubmittingIntegrationBindings,
     });
   }, [
     onDraftStateChange,
     integrationsState.flushDraftChanges,
     integrationsState.hasUnsavedChanges,
     integrationsState.integrationRows,
-    integrationsState.isSubmittingIntegrationBindings,
   ]);
 
   return (
@@ -2338,6 +2437,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
           integrationRows={integrationsState.integrationRows}
           integrationSaveError={integrationsState.integrationSaveError}
           disabled={input.disabled}
+          readOnly={input.readOnly}
           onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
           onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
           onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
@@ -2354,7 +2454,6 @@ function LoadedSandboxProfileSetupScriptSection(input: {
   disabled: boolean;
   integrationRows: readonly SandboxProfileBindingEditorRow[] | null;
   loader: ReturnType<typeof useSandboxProfileSetupScriptLoader>;
-  invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   isDraft: boolean;
   setupAssistantControl: SetupScriptAssistantControl;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
@@ -2379,7 +2478,6 @@ function LoadedSandboxProfileSetupScriptSection(input: {
 
   return (
     <ReadySandboxProfileSetupScriptSection
-      invalidateVersionSetupScript={input.invalidateVersionSetupScript}
       isDraft={input.isDraft}
       profileId={input.profileId}
       disabled={input.disabled}
@@ -2400,7 +2498,6 @@ function ReadySandboxProfileSetupScriptSection(input: {
   disabled: boolean;
   integrationRows: readonly SandboxProfileBindingEditorRow[] | null;
   setupScript: string | null;
-  invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
   isDraft: boolean;
   setupAssistantControl: SetupScriptAssistantControl;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
@@ -2409,7 +2506,6 @@ function ReadySandboxProfileSetupScriptSection(input: {
     profileId: input.profileId,
     version: input.version,
     setupScript: input.setupScript,
-    invalidateVersionSetupScript: input.invalidateVersionSetupScript,
   });
   const setupScriptTest = useSandboxProfileSetupScriptTestRun({
     disabled: input.disabled,
@@ -2424,14 +2520,8 @@ function ReadySandboxProfileSetupScriptSection(input: {
     onDraftStateChange?.({
       flushDraftChanges: setupScriptState.flushDraftChanges,
       hasUnpersistedChanges: setupScriptState.hasUnsavedChanges,
-      isSaving: setupScriptState.isSaving,
     });
-  }, [
-    onDraftStateChange,
-    setupScriptState.flushDraftChanges,
-    setupScriptState.hasUnsavedChanges,
-    setupScriptState.isSaving,
-  ]);
+  }, [onDraftStateChange, setupScriptState.flushDraftChanges, setupScriptState.hasUnsavedChanges]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -2441,9 +2531,7 @@ function ReadySandboxProfileSetupScriptSection(input: {
       <SandboxProfileSetupScriptPanel
         errorMessage={setupScriptState.errorMessage}
         isSaving={setupScriptState.isSaving}
-        onBlur={setupScriptState.onBlur}
         onChange={setupScriptState.onChange}
-        saveStatus={setupScriptState.saveStatus}
         testControl={
           <SandboxProfileSetupScriptTestButton
             {...setupScriptTest.buttonProps}
@@ -2498,20 +2586,12 @@ export function SandboxProfileSetupScriptPanel(input: {
   value: string;
   disabled?: boolean;
   isSaving?: boolean;
-  saveStatus?: "idle" | "saving" | "saved" | "saved-fading";
   errorMessage?: string | null;
   onChange?: (nextValue: string) => void;
-  onBlur?: () => void;
   repositoryHandles?: readonly string[];
   testControl?: ReactNode;
   testPanel?: ReactNode;
 }): React.JSX.Element {
-  const liveMessage =
-    input.errorMessage !== null && input.errorMessage !== undefined
-      ? ""
-      : input.saveStatus === "saved" || input.saveStatus === "saved-fading"
-        ? "Saved"
-        : "";
   const setupScriptContext = createSandboxBaseSetupScriptContextFromGeneratedInventory(
     input.repositoryHandles,
   );
@@ -2526,9 +2606,6 @@ export function SandboxProfileSetupScriptPanel(input: {
           </div>
         </FieldHeader>
         <FieldContent>
-          <p aria-live="polite" className="sr-only" role="status">
-            {liveMessage}
-          </p>
           <div className="gap-2 flex flex-col">
             <SandboxSetupScriptEditor
               ariaLabelledBy="sandbox-setup-script-label"
@@ -2538,7 +2615,6 @@ export function SandboxProfileSetupScriptPanel(input: {
               }}
               placeholderText={SetupScriptPlaceholder}
               value={input.value}
-              {...(input.onBlur === undefined ? {} : { onBlur: input.onBlur })}
             />
             {input.testPanel}
             {input.disabled === true ? null : (
@@ -2599,15 +2675,6 @@ export function SandboxProfileSetupScriptPanel(input: {
             {input.errorMessage ? (
               <div aria-live="polite" className="text-destructive text-xs" role="status">
                 {input.errorMessage}
-              </div>
-            ) : input.saveStatus === "saved" || input.saveStatus === "saved-fading" ? (
-              <div
-                className={`flex items-center gap-1.5 text-xs text-emerald-700 transition-opacity duration-700 ${
-                  input.saveStatus === "saved" ? "opacity-100" : "opacity-0"
-                }`}
-              >
-                <CheckCircleIcon aria-hidden className="size-4" weight="fill" />
-                <span>Saved</span>
               </div>
             ) : null}
           </div>
