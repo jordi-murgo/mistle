@@ -15,7 +15,7 @@ type NewSessionPageStoryArgs = {
   initialSelectedProfileId: string;
 };
 
-function NewSessionPageStory(input: NewSessionPageStoryArgs): React.JSX.Element {
+export function NewSessionPageStory(input: NewSessionPageStoryArgs): React.JSX.Element {
   const queryClient = createSessionsPageStoryQueryClient({
     launchableProfiles: input.launchableProfiles,
   });
@@ -38,6 +38,7 @@ const meta = {
   title: "Dashboard/Sessions/New Session Page",
   component: NewSessionPageStory,
   tags: ["autodocs"],
+  excludeStories: ["NewSessionPageStory"],
   parameters: {
     layout: "fullscreen",
   },
