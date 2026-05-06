@@ -15,6 +15,7 @@ const CloudflaredTunnelStartupTimeoutMs = 180_000;
 const RuntimePublicAccessTunnelLabel = "mistle.runtime-public-access.tunnel-id";
 const RuntimePublicAccessProxyReadyTimeoutMs = 30_000;
 const RuntimePublicAccessProxyPoolLockTimeoutMs = 240_000;
+const RuntimePublicAccessRouteReadyTimeoutMs = 30_000;
 
 export type RuntimePublicAccessTunnel = {
   publicBaseUrls: ReadonlyMap<string, string>;
@@ -25,6 +26,7 @@ export async function startRuntimeCloudflaredTunnel(input: {
   environmentId: string;
   tunnelId: string;
   tunnelCredentialsJson: string;
+  publicHostnames: readonly string[];
   ingressRules: ReadonlyArray<{
     publicHostname: string;
     localBaseUrl: string;
@@ -44,12 +46,17 @@ export async function startRuntimeCloudflaredTunnel(input: {
   const proxy = await acquireRuntimePublicAccessProxy({
     tunnelId: input.tunnelId,
     tunnelCredentialsJson: input.tunnelCredentialsJson,
-    publicHostnames: input.ingressRules.map((rule) => rule.publicHostname),
+    publicHostnames: input.publicHostnames,
   });
   const registered = await registerRuntimePublicAccessRoutes({
     proxy,
     environmentId: input.environmentId,
     ingressRules: input.ingressRules,
+  });
+  await waitForRuntimePublicAccessRoutesReady({
+    environmentId: input.environmentId,
+    ingressRules: input.ingressRules,
+    timeoutMs: RuntimePublicAccessRouteReadyTimeoutMs,
   });
 
   return {
@@ -76,11 +83,11 @@ async function acquireRuntimePublicAccessProxy(input: {
   publicHostnames: readonly string[];
 }): Promise<RuntimePublicAccessProxy> {
   const runnerPoolSession = resolveRunnerPoolSession(process.env);
-  const publicHostnames = [...new Set(input.publicHostnames)].sort();
+  const publicHostnames = normalizeRuntimePublicAccessHostnames(input.publicHostnames);
   const proxy = await acquireRunnerServicePoolLease({
     runId: runnerPoolSession.runId,
     coordinatorDir: runnerPoolSession.coordinatorDir,
-    key: `runtime-public-access:${input.tunnelId}:${publicHostnames.join(",")}`,
+    key: createRuntimePublicAccessProxyPoolKey({ tunnelId: input.tunnelId }),
     lockTimeoutMs: RuntimePublicAccessProxyPoolLockTimeoutMs,
     start: async () =>
       startRuntimePublicAccessProxy({
@@ -88,6 +95,7 @@ async function acquireRuntimePublicAccessProxy(input: {
         tunnelCredentialsJson: input.tunnelCredentialsJson,
         publicHostnames,
         coordinatorDir: runnerPoolSession.coordinatorDir,
+        ownerPid: runnerPoolSession.ownerPid,
       }),
     healthCheck: async (service) => {
       const endpoint = service.endpoints.http;
@@ -114,11 +122,27 @@ async function acquireRuntimePublicAccessProxy(input: {
   return proxy;
 }
 
+export function createRuntimePublicAccessProxyPoolKey(input: { tunnelId: string }): string {
+  return `runtime-public-access:${input.tunnelId}`;
+}
+
+export function normalizeRuntimePublicAccessHostnames(
+  publicHostnames: readonly string[],
+): readonly string[] {
+  const normalized = [...new Set(publicHostnames)].sort();
+  if (normalized.length === 0 || normalized.some((publicHostname) => publicHostname.length === 0)) {
+    throw new Error("Runtime public access proxy requires at least one public hostname.");
+  }
+
+  return normalized;
+}
+
 async function startRuntimePublicAccessProxy(input: {
   tunnelId: string;
   tunnelCredentialsJson: string;
   publicHostnames: readonly string[];
   coordinatorDir: string;
+  ownerPid: number;
 }): Promise<{
   endpoints: {
     http: {
@@ -145,6 +169,7 @@ async function startRuntimePublicAccessProxy(input: {
       MISTLE_RUNTIME_PUBLIC_ACCESS_TUNNEL_ID: input.tunnelId,
       MISTLE_RUNTIME_PUBLIC_ACCESS_TUNNEL_CREDENTIALS_JSON: input.tunnelCredentialsJson,
       MISTLE_RUNTIME_PUBLIC_ACCESS_PUBLIC_HOSTNAMES: JSON.stringify(input.publicHostnames),
+      MISTLE_RUNTIME_PUBLIC_ACCESS_OWNER_PID: String(input.ownerPid),
       MISTLE_RUNTIME_PUBLIC_ACCESS_READY_PATH: readyPath,
       MISTLE_RUNTIME_PUBLIC_ACCESS_LOG_PATH: logPath,
       MISTLE_RUNTIME_PUBLIC_ACCESS_CLOUDFLARED_IMAGE: CloudflaredImageReference,
@@ -293,6 +318,75 @@ async function unregisterRuntimePublicAccessRoutes(input: {
   }).catch(() => undefined);
 }
 
+async function waitForRuntimePublicAccessRoutesReady(input: {
+  environmentId: string;
+  ingressRules: ReadonlyArray<{
+    publicHostname: string;
+    localBaseUrl: string;
+  }>;
+  timeoutMs: number;
+}): Promise<void> {
+  const startedAt = Date.now();
+  for (const rule of input.ingressRules) {
+    await waitForRuntimePublicAccessRouteReady({
+      environmentId: input.environmentId,
+      publicHostname: rule.publicHostname,
+      timeoutMs: Math.max(0, input.timeoutMs - (Date.now() - startedAt)),
+    });
+  }
+}
+
+async function waitForRuntimePublicAccessRouteReady(input: {
+  environmentId: string;
+  publicHostname: string;
+  timeoutMs: number;
+}): Promise<void> {
+  const startedAt = Date.now();
+  const routeHealthUrl = createRuntimePublicAccessRouteHealthUrl(input);
+  while (Date.now() - startedAt < input.timeoutMs) {
+    try {
+      const response = await fetch(routeHealthUrl);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Keep polling until the environment-scoped route reaches the local service.
+    }
+
+    await systemSleeper.sleep(CloudflaredTunnelPollIntervalMs);
+  }
+
+  throw new Error(
+    `Timed out waiting for runtime Cloudflare public access route at ${routeHealthUrl.toString()} after ${String(input.timeoutMs)}ms.`,
+  );
+}
+
+export function createRuntimePublicAccessRouteHealthUrl(input: {
+  environmentId: string;
+  publicHostname: string;
+}): URL {
+  const url = new URL("/__healthz", `https://${input.publicHostname}`);
+  url.searchParams.set("x-mistle-test-environment-id", input.environmentId);
+  return url;
+}
+
+export function readRuntimePublicAccessEnvironmentIdFromPath(
+  requestPath: string,
+): string | undefined {
+  const prefix = "/__test-environments/";
+  if (!requestPath.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const pathWithoutPrefix = requestPath.slice(prefix.length);
+  const separatorIndex = pathWithoutPrefix.indexOf("/");
+  if (separatorIndex <= 0) {
+    return undefined;
+  }
+
+  return decodeURIComponent(pathWithoutPrefix.slice(0, separatorIndex));
+}
+
 function createRuntimePublicAccessProxyScript(): string {
   return String.raw`
 import { spawn, spawnSync } from "node:child_process";
@@ -305,8 +399,14 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const DockerHostGatewayName = "host.docker.internal";
+const UpgradeTargetConnectRetryIntervalMs = 100;
+const UpgradeTargetConnectTimeoutMs = 10_000;
 const tunnelId = readRequiredEnv("MISTLE_RUNTIME_PUBLIC_ACCESS_TUNNEL_ID");
 const tunnelCredentialsJson = readRequiredEnv("MISTLE_RUNTIME_PUBLIC_ACCESS_TUNNEL_CREDENTIALS_JSON");
+const ownerPid = Number(readRequiredEnv("MISTLE_RUNTIME_PUBLIC_ACCESS_OWNER_PID"));
+if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
+  throw new Error("Runtime public access proxy requires a positive owner pid.");
+}
 const readyPath = readRequiredEnv("MISTLE_RUNTIME_PUBLIC_ACCESS_READY_PATH");
 const logPath = readRequiredEnv("MISTLE_RUNTIME_PUBLIC_ACCESS_LOG_PATH");
 const cloudflaredImage = readRequiredEnv("MISTLE_RUNTIME_PUBLIC_ACCESS_CLOUDFLARED_IMAGE");
@@ -333,6 +433,12 @@ server.listen(0, "0.0.0.0", async () => {
 const logStream = createWriteStream(logPath, { flags: "a" });
 let cloudflared;
 let cloudflaredContainerName;
+const ownerWatchdog = setInterval(() => {
+  if (!isProcessAlive(ownerPid)) {
+    logStream.write("owner process " + String(ownerPid) + " is no longer alive; shutting down\n");
+    shutdown();
+  }
+}, 1000);
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
@@ -387,12 +493,13 @@ async function handleRequest(request, response) {
     return;
   }
 
-  const targetUrl = new URL(request.url ?? "/", target);
+  const targetUrl = new URL(request.url ?? "/", target.localBaseUrl);
   const proxyRequest = http.request(targetUrl, {
     method: request.method,
     headers: {
       ...request.headers,
       host: targetUrl.host,
+      "x-mistle-test-environment-id": target.environmentId,
     },
   }, (proxyResponse) => {
     response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers);
@@ -412,13 +519,16 @@ function handleUpgrade(request, socket, head) {
     return;
   }
 
-  const targetUrl = new URL(request.url ?? "/", target);
-  const targetSocket = net.connect({
+  const targetUrl = new URL(request.url ?? "/", target.localBaseUrl);
+  connectUpgradeTarget({
     host: targetUrl.hostname,
     port: Number(targetUrl.port),
-  });
-  targetSocket.once("connect", () => {
-    const headers = Object.entries(request.headers)
+    timeoutMs: UpgradeTargetConnectTimeoutMs,
+  }).then((targetSocket) => {
+    const headers = Object.entries({
+      ...request.headers,
+      "x-mistle-test-environment-id": target.environmentId,
+    })
       .map(([name, value]) => name + ": " + (Array.isArray(value) ? value.join(", ") : value ?? ""))
       .join("\r\n");
     targetSocket.write((request.method ?? "GET") + " " + targetUrl.pathname + targetUrl.search + " HTTP/" + request.httpVersion + "\r\n" + headers + "\r\n\r\n");
@@ -427,20 +537,64 @@ function handleUpgrade(request, socket, head) {
     }
     socket.pipe(targetSocket);
     targetSocket.pipe(socket);
-  });
-  targetSocket.on("error", () => {
+  }).catch(() => {
     socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+}
+
+function connectUpgradeTarget(input) {
+  const deadline = Date.now() + input.timeoutMs;
+  return new Promise((resolve, reject) => {
+    const tryConnect = () => {
+      const targetSocket = net.connect({
+        host: input.host,
+        port: input.port,
+      });
+      targetSocket.once("connect", () => {
+        resolve(targetSocket);
+      });
+      targetSocket.once("error", (error) => {
+        targetSocket.destroy();
+        if (Date.now() >= deadline) {
+          reject(error);
+          return;
+        }
+        setTimeout(tryConnect, UpgradeTargetConnectRetryIntervalMs);
+      });
+    };
+
+    tryConnect();
   });
 }
 
 function resolveTarget(request) {
   const host = String(request.headers.host ?? "").split(":")[0];
   const requestUrl = new URL(request.url ?? "/", "http://" + host);
-  const environmentId = String(request.headers["x-mistle-test-environment-id"] ?? requestUrl.searchParams.get("x-mistle-test-environment-id") ?? "");
+  const environmentId = String(request.headers["x-mistle-test-environment-id"] ?? requestUrl.searchParams.get("x-mistle-test-environment-id") ?? readEnvironmentIdFromPath(requestUrl.pathname) ?? "");
   if (host.length === 0 || environmentId.length === 0) {
     return undefined;
   }
-  return routes.get(createRouteKey(host, environmentId));
+  const localBaseUrl = routes.get(createRouteKey(host, environmentId));
+  if (localBaseUrl === undefined) {
+    return undefined;
+  }
+  return {
+    environmentId,
+    localBaseUrl,
+  };
+}
+
+function readEnvironmentIdFromPath(requestPath) {
+  const prefix = "/__test-environments/";
+  if (!requestPath.startsWith(prefix)) {
+    return undefined;
+  }
+  const pathWithoutPrefix = requestPath.slice(prefix.length);
+  const separatorIndex = pathWithoutPrefix.indexOf("/");
+  if (separatorIndex <= 0) {
+    return undefined;
+  }
+  return decodeURIComponent(pathWithoutPrefix.slice(0, separatorIndex));
 }
 
 function createRouteKey(hostname, environmentId) {
@@ -503,6 +657,7 @@ async function startCloudflared(proxyBaseUrl) {
 }
 
 function shutdown() {
+  clearInterval(ownerWatchdog);
   server.close();
   if (cloudflared !== undefined) {
     cloudflared.kill("SIGTERM");
@@ -512,6 +667,19 @@ function shutdown() {
   }
   logStream.end();
   process.exit(0);
+}
+
+function isProcessAlive(processId) {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && error.code === "EPERM") {
+      return true;
+    }
+
+    return false;
+  }
 }
 
 function readRequiredEnv(name) {
