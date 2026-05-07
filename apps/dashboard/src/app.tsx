@@ -38,7 +38,7 @@ import { ScheduledAutomationEditorPage } from "./features/pages/scheduled-automa
 import { SessionWorkbenchPage } from "./features/pages/session-workbench-page.js";
 import { SessionsPage } from "./features/pages/sessions-page.js";
 import { WebhookAutomationEditorPage } from "./features/pages/webhook-automation-editor-page.js";
-import { createSettingsRoutes } from "./features/settings/settings-routes.js";
+import { SETTINGS_DEFAULT_PATH } from "./features/settings/model.js";
 import { AppShell } from "./features/shell/app-shell.js";
 import { RequireAuth } from "./features/shell/require-auth.js";
 import { RouteErrorBoundary } from "./features/shell/route-error-boundary.js";
@@ -159,13 +159,44 @@ export const APP_ROUTES = createRoutesFromElements(
             path=":sandboxInstanceId"
           />
         </Route>
-        {createSettingsRoutes({
-          personal: <ProfileSettingsPage />,
-          organizationGeneral: <OrganizationGeneralSettingsPage />,
-          organizationIdentityLinking: <OrganizationIdentityLinkingSettingsPage />,
-          organizationMembers: <OrganizationMembersSettingsPage />,
-          organizationSandboxes: <OrganizationSandboxStorageSettingsPage />,
-        })}
+        <Route element={<RouteOutlet />} handle={ROUTE_HANDLES.settings} path="settings">
+          <Route element={<Navigate replace to={SETTINGS_DEFAULT_PATH} />} index />
+          <Route element={<RouteOutlet />} handle={ROUTE_HANDLES.settingsAccount} path="account">
+            <Route element={<Navigate replace to={SETTINGS_DEFAULT_PATH} />} index />
+            <Route
+              element={<ProfileSettingsPage />}
+              handle={ROUTE_HANDLES.settingsProfile}
+              path="profile"
+            />
+          </Route>
+          <Route
+            element={<RouteOutlet />}
+            handle={ROUTE_HANDLES.settingsOrganization}
+            path="organization"
+          >
+            <Route element={<Navigate replace to="/settings/organization/general" />} index />
+            <Route
+              element={<OrganizationGeneralSettingsPage />}
+              handle={ROUTE_HANDLES.settingsOrganizationGeneral}
+              path="general"
+            />
+            <Route
+              element={<OrganizationMembersSettingsPage />}
+              handle={ROUTE_HANDLES.settingsOrganizationMembers}
+              path="members"
+            />
+            <Route
+              element={<OrganizationIdentityLinkingSettingsPage />}
+              handle={ROUTE_HANDLES.settingsOrganizationIdentityLinking}
+              path="identity-linking"
+            />
+            <Route
+              element={<OrganizationSandboxStorageSettingsPage />}
+              handle={ROUTE_HANDLES.settingsOrganizationSandboxes}
+              path="sandboxes"
+            />
+          </Route>
+        </Route>
       </Route>
     </Route>
     <Route element={<Navigate replace to="/" />} path="*" />

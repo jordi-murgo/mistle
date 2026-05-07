@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { PageFrame } from "./page-frame.js";
+import { PageHeaderSidebarTriggerProvider } from "./page-header-sidebar-trigger-context.js";
 
 describe("PageFrame", () => {
   it("renders a centered constrained layout for the form page frame", () => {
@@ -103,12 +104,166 @@ describe("PageFrame", () => {
       </PageFrame>,
     );
 
-    const constrainedContainers = container.querySelectorAll(".max-w-5xl");
+    const header = container.querySelector('[data-slot="page-frame-header-content"]');
+    const content = screen.getByText("Contained content").parentElement;
 
-    expect(constrainedContainers).toHaveLength(2);
-    for (const constrainedContainer of constrainedContainers) {
-      expect(constrainedContainer.className).toContain("mx-auto");
-      expect(constrainedContainer.className).toContain("w-full");
-    }
+    expect(header?.className).toContain("min-[69rem]:mx-auto");
+    expect(header?.className).toContain("min-[69rem]:w-full");
+    expect(header?.className).toContain("min-[69rem]:max-w-5xl");
+    expect(content?.className).toContain("mx-auto");
+    expect(content?.className).toContain("w-full");
+    expect(content?.className).toContain("max-w-5xl");
+  });
+
+  it("renders the shell sidebar trigger before the page header title", () => {
+    const { container } = render(
+      <PageHeaderSidebarTriggerProvider
+        value={{
+          control: <button type="button">Toggle Sidebar</button>,
+          isVisible: true,
+        }}
+      >
+        <PageFrame title="Generic page">
+          <div>Contained content</div>
+        </PageFrame>
+      </PageHeaderSidebarTriggerProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+    const title = screen.getByRole("heading", { name: "Generic page" });
+
+    expect(container.querySelector('[data-slot="page-frame-header-layout"]')).toBeDefined();
+    expect(trigger.compareDocumentPosition(title)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("only lets the sidebar trigger occupy form header row space while constrained content is near the shell edge", () => {
+    const { container } = render(
+      <PageHeaderSidebarTriggerProvider
+        value={{
+          control: <button type="button">Toggle Sidebar</button>,
+          isVisible: true,
+        }}
+      >
+        <PageFrame title="Profile" width="form">
+          <div>Contained content</div>
+        </PageFrame>
+      </PageHeaderSidebarTriggerProvider>,
+    );
+
+    const layout = container.querySelector('[data-slot="page-frame-header-layout"]');
+    const trigger = container.querySelector('[data-slot="page-frame-header-trigger"]');
+    const header = container.querySelector('[data-slot="page-frame-header-content"]');
+
+    expect(layout?.className).toContain("flex");
+    expect(layout?.className).toContain("items-start");
+    expect(layout?.className).toContain("min-[47rem]:block");
+    expect(trigger?.className).toContain("shrink-0");
+    expect(trigger?.className).toContain("min-[47rem]:absolute");
+    expect(trigger?.className).toContain("min-[47rem]:top-0");
+    expect(trigger?.className).toContain("min-[47rem]:left-0");
+    expect(header?.className).toContain("flex-1");
+    expect(header?.className).toContain("min-[47rem]:mx-auto");
+    expect(header?.className).toContain("min-[47rem]:max-w-2xl");
+  });
+
+  it("renders the shell sidebar trigger for breadcrumb-only page frames", () => {
+    render(
+      <PageHeaderSidebarTriggerProvider
+        value={{
+          control: <button type="button">Toggle Sidebar</button>,
+          isVisible: true,
+        }}
+      >
+        <PageFrame breadcrumbs={<nav aria-label="Page breadcrumbs">Parent / Child</nav>}>
+          <div>Contained content</div>
+        </PageFrame>
+      </PageHeaderSidebarTriggerProvider>,
+    );
+
+    const breadcrumbs = screen.getByLabelText("Page breadcrumbs");
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+
+    expect(trigger.compareDocumentPosition(breadcrumbs)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByRole("heading")).toBeNull();
+  });
+
+  it("renders the shell sidebar trigger before breadcrumbs when breadcrumbs and a page header exist", () => {
+    render(
+      <PageHeaderSidebarTriggerProvider
+        value={{
+          control: <button type="button">Toggle Sidebar</button>,
+          isVisible: true,
+        }}
+      >
+        <PageFrame
+          breadcrumbs={<nav aria-label="Page breadcrumbs">Parent / Child</nav>}
+          title="Editor Shell"
+        >
+          <div>Contained content</div>
+        </PageFrame>
+      </PageHeaderSidebarTriggerProvider>,
+    );
+
+    const breadcrumbs = screen.getByLabelText("Page breadcrumbs");
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+    const title = screen.getByRole("heading", { name: "Editor Shell" });
+
+    expect(trigger.compareDocumentPosition(breadcrumbs)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(breadcrumbs.compareDocumentPosition(title)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("only lets the sidebar trigger occupy header shell space while constrained content is near the shell edge", () => {
+    const { container } = render(
+      <PageHeaderSidebarTriggerProvider
+        value={{
+          control: <button type="button">Toggle Sidebar</button>,
+          isVisible: true,
+        }}
+      >
+        <PageFrame
+          breadcrumbs={<nav aria-label="Page breadcrumbs">Parent / Child</nav>}
+          title="Editor Shell"
+          width="normal"
+        >
+          <div>Contained content</div>
+        </PageFrame>
+      </PageHeaderSidebarTriggerProvider>,
+    );
+
+    const layout = container.querySelector('[data-slot="page-frame-header-layout"]');
+    const trigger = container.querySelector('[data-slot="page-frame-header-trigger"]');
+    const header = container.querySelector('[data-slot="page-frame-header-content"]');
+    const breadcrumbs = container.querySelector('[data-slot="page-frame-breadcrumb-content"]');
+
+    expect(layout?.className).toContain("flex");
+    expect(layout?.className).toContain("items-start");
+    expect(layout?.className).toContain("min-[69rem]:block");
+    expect(trigger?.className).toContain("shrink-0");
+    expect(trigger?.className).toContain("min-[69rem]:absolute");
+    expect(trigger?.className).toContain("min-[69rem]:top-0");
+    expect(trigger?.className).toContain("min-[69rem]:left-0");
+    expect(header?.className).toContain("flex-1");
+    expect(header?.className).toContain("min-[69rem]:mx-auto");
+    expect(header?.className).toContain("min-[69rem]:max-w-5xl");
+    expect(breadcrumbs).toBeDefined();
+  });
+
+  it("does not render an empty page header when the shell sidebar trigger is hidden", () => {
+    const { container } = render(
+      <PageHeaderSidebarTriggerProvider
+        value={{
+          control: <button type="button">Toggle Sidebar</button>,
+          isVisible: false,
+        }}
+      >
+        <PageFrame breadcrumbs={<nav aria-label="Page breadcrumbs">Parent / Child</nav>}>
+          <div>Contained content</div>
+        </PageFrame>
+      </PageHeaderSidebarTriggerProvider>,
+    );
+
+    expect(screen.getByLabelText("Page breadcrumbs")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Toggle Sidebar" })).toBeNull();
+    expect(container.querySelector('[data-slot="page-header"]')).toBeNull();
   });
 });

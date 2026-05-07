@@ -5,8 +5,56 @@ import {
   SETTINGS_PAGE_ROUTE_HANDLE_CONTRACT,
   SETTINGS_PAGE_ROUTE_HANDLE_KEYS,
 } from "./route-handles.js";
+import type { AppRouteHandle } from "./route-meta.js";
 
 describe("route handles", () => {
+  it("requires every route handle to declare sidebar trigger ownership", () => {
+    const invalidHandleNames: string[] = [];
+
+    for (const [handleName, handle] of Object.entries(ROUTE_HANDLES)) {
+      if (
+        handle.sidebarTriggerOwner !== "none" &&
+        handle.sidebarTriggerOwner !== "page-frame" &&
+        handle.sidebarTriggerOwner !== "workspace"
+      ) {
+        invalidHandleNames.push(handleName);
+      }
+    }
+
+    expect(invalidHandleNames).toEqual([]);
+  });
+
+  it("requires every durable app-shell leaf route to declare a mounted sidebar trigger owner", () => {
+    const invalidShellLeafRoutes = DurableAppShellLeafRoutes.filter((route) => {
+      return (
+        route.handle.sidebarTriggerOwner === "none" ||
+        route.handle.sidebarTriggerOwner === undefined
+      );
+    });
+
+    expect(formatShellRouteContractFailures(invalidShellLeafRoutes)).toEqual([]);
+  });
+
+  it("requires durable document routes to own the sidebar trigger through PageFrame", () => {
+    const invalidDocumentLeafRoutes = DurableAppShellLeafRoutes.filter((route) => {
+      if (route.handle.sidebarTriggerOwner === "workspace") {
+        return false;
+      }
+
+      return route.handle.sidebarTriggerOwner !== "page-frame";
+    });
+
+    expect(formatShellRouteContractFailures(invalidDocumentLeafRoutes)).toEqual([]);
+  });
+
+  it("documents non-PageFrame sidebar trigger ownership exceptions", () => {
+    expect(ROUTE_HANDLES.sessionsDetail.sidebarTriggerOwner).toBe("workspace");
+    expect(ROUTE_HANDLES.experimentalTerminal.sidebarTriggerOwner).toBe("none");
+    expect(ROUTE_HANDLES.settings.sidebarTriggerOwner).toBe("none");
+    expect(ROUTE_HANDLES.settingsAccount.sidebarTriggerOwner).toBe("none");
+    expect(ROUTE_HANDLES.settingsOrganization.sidebarTriggerOwner).toBe("none");
+  });
+
   it("defines titles and descriptions for settings leaf pages", () => {
     expect(ROUTE_HANDLES.dashboard.title).toBe("Home");
     expect(ROUTE_HANDLES.dashboard.description).toBe("");
@@ -24,6 +72,7 @@ describe("route handles", () => {
     expect(ROUTE_HANDLES.integrationDetail.pageBreadcrumbVisible).toBe(true);
     expect(ROUTE_HANDLES.sessions.title).toBe("Sessions");
     expect(ROUTE_HANDLES.sessions.description).toBe("");
+    expect(ROUTE_HANDLES.sessions.appShellInsetOwner).toBe("child");
     expect(ROUTE_HANDLES.sessionsNew.title).toBe("New session");
     expect(ROUTE_HANDLES.sessionsNew.description).toBe(
       "Start a sandbox-backed session from a sandbox profile.",
@@ -73,8 +122,8 @@ describe("route handles", () => {
     expect(ROUTE_HANDLES.scheduledAutomationsDetail.description).toBe("");
     expect(ROUTE_HANDLES.scheduledAutomationsDetail.appShellInsetOwner).toBe("child");
 
-    expect(ROUTE_HANDLES.settingsPersonal.title).toBe("Personal");
-    expect(ROUTE_HANDLES.settingsPersonal.description).toBe("");
+    expect(ROUTE_HANDLES.settingsProfile.title).toBe("Profile");
+    expect(ROUTE_HANDLES.settingsProfile.description).toBe("");
 
     expect(ROUTE_HANDLES.settingsOrganizationGeneral.title).toBe("General");
     expect(ROUTE_HANDLES.settingsOrganizationGeneral.description).toBe("");
@@ -200,3 +249,114 @@ describe("route handles", () => {
     expect(detailBreadcrumb({ params: {} })).toBe("Edit");
   });
 });
+
+type DurableAppShellLeafRoute = {
+  handle: AppRouteHandle;
+  handleName: string;
+  path: string;
+};
+
+const DurableAppShellLeafRoutes: DurableAppShellLeafRoute[] = [
+  { path: "/", handleName: "dashboard", handle: ROUTE_HANDLES.dashboard },
+  {
+    path: "/sandbox-profiles",
+    handleName: "sandboxProfiles",
+    handle: ROUTE_HANDLES.sandboxProfiles,
+  },
+  {
+    path: "/sandbox-profiles/new",
+    handleName: "sandboxProfilesNew",
+    handle: ROUTE_HANDLES.sandboxProfilesNew,
+  },
+  {
+    path: "/sandbox-profiles/:profileId/sandbox-profile",
+    handleName: "sandboxProfileEditor",
+    handle: ROUTE_HANDLES.sandboxProfileEditor,
+  },
+  {
+    path: "/sandbox-profiles/:profileId/sandbox-profile/draft",
+    handleName: "sandboxProfileDraft",
+    handle: ROUTE_HANDLES.sandboxProfileDraft,
+  },
+  {
+    path: "/sandbox-profiles/:profileId/sandbox-profile/published",
+    handleName: "sandboxProfilePublished",
+    handle: ROUTE_HANDLES.sandboxProfilePublished,
+  },
+  {
+    path: "/sandbox-profiles/:profileId/snapshots",
+    handleName: "sandboxProfileSnapshots",
+    handle: ROUTE_HANDLES.sandboxProfileSnapshots,
+  },
+  { path: "/automations", handleName: "automations", handle: ROUTE_HANDLES.automations },
+  { path: "/automations/new", handleName: "automationsNew", handle: ROUTE_HANDLES.automationsNew },
+  {
+    path: "/automations/schedules/:automationId",
+    handleName: "scheduledAutomationsDetail",
+    handle: ROUTE_HANDLES.scheduledAutomationsDetail,
+  },
+  {
+    path: "/automations/:automationId",
+    handleName: "automationsDetail",
+    handle: ROUTE_HANDLES.automationsDetail,
+  },
+  { path: "/integrations", handleName: "integrations", handle: ROUTE_HANDLES.integrations },
+  {
+    path: "/integrations/:targetKey",
+    handleName: "integrationDetail",
+    handle: ROUTE_HANDLES.integrationDetail,
+  },
+  {
+    path: "/integrations/:targetKey/add",
+    handleName: "integrationCreate",
+    handle: ROUTE_HANDLES.integrationCreate,
+  },
+  {
+    path: "/integrations/:targetKey/:connectionId/edit",
+    handleName: "integrationEdit",
+    handle: ROUTE_HANDLES.integrationEdit,
+  },
+  {
+    path: "/integrations/:targetKey/:connectionId/:setupRouteSegment/setup",
+    handleName: "integrationSetup",
+    handle: ROUTE_HANDLES.integrationSetup,
+  },
+  { path: "/sessions", handleName: "sessions", handle: ROUTE_HANDLES.sessions },
+  { path: "/sessions/new", handleName: "sessionsNew", handle: ROUTE_HANDLES.sessionsNew },
+  {
+    path: "/sessions/:sandboxInstanceId",
+    handleName: "sessionsDetail",
+    handle: ROUTE_HANDLES.sessionsDetail,
+  },
+  {
+    path: "/settings/account/profile",
+    handleName: "settingsProfile",
+    handle: ROUTE_HANDLES.settingsProfile,
+  },
+  {
+    path: "/settings/organization/general",
+    handleName: "settingsOrganizationGeneral",
+    handle: ROUTE_HANDLES.settingsOrganizationGeneral,
+  },
+  {
+    path: "/settings/organization/members",
+    handleName: "settingsOrganizationMembers",
+    handle: ROUTE_HANDLES.settingsOrganizationMembers,
+  },
+  {
+    path: "/settings/organization/identity-linking",
+    handleName: "settingsOrganizationIdentityLinking",
+    handle: ROUTE_HANDLES.settingsOrganizationIdentityLinking,
+  },
+  {
+    path: "/settings/organization/sandboxes",
+    handleName: "settingsOrganizationSandboxes",
+    handle: ROUTE_HANDLES.settingsOrganizationSandboxes,
+  },
+];
+
+function formatShellRouteContractFailures(routes: DurableAppShellLeafRoute[]): string[] {
+  return routes.map((route) => {
+    return `${route.path}: ${route.handleName} (${route.handle.sidebarTriggerOwner ?? "missing owner"})`;
+  });
+}

@@ -10,6 +10,7 @@ import {
   useSidebar,
 } from "@mistle/ui";
 
+import { PageHeaderSidebarTriggerProvider } from "../shared/page-header-sidebar-trigger-context.js";
 import { shouldRenderSidebarTrigger } from "../shared/sidebar-trigger-visibility.js";
 
 const DASHBOARD_SIDEBAR_WIDTH = "14rem";
@@ -22,6 +23,7 @@ export interface AppShellViewProps {
   sidebarHeaderContent: React.ReactNode;
   sidebarContent: React.ReactNode;
   sidebarFooterContent: React.ReactNode;
+  sidebarDefaultOpen?: boolean;
   contentInsetOwner: "app-shell" | "child";
   mainContent: React.ReactNode;
   renderSidebarTrigger: boolean;
@@ -35,7 +37,7 @@ export function AppShellView(input: AppShellViewProps): React.JSX.Element {
     viewportMode: input.viewportMode,
   });
   return (
-    <SidebarProvider style={SidebarWidthStyle}>
+    <SidebarProvider defaultOpen={input.sidebarDefaultOpen ?? true} style={SidebarWidthStyle}>
       <Sidebar>
         {input.sidebarHeaderContent === null ? null : (
           <SidebarHeader className={input.sidebarHeaderClassName}>
@@ -54,19 +56,21 @@ export function AppShellView(input: AppShellViewProps): React.JSX.Element {
             : "from-background to-muted/20 min-h-svh bg-linear-to-b"
         }
       >
-        {input.topLoadingBar}
-        <AppShellSidebarTrigger renderSidebarTrigger={input.renderSidebarTrigger} />
-        <div className={contentContainerClassName}>
-          <div className="min-w-0 min-h-0 flex-1">{input.mainContent}</div>
-        </div>
+        <AppShellPageHeaderSidebarTriggerProvider renderSidebarTrigger={input.renderSidebarTrigger}>
+          {input.topLoadingBar}
+          <div className={contentContainerClassName}>
+            <div className="min-w-0 min-h-0 flex-1">{input.mainContent}</div>
+          </div>
+        </AppShellPageHeaderSidebarTriggerProvider>
       </SidebarInset>
     </SidebarProvider>
   );
 }
 
-function AppShellSidebarTrigger(input: {
+function AppShellPageHeaderSidebarTriggerProvider(input: {
+  children: React.ReactNode;
   renderSidebarTrigger: boolean;
-}): React.JSX.Element | null {
+}): React.JSX.Element {
   const { isMobile, openMobile, state } = useSidebar();
   const shouldShowSidebarTrigger =
     input.renderSidebarTrigger &&
@@ -76,14 +80,15 @@ function AppShellSidebarTrigger(input: {
       sidebarState: state,
     });
 
-  if (!shouldShowSidebarTrigger) {
-    return null;
-  }
-
   return (
-    <div className="pointer-events-none fixed top-3 left-3 z-20">
-      <SidebarTrigger className="bg-background/90 pointer-events-auto shadow-sm backdrop-blur-sm" />
-    </div>
+    <PageHeaderSidebarTriggerProvider
+      value={{
+        control: <SidebarTrigger className="-ml-1 shrink-0" />,
+        isVisible: shouldShowSidebarTrigger,
+      }}
+    >
+      {input.children}
+    </PageHeaderSidebarTriggerProvider>
   );
 }
 
