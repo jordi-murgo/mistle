@@ -7,6 +7,7 @@ import {
   resolveInitialSelectedRepositoryPath,
   resolvePrimaryRepositoryPresentation,
   resolvePrimaryRepositoryTurnStartCwd,
+  resolveSessionWorkbenchCwd,
   toRepositoryOptions,
 } from "./session-primary-repository-policy.js";
 
@@ -108,6 +109,33 @@ describe("session primary repository policy", () => {
 
   it("uses the workspace root as the Codex turn cwd when None is selected", () => {
     expect(resolvePrimaryRepositoryTurnStartCwd(null)).toBe(DefaultSandboxWorkspaceDir);
+  });
+
+  it("resolves the session workbench cwd from the selected repository first", () => {
+    expect(
+      resolveSessionWorkbenchCwd({
+        activeThreadCwd: "/root/acme/repo-1",
+        selectedRepositoryPath: "/root/acme/repo-2",
+      }),
+    ).toBe("/root/acme/repo-2");
+  });
+
+  it("resolves the session workbench cwd from the active Codex thread when no repository is selected", () => {
+    expect(
+      resolveSessionWorkbenchCwd({
+        activeThreadCwd: "/root/acme/repo-1/packages/app",
+        selectedRepositoryPath: null,
+      }),
+    ).toBe("/root/acme/repo-1/packages/app");
+  });
+
+  it("resolves the session workbench cwd to the workspace root when no cwd is available", () => {
+    expect(
+      resolveSessionWorkbenchCwd({
+        activeThreadCwd: null,
+        selectedRepositoryPath: null,
+      }),
+    ).toBe(DefaultSandboxWorkspaceDir);
   });
 
   it("restores the selected repository from the resumed Codex thread cwd before the launch primary repository", () => {

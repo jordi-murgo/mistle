@@ -1766,7 +1766,7 @@ function SetupScriptAssistantPanel(input: {
             <ResizablePanel id="setup-assistant-terminal-panel" minSize="180px">
               <SessionTerminalWorkspace
                 key={terminalPanelKey}
-                cwd={workbench.primaryRepositoryState.selectedRepositoryPath}
+                cwd={workbench.activeCwd}
                 ensureTransportConnected={workbench.ensureTransportConnected}
                 isConnectionReady={workbench.connectionReadiness.canConnect}
                 isVisible={workbench.terminalPanelState.isVisible}

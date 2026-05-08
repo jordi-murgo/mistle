@@ -21,6 +21,7 @@ import { type MainPanelTransitionState } from "./session-main-panel-handoff-stat
 import {
   resolveInitialSelectedRepositoryPath,
   resolvePrimaryRepositoryTurnStartCwd,
+  resolveSessionWorkbenchCwd,
 } from "./session-primary-repository-policy.js";
 import type { SessionStartupState } from "./session-startup-status.js";
 import {
@@ -50,6 +51,7 @@ import { useSessionWorkbenchLifecycleState } from "./use-session-workbench-lifec
 import { useSessionWorkbenchTransport } from "./use-session-workbench-transport.js";
 
 type SessionWorkbenchState = {
+  activeCwd: string;
   ensureTransportConnected: (input: { sandboxInstanceId: string }) => Promise<{
     sandboxInstanceId: string;
     transport: SandboxSessionTransport;
@@ -215,6 +217,10 @@ export function useSessionWorkbenchController(input: {
     sandboxInstanceId: input.sandboxInstanceId,
   });
   selectedRepositoryPathRef.current = primaryRepositoryState.selectedRepositoryPath;
+  const activeCwd = resolveSessionWorkbenchCwd({
+    activeThreadCwd: sessionState.lifecycle.sessionSnapshot?.activeThreadCwd,
+    selectedRepositoryPath: primaryRepositoryState.selectedRepositoryPath,
+  });
   const isPrimaryRepositorySwitchBlockedByCli = handoff.isCliToggleActive;
   const branchDiffState = useSessionBranchDiff({
     cwd: primaryRepositoryState.selectedRepositoryPath,
@@ -325,6 +331,7 @@ export function useSessionWorkbenchController(input: {
 
   return {
     workbench: {
+      activeCwd,
       ensureTransportConnected: transportManager.ensureTransportConnected,
       connectionReadiness: workbenchLifecycleState.connectionReadiness,
       handleTerminalWorkspaceReset: workbenchLifecycleState.handleTerminalWorkspaceReset,
