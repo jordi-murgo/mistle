@@ -1,4 +1,44 @@
-import { Button } from "@mistle/ui";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@mistle/ui";
+
+const DisabledPaginationLinkClassName =
+  "aria-disabled:pointer-events-none aria-disabled:opacity-50";
+
+type TablePaginationLinkProps = {
+  direction: "next" | "previous";
+  disabled: boolean;
+  onClick: () => void;
+};
+
+function TablePaginationLink(input: TablePaginationLinkProps): React.JSX.Element {
+  function handleClick(event: React.MouseEvent<HTMLAnchorElement>): void {
+    event.preventDefault();
+    if (input.disabled) {
+      return;
+    }
+
+    input.onClick();
+  }
+
+  const PaginationControl = input.direction === "previous" ? PaginationPrevious : PaginationNext;
+
+  return (
+    <PaginationItem>
+      <PaginationControl
+        aria-disabled={input.disabled}
+        className={DisabledPaginationLinkClassName}
+        href="#"
+        onClick={handleClick}
+        tabIndex={input.disabled ? -1 : undefined}
+      />
+    </PaginationItem>
+  );
+}
 
 export function TablePagination(input: {
   hasPreviousPage: boolean;
@@ -13,24 +53,23 @@ export function TablePagination(input: {
     return null;
   }
 
+  const isPreviousDisabled = !input.hasPreviousPage || input.previousPageDisabled === true;
+  const isNextDisabled = !input.hasNextPage || input.nextPageDisabled === true;
+
   return (
-    <div className="flex items-center justify-end gap-2">
-      <Button
-        disabled={!input.hasPreviousPage || input.previousPageDisabled === true}
-        onClick={input.onPreviousPage}
-        type="button"
-        variant="outline"
-      >
-        Previous
-      </Button>
-      <Button
-        disabled={!input.hasNextPage || input.nextPageDisabled === true}
-        onClick={input.onNextPage}
-        type="button"
-        variant="outline"
-      >
-        Next
-      </Button>
-    </div>
+    <Pagination className="mx-0 w-auto justify-end">
+      <PaginationContent>
+        <TablePaginationLink
+          direction="previous"
+          disabled={isPreviousDisabled}
+          onClick={input.onPreviousPage}
+        />
+        <TablePaginationLink
+          direction="next"
+          disabled={isNextDisabled}
+          onClick={input.onNextPage}
+        />
+      </PaginationContent>
+    </Pagination>
   );
 }
