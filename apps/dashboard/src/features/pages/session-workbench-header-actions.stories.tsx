@@ -48,7 +48,7 @@ const StorybookArgs = {
     title: "Open changes",
   },
   status: {
-    kind: "not_connected" as const,
+    kind: "not_connected",
     label: "Not connected",
   },
   terminalControl: {
@@ -71,6 +71,14 @@ function createStory(input: SessionWorkbenchHeaderActionsStoryHarnessProps): Sto
 }
 
 export const Default = createStory({
+  repositoryOptions: StoryRepositoryOptions,
+  repositorySelectedValue: "/root/mistle",
+  status: "connected",
+});
+
+export const MobileMoreActionsOpen = createStory({
+  moreActionsStartsOpen: true,
+  portAccessProcessScenario: "many",
   repositoryOptions: StoryRepositoryOptions,
   repositorySelectedValue: "/root/mistle",
   status: "connected",

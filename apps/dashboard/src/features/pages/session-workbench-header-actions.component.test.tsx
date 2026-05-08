@@ -18,7 +18,14 @@ const StoryButtonControl = {
   title: "Open control",
 } satisfies HeaderActionsProps["cliControl"];
 
-function renderHeaderActions(overrides?: Partial<HeaderActionsProps>): void {
+function renderHeaderActions(
+  overrides?: Partial<HeaderActionsProps>,
+  input?: {
+    viewportWidth?: number;
+  },
+): void {
+  setViewportWidth(input?.viewportWidth ?? 1024);
+
   render(
     <SessionWorkbenchHeaderActions
       cliControl={{
@@ -45,6 +52,14 @@ function renderHeaderActions(overrides?: Partial<HeaderActionsProps>): void {
   );
 }
 
+function setViewportWidth(width: number): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width,
+    writable: true,
+  });
+}
+
 describe("SessionWorkbenchHeaderActions", () => {
   it("renders the repository selector when repository options are provided", () => {
     renderHeaderActions({
@@ -64,6 +79,24 @@ describe("SessionWorkbenchHeaderActions", () => {
     expect(screen.getByRole("combobox", { name: "Primary repository" })).toBeDefined();
   });
 
+  it("renders a compact repository label for the mobile header", () => {
+    renderHeaderActions({
+      repositoryControl: {
+        ariaLabel: "Primary repository",
+        onValueChange: () => {
+          return;
+        },
+        options: [
+          { value: "__none__", label: "None" },
+          { value: "/root/pantheon", label: "staffany-eng/pantheon" },
+        ],
+        selectedValue: "/root/pantheon",
+      },
+    });
+
+    expect(screen.getByText("pantheon")).toBeDefined();
+  });
+
   it("does not render the repository selector when no repository control is provided", () => {
     renderHeaderActions({
       status: {
@@ -81,6 +114,48 @@ describe("SessionWorkbenchHeaderActions", () => {
     });
 
     expect(screen.getByRole("button", { name: "Open processes" })).toBeDefined();
+  });
+
+  it("keeps the desktop processes control mounted until the sm action layout breakpoint", () => {
+    renderHeaderActions(
+      {
+        portAccessControl: <button type="button">Open processes</button>,
+      },
+      { viewportWidth: 700 },
+    );
+
+    expect(screen.getByRole("button", { name: "Open processes" })).toBeDefined();
+  });
+
+  it("uses the mobile processes surface below the sm action layout breakpoint", () => {
+    renderHeaderActions(
+      {
+        mobilePortAccessControl: {
+          disabled: false,
+          onOpen: () => {
+            return;
+          },
+          surface: <section aria-label="Mobile processes">Mobile processes sheet</section>,
+          title: "Open processes",
+        },
+        portAccessControl: <button type="button">Desktop processes</button>,
+      },
+      { viewportWidth: 500 },
+    );
+
+    expect(screen.queryByRole("button", { name: "Desktop processes" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Mobile processes" })).toBeDefined();
+  });
+
+  it("exposes secondary workbench tools from the mobile tools menu", () => {
+    renderHeaderActions();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open session tools" }));
+
+    expect(screen.queryByText("Tools")).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "TUI" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Changes" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "Terminal" })).toBeDefined();
   });
 
   it("renders the repository refresh indicator inside the selector trigger", () => {
