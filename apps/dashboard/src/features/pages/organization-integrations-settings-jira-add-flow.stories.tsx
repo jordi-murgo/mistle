@@ -14,6 +14,7 @@ import { z } from "zod";
 
 import { resetDashboardConfigForTest } from "../../config.js";
 import { withDashboardPageStory } from "../../storybook/decorators.js";
+import { createStoryWebhookTriggerCapabilitiesProviderMetadata } from "../integrations/integration-story-harness.js";
 import type { ManagedWebhookSetupResult } from "../integrations/integrations-service-shared.js";
 import type {
   IntegrationConnection,
@@ -137,6 +138,11 @@ function createJiraWebhookSource(input?: { connectionId?: string }): Integration
         "comment_created",
         "comment_updated",
       ],
+      ...createStoryWebhookTriggerCapabilitiesProviderMetadata({
+        definition: JiraDefinition,
+        events: ["jira:issue_created", "jira:issue_updated", "comment_created"],
+        permissions: [{ permission: "read:jira-work" }, { permission: "manage:jira-webhook" }],
+      }),
     },
     createdAt: StoryNow,
     updatedAt: StoryNow,

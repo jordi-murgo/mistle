@@ -1,9 +1,20 @@
 import type {
+  IntegrationWebhookEventDefinition,
   IntegrationWebhookTriggerCapabilities,
   IntegrationWebhookTriggerProviderPermissionRequirement,
+  IntegrationWebhookTriggerRequirementSet,
   IntegrationWebhookTriggerRequirements,
 } from "../types/index.js";
 import { IntegrationWebhookTriggerCapabilitiesProviderMetadataKey } from "../types/index.js";
+
+export type IntegrationWebhookTriggerCapabilityEventStatus = "enabled" | "not_enabled";
+
+export type IntegrationWebhookTriggerCapabilityEvent = {
+  eventDefinition: IntegrationWebhookEventDefinition;
+  satisfiedRequirementSet?: IntegrationWebhookTriggerRequirementSet | undefined;
+  status: IntegrationWebhookTriggerCapabilityEventStatus;
+  unsatisfiedRequirementSets: readonly IntegrationWebhookTriggerRequirementSet[];
+};
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -113,9 +124,37 @@ function hasPermissionCapability(input: {
   );
 }
 
+export function hasWebhookTriggerEventCapability(input: {
+  capabilities: IntegrationWebhookTriggerCapabilities | undefined;
+  event: string;
+}): boolean {
+  if (input.capabilities === undefined) {
+    return false;
+  }
+
+  return hasEventCapability({
+    capabilities: input.capabilities,
+    event: input.event,
+  });
+}
+
+export function hasWebhookTriggerPermissionCapability(input: {
+  capabilities: IntegrationWebhookTriggerCapabilities | undefined;
+  permission: IntegrationWebhookTriggerProviderPermissionRequirement;
+}): boolean {
+  if (input.capabilities === undefined) {
+    return false;
+  }
+
+  return hasPermissionCapability({
+    capabilities: input.capabilities,
+    permission: input.permission,
+  });
+}
+
 function isRequirementSetSatisfied(input: {
   capabilities: IntegrationWebhookTriggerCapabilities;
-  requirementSet: IntegrationWebhookTriggerRequirements["anyOf"][number];
+  requirementSet: IntegrationWebhookTriggerRequirementSet;
 }): boolean {
   if (
     input.requirementSet.event !== undefined &&
@@ -136,6 +175,18 @@ function isRequirementSetSatisfied(input: {
   return true;
 }
 
+function findSatisfiedRequirementSet(input: {
+  capabilities: IntegrationWebhookTriggerCapabilities;
+  requirements: IntegrationWebhookTriggerRequirements;
+}): IntegrationWebhookTriggerRequirementSet | undefined {
+  return input.requirements.anyOf.find((requirementSet) =>
+    isRequirementSetSatisfied({
+      capabilities: input.capabilities,
+      requirementSet,
+    }),
+  );
+}
+
 export function isWebhookTriggerSupportedByCapabilities(input: {
   capabilities: IntegrationWebhookTriggerCapabilities | undefined;
   requirements: IntegrationWebhookTriggerRequirements | undefined;
@@ -148,11 +199,54 @@ export function isWebhookTriggerSupportedByCapabilities(input: {
     return false;
   }
 
-  const capabilities = input.capabilities;
-  return input.requirements.anyOf.some((requirementSet) =>
-    isRequirementSetSatisfied({
-      capabilities,
-      requirementSet,
-    }),
+  return (
+    findSatisfiedRequirementSet({
+      capabilities: input.capabilities,
+      requirements: input.requirements,
+    }) !== undefined
   );
+}
+
+export function resolveWebhookTriggerCapabilityEvents(input: {
+  capabilities: IntegrationWebhookTriggerCapabilities | undefined;
+  supportedWebhookEvents: readonly IntegrationWebhookEventDefinition[];
+}): readonly IntegrationWebhookTriggerCapabilityEvent[] {
+  return input.supportedWebhookEvents.map((eventDefinition) => {
+    const requirements = eventDefinition.requirements;
+    if (requirements === undefined) {
+      return {
+        eventDefinition,
+        status: "enabled",
+        unsatisfiedRequirementSets: [],
+      };
+    }
+
+    if (input.capabilities === undefined) {
+      return {
+        eventDefinition,
+        status: "not_enabled",
+        unsatisfiedRequirementSets: requirements.anyOf,
+      };
+    }
+
+    const satisfiedRequirementSet = findSatisfiedRequirementSet({
+      capabilities: input.capabilities,
+      requirements,
+    });
+
+    if (satisfiedRequirementSet !== undefined) {
+      return {
+        eventDefinition,
+        satisfiedRequirementSet,
+        status: "enabled",
+        unsatisfiedRequirementSets: [],
+      };
+    }
+
+    return {
+      eventDefinition,
+      status: "not_enabled",
+      unsatisfiedRequirementSets: requirements.anyOf,
+    };
+  });
 }
