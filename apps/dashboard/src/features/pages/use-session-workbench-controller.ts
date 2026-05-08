@@ -18,6 +18,10 @@ import {
   type SessionComposerStateInput,
 } from "./session-composer/index.js";
 import { type MainPanelTransitionState } from "./session-main-panel-handoff-state.js";
+import {
+  resolveInitialSelectedRepositoryPath,
+  resolvePrimaryRepositoryTurnStartCwd,
+} from "./session-primary-repository-policy.js";
 import type { SessionStartupState } from "./session-startup-status.js";
 import {
   hasAutomationSessionPreparationTimedOut,
@@ -101,7 +105,6 @@ type SessionWorkbenchState = {
   primaryRepositoryState: ReturnType<typeof useSessionPrimaryRepositoryState>;
   primaryRepositoryControlState: {
     disabledReason: string | null;
-    isSwitching: boolean;
     switchPrimaryRepository: (nextSelectedRepositoryPath: string | null) => Promise<void>;
   };
   portAccessState: ReturnType<typeof useSessionPortAccess>;
@@ -201,16 +204,18 @@ export function useSessionWorkbenchController(input: {
     queryClient,
   });
   const sandboxStatus = workbenchLifecycleState.sandboxStatusQuery.data;
-  const initialSelectedRepositoryPath = sandboxStatus?.runtimeContext?.primaryRepositoryRoot;
+  const initialSelectedRepositoryPath = resolveInitialSelectedRepositoryPath({
+    activeThreadCwd: sessionState.lifecycle.sessionSnapshot?.activeThreadCwd ?? undefined,
+    runtimePrimaryRepositoryRoot: sandboxStatus?.runtimeContext?.primaryRepositoryRoot,
+  });
   const primaryRepositoryState = useSessionPrimaryRepositoryState({
     enabled: workbenchLifecycleState.connectionReadiness.canConnect,
     ensureTransportConnected: transportManager.ensureTransportConnected,
-    ...(initialSelectedRepositoryPath === undefined ? {} : { initialSelectedRepositoryPath }),
+    initialSelectedRepositoryPath,
     sandboxInstanceId: input.sandboxInstanceId,
   });
   selectedRepositoryPathRef.current = primaryRepositoryState.selectedRepositoryPath;
   const isPrimaryRepositorySwitchBlockedByCli = handoff.isCliToggleActive;
-  const isSwitchingPrimaryRepository = sessionState.threads.isSwitchingPrimaryRepository;
   const branchDiffState = useSessionBranchDiff({
     cwd: primaryRepositoryState.selectedRepositoryPath,
     enabled: diffPanelState.isVisible && workbenchLifecycleState.connectionReadiness.canConnect,
@@ -266,13 +271,13 @@ export function useSessionWorkbenchController(input: {
         return;
       }
 
-      await sessionState.threads.switchPrimaryRepository(nextSelectedRepositoryPath);
+      await sessionState.threads.ensureCanSwitchPrimaryRepository();
       primaryRepositoryState.setSelectedRepositoryPath(nextSelectedRepositoryPath);
     },
     [
       primaryRepositoryState.selectedRepositoryPath,
       primaryRepositoryState.setSelectedRepositoryPath,
-      sessionState.threads.switchPrimaryRepository,
+      sessionState.threads.ensureCanSwitchPrimaryRepository,
     ],
   );
   const startTurn = useCallback(
@@ -284,7 +289,10 @@ export function useSessionWorkbenchController(input: {
         chat.chatState.turnOrder.length === 0 &&
         !(cachedTitle !== undefined && cachedTitle !== null);
 
-      await chat.startTurn(turnInput);
+      await chat.startTurn({
+        ...turnInput,
+        cwd: resolvePrimaryRepositoryTurnStartCwd(primaryRepositoryState.selectedRepositoryPath),
+      });
 
       if (!shouldGenerateSessionTitle || sandboxInstanceId === null) {
         return;
@@ -354,7 +362,6 @@ export function useSessionWorkbenchController(input: {
         disabledReason: isPrimaryRepositorySwitchBlockedByCli
           ? "Exit Codex TUI before switching the primary repository."
           : null,
-        isSwitching: isSwitchingPrimaryRepository,
         switchPrimaryRepository,
       },
     },
