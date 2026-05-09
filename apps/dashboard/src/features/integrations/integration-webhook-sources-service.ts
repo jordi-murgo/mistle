@@ -62,6 +62,33 @@ export async function createIntegrationWebhookSource(input: {
   }
 }
 
+export async function refreshIntegrationWebhookTriggerCapabilities(input: {
+  body: Readonly<Record<string, unknown>>;
+  connectionId: string;
+}): Promise<IntegrationWebhookSource> {
+  try {
+    const response = await requestControlPlane({
+      operation: "refreshIntegrationWebhookTriggerCapabilities",
+      method: "POST",
+      pathname: `/v1/integration/connections/${encodeURIComponent(input.connectionId)}/webhook-sources/trigger-capabilities/refresh`,
+      body: input.body,
+      fallbackMessage: "Could not sync webhook events.",
+    });
+
+    return await readJsonWithSchema({
+      response,
+      schema: IntegrationWebhookSourceSchema,
+      operation: "refreshIntegrationWebhookTriggerCapabilities",
+    });
+  } catch (error) {
+    throw wrapIntegrationsApiError({
+      operation: "refreshIntegrationWebhookTriggerCapabilities",
+      error,
+      fallbackMessage: "Could not sync webhook events.",
+    });
+  }
+}
+
 export async function deleteIntegrationWebhookSource(input: {
   connectionId: string;
   webhookSourceId: string;

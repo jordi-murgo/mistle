@@ -1,5 +1,3 @@
-import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
-import { SlackConnectionMethodId } from "@mistle/integrations-definitions/browser";
 import { Notice, NoticeAutoHideDurationsMs } from "@mistle/ui";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -10,6 +8,11 @@ import { DeleteIntegrationConnectionDialog } from "../integrations/delete-integr
 import { IntegrationConnectionApiKeyDialog } from "../integrations/integration-connection-api-key-dialog.js";
 import { IntegrationConnectionDetailView } from "../integrations/integration-connection-detail-view.js";
 import { resolveFormConnectionMethodManagedWebhookSourcePostCreate } from "../integrations/integration-connection-method-metadata.js";
+import {
+  resolveInstalledIntegrationConnectionNotice,
+  type IntegrationConnectionNotice,
+} from "../integrations/integration-connection-notices.js";
+import { useIntegrationWebhookSourceActions } from "../integrations/integration-webhook-source-actions.js";
 import {
   ManagedWebhookSetupResultSchema,
   type IntegrationConnectionMethod,
@@ -42,14 +45,6 @@ type GitHubAppInstallationState = {
 
 type GitHubAppInstallationStateEntry = [string, GitHubAppInstallationState];
 
-type ConnectionNotice = {
-  connectionId: string;
-  message?: string;
-  resetKey: string;
-  title: string;
-  variant: "alert" | "success";
-};
-
 function buildGitHubAppInstallationStateByConnectionId(input: {
   connections: readonly {
     id: string;
@@ -78,52 +73,12 @@ function clearUrlConnectionNoticeParams(searchParams: URLSearchParams): URLSearc
   return nextSearchParams;
 }
 
-function resolveUrlConnectionNotice(input: {
-  detailConnectionId: string | null;
-  searchParams: URLSearchParams;
-  selectedConnection: Pick<IntegrationConnection, "connectionMethodId" | "id"> | undefined;
-}): ConnectionNotice | null {
-  if (
-    input.detailConnectionId === null ||
-    input.selectedConnection?.id !== input.detailConnectionId
-  ) {
-    return null;
-  }
-
-  if (input.searchParams.get("connectionNotice") !== "installed") {
-    return null;
-  }
-
-  if (input.selectedConnection.connectionMethodId === SlackConnectionMethodId) {
-    return {
-      connectionId: input.detailConnectionId,
-      resetKey: `slack-installed:${input.detailConnectionId}`,
-      title: "The Slack app was created and connected to Mistle successfully",
-      variant: "success",
-    };
-  }
-
-  if (
-    input.selectedConnection.connectionMethodId ===
-    IntegrationConnectionMethodIds.GITHUB_APP_INSTALLATION
-  ) {
-    return {
-      connectionId: input.detailConnectionId,
-      resetKey: `github-installed:${input.detailConnectionId}`,
-      title: "GitHub App connected to Mistle successfully",
-      variant: "success",
-    };
-  }
-
-  return null;
-}
-
 function resolveRouteStateConnectionNotice(input: {
   connectionMethods: readonly IntegrationConnectionMethod[] | undefined;
   detailConnectionId: string | null;
   locationState: unknown;
   selectedConnection: Pick<IntegrationConnection, "connectionMethodId" | "id"> | undefined;
-}): ConnectionNotice | null {
+}): IntegrationConnectionNotice | null {
   if (
     input.detailConnectionId === null ||
     input.selectedConnection?.id !== input.detailConnectionId
@@ -186,7 +141,8 @@ export function IntegrationsPage() {
   const navigate = useNavigate();
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [urlConnectionNotice, setUrlConnectionNotice] = useState<ConnectionNotice | null>(null);
+  const [urlConnectionNotice, setUrlConnectionNotice] =
+    useState<IntegrationConnectionNotice | null>(null);
   useRequiredOrganizationId();
   const detailTargetKey = params["targetKey"] ?? null;
   const detailConnectionId = searchParams.get("connectionId");
@@ -202,6 +158,13 @@ export function IntegrationsPage() {
   });
   const webhookSourceState = useIntegrationWebhookSourceState({
     detailConnections: directoryState.selectedDetailConnections,
+  });
+  const webhookSourceActions = useIntegrationWebhookSourceActions({
+    connections: directoryState.selectedDetailConnections,
+    refreshTriggerCapabilities: webhookSourceState.refreshTriggerCapabilities,
+    refreshTriggerCapabilitiesError: webhookSourceState.refreshTriggerCapabilitiesError,
+    refreshingTriggerCapabilitiesConnectionId:
+      webhookSourceState.refreshingTriggerCapabilitiesConnectionId,
   });
   const githubAppInstallationStateByConnectionId = buildGitHubAppInstallationStateByConnectionId({
     connections: directoryState.selectedDetailConnections,
@@ -249,7 +212,7 @@ export function IntegrationsPage() {
         });
 
   useEffect(() => {
-    const resolvedUrlNotice = resolveUrlConnectionNotice({
+    const resolvedUrlNotice = resolveInstalledIntegrationConnectionNotice({
       detailConnectionId,
       searchParams,
       selectedConnection: selectedDetailConnection,
@@ -352,6 +315,7 @@ export function IntegrationsPage() {
             webhookSourceId,
           });
         }}
+        renderWebhookSourceActions={webhookSourceActions.renderWebhookSourceActions}
         webhookPolicy={selectedWebhookPolicy}
         titleEditor={connectionEditors.titleEditor}
       />
@@ -365,6 +329,7 @@ export function IntegrationsPage() {
         <>
           <IntegrationConnectionApiKeyDialog {...connectionEditors.apiKeyDialog} />
           <DeleteIntegrationConnectionDialog {...connectionEditors.deleteDialog} />
+          {webhookSourceActions.dialog}
         </>
       }
       detailSurface={detailSurface}
