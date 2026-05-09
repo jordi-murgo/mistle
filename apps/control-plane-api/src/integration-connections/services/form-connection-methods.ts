@@ -3,9 +3,12 @@ import {
   type IntegrationCredentialSecretKind,
 } from "@mistle/db/control-plane";
 import { BadRequestError } from "@mistle/http/errors.js";
-import type {
-  IntegrationConnectionMethodDefinition,
-  IntegrationConnectionMethodId,
+import {
+  resolveIntegrationForm,
+  type AnyIntegrationDefinition,
+  type IntegrationConnectionMethodDefinition,
+  type IntegrationConnectionMethodId,
+  type IntegrationFormContext,
 } from "@mistle/integrations-core";
 import { z } from "zod";
 
@@ -32,6 +35,213 @@ export type ParsedFormSecret = {
   normalizedValue: string;
   persistedSecretRef: PersistedSecretRef;
 };
+
+export function buildFormConnectionMethodContextOrThrow(input: {
+  targetKey: string;
+  target: {
+    familyId: string;
+    variantId: string;
+    config: unknown;
+  };
+  definition: Pick<AnyIntegrationDefinition, "kind" | "targetConfigSchema">;
+  currentValue: Record<string, unknown>;
+  connection?:
+    | {
+        id: string;
+        config: unknown;
+      }
+    | undefined;
+  invalidInputCode: FormConnectionInvalidInputCode;
+}): IntegrationFormContext {
+  const targetConfig = input.definition.targetConfigSchema.safeParse(input.target.config);
+  if (!targetConfig.success) {
+    throw new BadRequestError(
+      input.invalidInputCode,
+      `Integration target '${input.targetKey}' has invalid config.`,
+    );
+  }
+
+  const targetRawConfig = UnknownRecordSchema.safeParse(input.target.config);
+  if (!targetRawConfig.success) {
+    throw new BadRequestError(
+      input.invalidInputCode,
+      `Integration target '${input.targetKey}' has invalid raw config.`,
+    );
+  }
+
+  const targetConfigRecord = UnknownRecordSchema.safeParse(targetConfig.data);
+  if (!targetConfigRecord.success) {
+    throw new BadRequestError(
+      input.invalidInputCode,
+      `Integration target '${input.targetKey}' resolved to non-object config.`,
+    );
+  }
+
+  const formContext: IntegrationFormContext = {
+    familyId: input.target.familyId,
+    variantId: input.target.variantId,
+    kind: input.definition.kind,
+    target: {
+      rawConfig: targetRawConfig.data,
+      config: targetConfigRecord.data,
+    },
+    currentValue: input.currentValue,
+  };
+
+  if (input.connection === undefined) {
+    return formContext;
+  }
+
+  const connectionConfig = readExistingFormConnectionConfigOrThrow({
+    connectionId: input.connection.id,
+    config: input.connection.config,
+    invalidInputCode: input.invalidInputCode,
+  });
+
+  return {
+    ...formContext,
+    connection: {
+      id: input.connection.id,
+      rawConfig: connectionConfig,
+      config: connectionConfig,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readExistingFormConnectionConfigOrThrow(input: {
+  connectionId: string;
+  config: unknown;
+  invalidInputCode: FormConnectionInvalidInputCode;
+}): Record<string, unknown> {
+  const connectionConfig = UnknownRecordSchema.safeParse(input.config);
+  if (!connectionConfig.success) {
+    throw new BadRequestError(
+      input.invalidInputCode,
+      `Integration connection '${input.connectionId}' has invalid config.`,
+    );
+  }
+
+  return connectionConfig.data;
+}
+
+function readRequiredPropertyKeys(input: {
+  methodId: string;
+  targetKey: string;
+  schema: Record<string, unknown>;
+}): readonly string[] {
+  const required = input.schema.required;
+  if (required === undefined) {
+    return [];
+  }
+
+  const parsedRequired = z.array(z.string()).safeParse(required);
+  if (!parsedRequired.success) {
+    throw new Error(
+      `Resolved config form for method '${input.methodId}' on integration target '${input.targetKey}' has invalid required fields.`,
+    );
+  }
+
+  return parsedRequired.data;
+}
+
+function readUiWidget(input: {
+  propertyKey: string;
+  uiSchema: Record<string, unknown>;
+}): string | undefined {
+  const propertyUiSchema = input.uiSchema[input.propertyKey];
+  if (!isRecord(propertyUiSchema)) {
+    return undefined;
+  }
+
+  const widget = propertyUiSchema["ui:widget"];
+  return typeof widget === "string" ? widget : undefined;
+}
+
+function readSchemaPropertyLabel(input: {
+  propertyKey: string;
+  schema: Record<string, unknown>;
+}): string {
+  const properties = input.schema.properties;
+  if (!isRecord(properties)) {
+    return input.propertyKey;
+  }
+
+  const propertySchema = properties[input.propertyKey];
+  if (!isRecord(propertySchema)) {
+    return input.propertyKey;
+  }
+
+  const title = propertySchema.title;
+  return typeof title === "string" && title.trim().length > 0 ? title : input.propertyKey;
+}
+
+function isMissingRequiredConfigValue(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+
+  return typeof value === "string" && value.trim().length === 0;
+}
+
+function assertRequiredVisibleFormConfigFields(input: {
+  targetKey: string;
+  method: FormConnectionMethod;
+  config: Record<string, unknown>;
+  formContext: IntegrationFormContext | undefined;
+  invalidInputCode: FormConnectionInvalidInputCode;
+}): void {
+  if (input.method.configForm === undefined || input.formContext === undefined) {
+    return;
+  }
+
+  const configSchema = input.method.configSchema;
+  if (configSchema === undefined) {
+    throw new BadRequestError(
+      input.invalidInputCode,
+      `Form connection method '${input.method.id}' for integration target '${input.targetKey}' is missing a config schema.`,
+    );
+  }
+
+  const resolvedForm = resolveIntegrationForm({
+    schema: configSchema,
+    form: input.method.configForm,
+    context: input.formContext,
+  });
+  const schema = UnknownRecordSchema.parse(resolvedForm.schema ?? {});
+  const uiSchema = UnknownRecordSchema.parse(resolvedForm.uiSchema ?? {});
+
+  for (const propertyKey of readRequiredPropertyKeys({
+    methodId: input.method.id,
+    targetKey: input.targetKey,
+    schema,
+  })) {
+    if (
+      readUiWidget({
+        propertyKey,
+        uiSchema,
+      }) === "hidden"
+    ) {
+      continue;
+    }
+
+    if (!isMissingRequiredConfigValue(input.config[propertyKey])) {
+      continue;
+    }
+
+    const label = readSchemaPropertyLabel({
+      propertyKey,
+      schema,
+    });
+    throw new BadRequestError(
+      input.invalidInputCode,
+      `Connection config field '${label}' is required for method '${input.method.id}'.`,
+    );
+  }
+}
 
 export function resolveFormConnectionMethodOrThrow(input: {
   targetKey: string;
@@ -62,6 +272,7 @@ export function parseFormConnectionConfigOrThrow(input: {
   targetKey: string;
   method: FormConnectionMethod;
   config: Record<string, unknown>;
+  formContext?: IntegrationFormContext | undefined;
   invalidInputCode: FormConnectionInvalidInputCode;
 }): Record<string, unknown> {
   try {
@@ -81,6 +292,14 @@ export function parseFormConnectionConfigOrThrow(input: {
         `Form connection method '${input.method.id}' for integration target '${input.targetKey}' resolved to a non-object config.`,
       );
     }
+
+    assertRequiredVisibleFormConfigFields({
+      targetKey: input.targetKey,
+      method: input.method,
+      config: parsedRecord.data,
+      formContext: input.formContext,
+      invalidInputCode: input.invalidInputCode,
+    });
 
     return parsedRecord.data;
   } catch (error) {

@@ -1,16 +1,159 @@
 import { IntegrationCredentialSecretKinds } from "@mistle/db/control-plane";
 import { BadRequestError } from "@mistle/http/errors.js";
-import { IntegrationConnectionMethodIds } from "@mistle/integrations-core";
+import {
+  IntegrationConnectionMethodIds,
+  type AnyIntegrationDefinition,
+} from "@mistle/integrations-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  buildFormConnectionMethodContextOrThrow,
   parseFormConnectionConfigOrThrow,
   parseCreateFormSecretsOrThrow,
   parseUpdateFormSecretsOrThrow,
   resolveFormConnectionMethodOrThrow,
   resolvePersistedSecretRefOrThrow,
 } from "./form-connection-methods.js";
+
+const SlackTargetKey = "slack-default";
+const SlackConnectionMethodId = "slack-bot-token";
+
+const SlackTarget = {
+  familyId: "slack",
+  variantId: SlackTargetKey,
+  config: {
+    api_base_url: "https://slack.com/api",
+  },
+};
+
+const SlackDefinition: Pick<AnyIntegrationDefinition, "kind" | "targetConfigSchema"> = {
+  kind: "connector",
+  targetConfigSchema: z.object({
+    api_base_url: z.url(),
+  }),
+};
+
+function expectBadRequestError(
+  error: unknown,
+  expected: {
+    code: string;
+    message: string;
+  },
+): void {
+  expect(error).toBeInstanceOf(BadRequestError);
+  if (!(error instanceof BadRequestError)) {
+    throw new Error("Expected a bad request error.");
+  }
+  expect(error.code).toBe(expected.code);
+  expect(error.message).toBe(expected.message);
+}
+
+describe("buildFormConnectionMethodContextOrThrow", () => {
+  it("returns parsed target and connection config for update form context", () => {
+    const context = buildFormConnectionMethodContextOrThrow({
+      targetKey: SlackTargetKey,
+      target: SlackTarget,
+      definition: SlackDefinition,
+      currentValue: {
+        connection_method: SlackConnectionMethodId,
+        app_id: "A123",
+      },
+      connection: {
+        id: "icn_slack",
+        config: {
+          connection_method: SlackConnectionMethodId,
+          app_id: "A000",
+        },
+      },
+      invalidInputCode: "INVALID_UPDATE_CONNECTION_INPUT",
+    });
+
+    expect(context).toEqual({
+      familyId: "slack",
+      variantId: SlackTargetKey,
+      kind: "connector",
+      target: {
+        rawConfig: {
+          api_base_url: "https://slack.com/api",
+        },
+        config: {
+          api_base_url: "https://slack.com/api",
+        },
+      },
+      currentValue: {
+        connection_method: SlackConnectionMethodId,
+        app_id: "A123",
+      },
+      connection: {
+        id: "icn_slack",
+        rawConfig: {
+          connection_method: SlackConnectionMethodId,
+          app_id: "A000",
+        },
+        config: {
+          connection_method: SlackConnectionMethodId,
+          app_id: "A000",
+        },
+      },
+    });
+  });
+
+  it("throws a bad request error when stored target config is invalid", () => {
+    let thrownError: unknown = null;
+
+    try {
+      buildFormConnectionMethodContextOrThrow({
+        targetKey: SlackTargetKey,
+        target: {
+          ...SlackTarget,
+          config: {
+            api_base_url: "",
+          },
+        },
+        definition: SlackDefinition,
+        currentValue: {
+          connection_method: SlackConnectionMethodId,
+        },
+        invalidInputCode: "INVALID_CREATE_CONNECTION_INPUT",
+      });
+    } catch (error) {
+      thrownError = error;
+    }
+
+    expectBadRequestError(thrownError, {
+      code: "INVALID_CREATE_CONNECTION_INPUT",
+      message: "Integration target 'slack-default' has invalid config.",
+    });
+  });
+
+  it("throws a bad request error when stored connection config is not an object", () => {
+    let thrownError: unknown = null;
+
+    try {
+      buildFormConnectionMethodContextOrThrow({
+        targetKey: SlackTargetKey,
+        target: SlackTarget,
+        definition: SlackDefinition,
+        currentValue: {
+          connection_method: SlackConnectionMethodId,
+        },
+        connection: {
+          id: "icn_slack",
+          config: null,
+        },
+        invalidInputCode: "INVALID_UPDATE_CONNECTION_INPUT",
+      });
+    } catch (error) {
+      thrownError = error;
+    }
+
+    expectBadRequestError(thrownError, {
+      code: "INVALID_UPDATE_CONNECTION_INPUT",
+      message: "Integration connection 'icn_slack' has invalid config.",
+    });
+  });
+});
 
 describe("resolveFormConnectionMethodOrThrow", () => {
   it("returns the selected form method", () => {
@@ -71,14 +214,11 @@ describe("resolveFormConnectionMethodOrThrow", () => {
       thrownError = error;
     }
 
-    expect(thrownError).toBeInstanceOf(BadRequestError);
-    if (!(thrownError instanceof BadRequestError)) {
-      throw new Error("Expected unsupported form method to throw.");
-    }
-    expect(thrownError.code).toBe("FORM_CONNECTION_METHOD_NOT_SUPPORTED");
-    expect(thrownError.message).toBe(
-      "Integration target 'oauth2-only-target' does not support form connection method 'oauth2-authorization-code'.",
-    );
+    expectBadRequestError(thrownError, {
+      code: "FORM_CONNECTION_METHOD_NOT_SUPPORTED",
+      message:
+        "Integration target 'oauth2-only-target' does not support form connection method 'oauth2-authorization-code'.",
+    });
   });
 
   it("throws when the selected method is a device-authorization method", () => {
@@ -110,14 +250,11 @@ describe("resolveFormConnectionMethodOrThrow", () => {
       thrownError = error;
     }
 
-    expect(thrownError).toBeInstanceOf(BadRequestError);
-    if (!(thrownError instanceof BadRequestError)) {
-      throw new Error("Expected device-authorization method to throw.");
-    }
-    expect(thrownError.code).toBe("FORM_CONNECTION_METHOD_NOT_SUPPORTED");
-    expect(thrownError.message).toBe(
-      "Integration target 'openai-device-auth-only-target' does not support form connection method 'chatgpt-device-code'.",
-    );
+    expectBadRequestError(thrownError, {
+      code: "FORM_CONNECTION_METHOD_NOT_SUPPORTED",
+      message:
+        "Integration target 'openai-device-auth-only-target' does not support form connection method 'chatgpt-device-code'.",
+    });
   });
 });
 
@@ -187,12 +324,111 @@ describe("parseFormConnectionConfigOrThrow", () => {
       thrownError = error;
     }
 
-    expect(thrownError).toBeInstanceOf(BadRequestError);
-    if (!(thrownError instanceof BadRequestError)) {
-      throw new Error("Expected invalid config to throw.");
+    expectBadRequestError(thrownError, {
+      code: "INVALID_CREATE_CONNECTION_INPUT",
+      message: "Connection config for method 'api-key' is invalid.",
+    });
+  });
+
+  it("throws a bad request error when a required visible config field is missing", () => {
+    let thrownError: unknown = null;
+
+    try {
+      parseFormConnectionConfigOrThrow({
+        targetKey: SlackTargetKey,
+        method: {
+          id: SlackConnectionMethodId,
+          label: "Slack app",
+          kind: "form",
+          secretFields: [],
+          configSchema: z
+            .object({
+              connection_method: z.literal(SlackConnectionMethodId),
+              app_id: z.string().min(1).optional(),
+            })
+            .strict(),
+          configForm: {
+            schema: {
+              properties: {
+                connection_method: {
+                  default: SlackConnectionMethodId,
+                },
+                app_id: {
+                  title: "App ID",
+                },
+              },
+              required: ["connection_method", "app_id"],
+            },
+            uiSchema: {
+              connection_method: {
+                "ui:widget": "hidden",
+              },
+            },
+          },
+        },
+        config: {
+          connection_method: SlackConnectionMethodId,
+        },
+        formContext: {
+          familyId: "slack",
+          variantId: SlackTargetKey,
+          kind: "connector",
+          currentValue: {
+            connection_method: SlackConnectionMethodId,
+          },
+        },
+        invalidInputCode: "INVALID_UPDATE_CONNECTION_INPUT",
+      });
+    } catch (error) {
+      thrownError = error;
     }
-    expect(thrownError.code).toBe("INVALID_CREATE_CONNECTION_INPUT");
-    expect(thrownError.message).toBe("Connection config for method 'api-key' is invalid.");
+
+    expectBadRequestError(thrownError, {
+      code: "INVALID_UPDATE_CONNECTION_INPUT",
+      message: "Connection config field 'App ID' is required for method 'slack-bot-token'.",
+    });
+  });
+
+  it("throws a bad request error when resolved required config fields are malformed", () => {
+    let thrownError: unknown = null;
+
+    try {
+      parseFormConnectionConfigOrThrow({
+        targetKey: SlackTargetKey,
+        method: {
+          id: SlackConnectionMethodId,
+          label: "Slack app",
+          kind: "form",
+          secretFields: [],
+          configSchema: z
+            .object({
+              connection_method: z.literal(SlackConnectionMethodId),
+            })
+            .strict(),
+          configForm: {
+            schema: {
+              required: ["connection_method", 123],
+            },
+          },
+        },
+        config: {
+          connection_method: SlackConnectionMethodId,
+        },
+        formContext: {
+          familyId: "slack",
+          variantId: SlackTargetKey,
+          kind: "connector",
+        },
+        invalidInputCode: "INVALID_UPDATE_CONNECTION_INPUT",
+      });
+    } catch (error) {
+      thrownError = error;
+    }
+
+    expectBadRequestError(thrownError, {
+      code: "INVALID_UPDATE_CONNECTION_INPUT",
+      message: "Connection config for method 'slack-bot-token' is invalid.",
+    });
   });
 });
 
@@ -249,14 +485,10 @@ describe("resolvePersistedSecretRefOrThrow", () => {
       thrownError = error;
     }
 
-    expect(thrownError).toBeInstanceOf(BadRequestError);
-    if (!(thrownError instanceof BadRequestError)) {
-      throw new Error("Expected unsupported secret type to throw.");
-    }
-    expect(thrownError.code).toBe("INVALID_UPDATE_CONNECTION_INPUT");
-    expect(thrownError.message).toBe(
-      "Unsupported persisted secret type 'github_app_installation_token'.",
-    );
+    expectBadRequestError(thrownError, {
+      code: "INVALID_UPDATE_CONNECTION_INPUT",
+      message: "Unsupported persisted secret type 'github_app_installation_token'.",
+    });
   });
 });
 

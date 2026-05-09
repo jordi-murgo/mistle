@@ -39,6 +39,7 @@ import { SETTINGS_INTEGRATIONS_QUERY_KEY } from "./use-integrations-directory-st
 
 const IntegrationRegistry = createBrowserIntegrationRegistry();
 const StoryControlPlaneApiOrigin = "https://control-plane.example.com";
+const ActiveConnectionStatus: IntegrationConnection["status"] = "active";
 const SlackStorySyncedBotEvents = [
   "app_mention",
   "message.channels",
@@ -500,7 +501,11 @@ export function SlackAppSetupPageStory(input: {
   );
 }
 
-function SlackConnectedWebhookVerifiedRefreshStory(): React.JSX.Element {
+function SlackConnectedWebhookVerifiedRefreshStory({
+  includeAppId = true,
+}: {
+  includeAppId?: boolean;
+} = {}): React.JSX.Element {
   configureDashboardRuntimeForStory();
   const storyProps = createSlackDetailViewStoryProps();
   const selectedConnection = storyProps.connections[0];
@@ -528,19 +533,30 @@ function SlackConnectedWebhookVerifiedRefreshStory(): React.JSX.Element {
     id: connection.id,
     targetKey: "slack-default",
     displayName: connection.displayName,
-    status: "active",
+    status: ActiveConnectionStatus,
     connectionMethodId: "slack-bot-token",
     connectionMethodLabel: "Slack app",
     config: {
       connection_method: "slack-bot-token",
       client_id: "3555487893074.10993991013813",
-      app_id: "A0123456789",
+      ...(includeAppId ? { app_id: "A0123456789" } : {}),
     },
     configuredSecretNames: ["botToken", "clientSecret", "signingSecret"],
     supportsWebhookSources: true,
     createdAt: "2026-04-26T00:00:00.000Z",
     updatedAt: "2026-04-26T00:00:00.000Z",
   })) satisfies readonly IntegrationConnection[];
+  const storyDetailConnections = storyProps.connections.map((connection, index) => {
+    const storyConnection = storyConnections[index];
+    if (storyConnection === undefined) {
+      throw new Error("Slack detail story connection is missing.");
+    }
+
+    return {
+      ...connection,
+      ...storyConnection,
+    };
+  });
   const [queryClient] = useState(() =>
     createStoryQueryClient({
       connections: storyConnections,
@@ -595,7 +611,7 @@ function SlackConnectedWebhookVerifiedRefreshStory(): React.JSX.Element {
       <div className="flex flex-col gap-6">
         <IntegrationConnectionDetailView
           {...storyProps}
-          connections={storyProps.connections.slice(0, 1)}
+          connections={storyDetailConnections}
           renderWebhookSourceActions={slackWebhookSourceActions.renderWebhookSourceActions}
           webhookSourceStateByConnectionId={webhookSourceStateByConnectionId}
         />
@@ -693,6 +709,12 @@ export const SetupConfiguredExistingApp: PageStory = {
 export const ConnectedWebhookVerifiedRefresh: PageStory = {
   render: function RenderStory() {
     return <SlackConnectedWebhookVerifiedRefreshStory />;
+  },
+};
+
+export const ConnectedWebhookSyncMissingAppId: PageStory = {
+  render: function RenderStory() {
+    return <SlackConnectedWebhookVerifiedRefreshStory includeAppId={false} />;
   },
 };
 

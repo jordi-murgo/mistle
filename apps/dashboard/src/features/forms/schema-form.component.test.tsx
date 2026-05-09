@@ -227,4 +227,37 @@ describe("SchemaFormWithoutSubmit", () => {
     expect(screen.getByRole("button", { name: "Field description" })).toBeDefined();
     expect(screen.getByLabelText("API token")).toBeDefined();
   });
+
+  it("marks required schema fields in the label", () => {
+    render(
+      <SchemaFormWithoutSubmit
+        formContext={{}}
+        formData={{}}
+        noHtml5Validate
+        onChange={() => {}}
+        schema={{
+          type: "object",
+          required: ["appId"],
+          properties: {
+            appId: {
+              title: "App ID",
+              description: "Slack app ID used to refresh webhook event capabilities from Slack.",
+              type: "string",
+            },
+            clientId: {
+              title: "Client ID",
+              type: "string",
+            },
+          },
+        }}
+        showErrorList={false}
+        validator={validator}
+      />,
+    );
+
+    const appIdLabel = screen.getByText("App ID").closest("div");
+    expect(appIdLabel).not.toBeNull();
+    expect(within(appIdLabel ?? document.body).getByText("required")).toBeDefined();
+    expect(screen.queryByText("Client ID required")).toBeNull();
+  });
 });
