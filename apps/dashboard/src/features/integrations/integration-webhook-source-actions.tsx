@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 
+import { useGitHubWebhookSourceActions } from "./github-webhook-source-actions.js";
 import type { IntegrationWebhookSourceActionsRefreshTriggerCapabilities } from "./integration-webhook-source-actions-types.js";
 import type { IntegrationConnection } from "./integrations-service.js";
 import { useSlackWebhookSourceActions } from "./slack-webhook-source-actions.js";
@@ -7,7 +8,6 @@ import { useSlackWebhookSourceActions } from "./slack-webhook-source-actions.js"
 type IntegrationWebhookSourceActionsInput = {
   connections: readonly IntegrationConnection[];
   refreshTriggerCapabilities: IntegrationWebhookSourceActionsRefreshTriggerCapabilities;
-  refreshTriggerCapabilitiesError: { connectionId: string; message: string } | null;
   refreshingTriggerCapabilitiesConnectionId: string | null;
 };
 
@@ -24,6 +24,10 @@ type IntegrationWebhookSourceActionProvider = {
 };
 
 const WebhookSourceActionProviders = [
+  {
+    id: "github",
+    useActions: useGitHubWebhookSourceActions,
+  },
   {
     id: "slack",
     useActions: useSlackWebhookSourceActions,
