@@ -128,7 +128,10 @@ import {
   SandboxProfileEditorSections,
   type SandboxProfileEditorSection,
 } from "./sandbox-profile-editor-sections.js";
-import { SandboxProfileIntegrationsSetupSection } from "./sandbox-profile-integrations-setup-section.js";
+import {
+  SandboxProfileIntegrationsSetupSection,
+  SandboxProfileIntegrationsSetupUnavailableState,
+} from "./sandbox-profile-integrations-setup-section.js";
 import {
   useLoadedSandboxProfileIntegrationsState,
   useSandboxProfileIntegrationsLoader,
@@ -2036,30 +2039,26 @@ function SandboxProfileEditorSectionPanels(input: {
 
   return (
     <div className="flex w-full flex-col gap-8">
-      {input.currentVersion === null ? null : (
-        <SandboxProfilePanelSection>
-          <SectionBlock title="Runtime">
-            <div className="grid gap-4">
-              <SandboxProfileSectionCard>
-                <LoadedSandboxProfileRuntimeSection
-                  availableConnections={input.integrationsLoader.availableConnections}
-                  availableTargets={input.integrationsLoader.availableTargets}
-                  disabled={input.draftFieldsAreReadOnly}
-                  isDraft={input.mode.kind === "draft"}
-                  onDraftStateChange={input.onRuntimeDraftStateChange}
-                  sectionChrome={false}
-                  version={input.currentVersion}
-                />
-              </SandboxProfileSectionCard>
-            </div>
-          </SectionBlock>
-        </SandboxProfilePanelSection>
-      )}
       <LoadedSandboxProfileIntegrationSetupSection
         key={`${input.profileId}:${String(input.mode.version)}:${String(input.draftEditorResetKey)}:integration-setup`}
         loader={input.integrationsLoader}
         onDraftStateChange={input.onIntegrationDraftStateChange}
         profileId={input.profileId}
+        runtimeSettings={
+          input.currentVersion === null ? null : (
+            <SandboxProfileSectionCard>
+              <LoadedSandboxProfileRuntimeSection
+                availableConnections={input.integrationsLoader.availableConnections}
+                availableTargets={input.integrationsLoader.availableTargets}
+                disabled={input.draftFieldsAreReadOnly}
+                isDraft={input.mode.kind === "draft"}
+                onDraftStateChange={input.onRuntimeDraftStateChange}
+                sectionChrome={false}
+                version={input.currentVersion}
+              />
+            </SandboxProfileSectionCard>
+          )
+        }
         disabled={input.draftFieldsAreReadOnly}
         readOnly={input.draftFieldsAreReadOnly}
         version={input.mode.version}
@@ -2732,6 +2731,7 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   disabled: boolean;
   readOnly: boolean;
   loader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
+  runtimeSettings: ReactNode | null;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element | null {
   const showBindingsUnavailableNotice = input.loader.integrationBindingsQuery.isError;
@@ -2740,14 +2740,17 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   if (showBindingsUnavailableNotice || showDirectoryUnavailableNotice) {
     return (
       <SandboxProfilePanelSection>
-        <SandboxProfileIntegrationsSetupUnavailableState
-          integrationBindingsError={
-            showBindingsUnavailableNotice ? input.loader.integrationBindingsQuery.error : null
-          }
-          integrationDirectoryError={
-            showDirectoryUnavailableNotice ? input.loader.integrationDirectoryQuery.error : null
-          }
-        />
+        <div className="flex flex-col gap-4">
+          <RuntimeSettingsSection>{input.runtimeSettings}</RuntimeSettingsSection>
+          <SandboxProfileIntegrationsSetupUnavailableState
+            integrationBindingsError={
+              showBindingsUnavailableNotice ? input.loader.integrationBindingsQuery.error : null
+            }
+            integrationDirectoryError={
+              showDirectoryUnavailableNotice ? input.loader.integrationDirectoryQuery.error : null
+            }
+          />
+        </div>
       </SandboxProfilePanelSection>
     );
   }
@@ -2757,7 +2760,15 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
     input.loader.integrationDirectoryQuery.isPending ||
     input.loader.initialRows === null
   ) {
-    return null;
+    if (input.runtimeSettings === null) {
+      return null;
+    }
+
+    return (
+      <SandboxProfilePanelSection>
+        <RuntimeSettingsSection>{input.runtimeSettings}</RuntimeSettingsSection>
+      </SandboxProfilePanelSection>
+    );
   }
 
   return (
@@ -2771,6 +2782,7 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
       disabled={input.disabled}
       readOnly={input.readOnly}
       integrationDirectoryQuery={input.loader.integrationDirectoryQuery}
+      runtimeSettings={input.runtimeSettings}
       {...(input.onDraftStateChange === undefined
         ? {}
         : { onDraftStateChange: input.onDraftStateChange })}
@@ -2778,29 +2790,15 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   );
 }
 
-export function SandboxProfileIntegrationsSetupUnavailableState(input: {
-  integrationBindingsError: unknown;
-  integrationDirectoryError: unknown;
-}): React.JSX.Element {
+function RuntimeSettingsSection(input: { children: ReactNode | null }): React.JSX.Element | null {
+  if (input.children === null) {
+    return null;
+  }
+
   return (
-    <div className="flex flex-col gap-4">
-      {input.integrationBindingsError !== null ? (
-        <Notice title="Could not load integration bindings" variant="alert">
-          {resolveApiErrorMessage({
-            error: input.integrationBindingsError,
-            fallbackMessage: "Could not load sandbox profile integration bindings.",
-          })}
-        </Notice>
-      ) : null}
-      {input.integrationDirectoryError !== null ? (
-        <Notice title="Could not load integration connections" variant="alert">
-          {resolveApiErrorMessage({
-            error: input.integrationDirectoryError,
-            fallbackMessage: "Could not load integration connections.",
-          })}
-        </Notice>
-      ) : null}
-    </div>
+    <SectionBlock title="Runtime">
+      <div className="grid gap-4">{input.children}</div>
+    </SectionBlock>
   );
 }
 
@@ -2812,6 +2810,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
   availableTargets: readonly IntegrationTargetSummary[];
   disabled: boolean;
   readOnly: boolean;
+  runtimeSettings: ReactNode | null;
   integrationDirectoryQuery: ReturnType<
     typeof useSandboxProfileIntegrationsLoader
   >["integrationDirectoryQuery"];
@@ -2849,6 +2848,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
         integrationDirectoryQuery={input.integrationDirectoryQuery}
         integrationRows={integrationsState.integrationRows}
         integrationSaveError={integrationsState.integrationSaveError}
+        runtimeSettings={input.runtimeSettings}
         disabled={input.disabled}
         readOnly={input.readOnly}
         onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
