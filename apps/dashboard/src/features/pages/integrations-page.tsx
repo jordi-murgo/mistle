@@ -28,6 +28,7 @@ import {
 } from "./integration-connection-setup-state.js";
 import {
   buildIntegrationConnectionDetailItems,
+  type ProviderAppSetupState,
   resolveIntegrationConnectionDetailWebhookPolicy,
 } from "./integrations-page-view-model.js";
 import { OrganizationIntegrationsSettingsPageView } from "./organization-integrations-settings-page-view.js";
@@ -38,22 +39,15 @@ import {
   useIntegrationsDirectoryState,
 } from "./use-integrations-directory-state.js";
 
-type GitHubAppInstallationState = {
-  errorMessage?: string;
-  isPending: boolean;
-};
-
-type GitHubAppInstallationStateEntry = [string, GitHubAppInstallationState];
-
-function buildGitHubAppInstallationStateByConnectionId(input: {
+function buildProviderAppSetupStateByConnectionId(input: {
   connections: readonly {
     id: string;
   }[];
   errorMessageByConnectionId: Readonly<Record<string, string | undefined>>;
   pendingConnectionId: string | null | undefined;
-}): ReadonlyMap<string, GitHubAppInstallationState> {
+}): ReadonlyMap<string, ProviderAppSetupState> {
   return new Map(
-    input.connections.map((connection): GitHubAppInstallationStateEntry => {
+    input.connections.map((connection) => {
       const errorMessage = input.errorMessageByConnectionId[connection.id];
 
       return [
@@ -165,10 +159,10 @@ export function IntegrationsPage() {
     refreshingTriggerCapabilitiesConnectionId:
       webhookSourceState.refreshingTriggerCapabilitiesConnectionId,
   });
-  const githubAppInstallationStateByConnectionId = buildGitHubAppInstallationStateByConnectionId({
+  const providerAppSetupStateByConnectionId = buildProviderAppSetupStateByConnectionId({
     connections: directoryState.selectedDetailConnections,
-    errorMessageByConnectionId: connectionEditors.githubAppInstallation.errorMessageByConnectionId,
-    pendingConnectionId: connectionEditors.githubAppInstallation.pendingConnectionId,
+    errorMessageByConnectionId: connectionEditors.providerAppSetup.errorMessageByConnectionId,
+    pendingConnectionId: connectionEditors.providerAppSetup.pendingConnectionId,
   });
 
   if (
@@ -235,7 +229,7 @@ export function IntegrationsPage() {
         connections={buildIntegrationConnectionDetailItems({
           connections: directoryState.selectedDetailConnections,
           controlPlaneApiOrigin: dashboardConfig.controlPlaneApiOrigin,
-          githubAppInstallationStateByConnectionId,
+          providerAppSetupStateByConnectionId,
           refreshingConnectionIds: directoryState.refreshingConnectionIds,
           refreshingResourceKeys: directoryState.refreshingResourceKeys,
           ...(directoryState.selectedDetailCard === null
@@ -278,7 +272,7 @@ export function IntegrationsPage() {
 
           void navigate(`/integrations/${detailTargetKey}/${connectionId}/edit${location.search}`);
         }}
-        onStartGitHubAppInstallation={connectionEditors.githubAppInstallation.onStartInstallation}
+        onStartProviderAppSetup={connectionEditors.providerAppSetup.onStartInstallation}
         onRefreshResource={directoryState.onRefreshResource}
         selectedConnectionId={directoryState.activeDetailConnectionId}
         selectedConnectionBody={renderSelectedConnectionSetupBody({

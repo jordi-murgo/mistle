@@ -121,16 +121,15 @@ export function buildOpenUpdateIntegrationConnectionInput(input: {
   };
 }
 
+export type ProviderAppSetupState = Required<
+  Pick<NonNullable<IntegrationConnectionDetailItem["installation"]>, "isPending">
+> &
+  Pick<NonNullable<IntegrationConnectionDetailItem["installation"]>, "errorMessage">;
+
 export function buildIntegrationConnectionDetailItems(input: {
   connections: readonly IntegrationConnection[];
   controlPlaneApiOrigin?: string;
-  githubAppInstallationStateByConnectionId?: ReadonlyMap<
-    string,
-    {
-      errorMessage?: string;
-      isPending: boolean;
-    }
-  >;
+  providerAppSetupStateByConnectionId?: ReadonlyMap<string, ProviderAppSetupState>;
   refreshingConnectionIds?: ReadonlySet<string>;
   refreshingResourceKeys: ReadonlySet<string>;
   targetConfig?: Record<string, unknown>;
@@ -154,8 +153,8 @@ export function buildIntegrationConnectionDetailItems(input: {
         ? {}
         : { controlPlaneApiOrigin: input.controlPlaneApiOrigin }),
     });
-    const githubAppInstallationState =
-      input.githubAppInstallationStateByConnectionId?.get(connection.id) ?? undefined;
+    const providerAppSetupState =
+      input.providerAppSetupStateByConnectionId?.get(connection.id) ?? undefined;
     const authFields = resolveAuthFields({
       connection,
       currentMethod,
@@ -195,12 +194,12 @@ export function buildIntegrationConnectionDetailItems(input: {
               : {
                   installation: {
                     ...connectionDetailContext.installation,
-                    ...(githubAppInstallationState?.errorMessage === undefined
+                    ...(providerAppSetupState?.errorMessage === undefined
                       ? {}
-                      : { errorMessage: githubAppInstallationState.errorMessage }),
-                    ...(githubAppInstallationState === undefined
+                      : { errorMessage: providerAppSetupState.errorMessage }),
+                    ...(providerAppSetupState === undefined
                       ? {}
-                      : { isPending: githubAppInstallationState.isPending }),
+                      : { isPending: providerAppSetupState.isPending }),
                   },
                 }),
             ...(connectionDetailContext.contextItems === undefined
