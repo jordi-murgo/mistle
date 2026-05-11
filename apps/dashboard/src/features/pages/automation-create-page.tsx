@@ -1,6 +1,10 @@
 import { useNavigate, useSearchParams } from "react-router";
 
 import {
+  createProfileAutomationDetailPath,
+  type CreatedAutomationNavigationTarget,
+} from "../automations/automation-editor-navigation.js";
+import {
   AutomationTypeSelectField,
   type AutomationTypeValue,
 } from "../automations/automation-type-field.js";
@@ -13,12 +17,30 @@ function parseAutomationCreateKind(value: string | null): AutomationTypeValue {
   return value === "scheduled" ? "scheduled" : "trigger";
 }
 
+function parseSandboxProfileId(value: string | null): string | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length === 0 ? undefined : normalized;
+}
+
 export function AutomationCreatePage(): React.JSX.Element {
   const pageMeta = useAppPageMeta();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const kind = parseAutomationCreateKind(searchParams.get("type"));
+  const initialSandboxProfileId = parseSandboxProfileId(searchParams.get("sandboxProfileId"));
   const { title, description } = resolvePageFrameText(pageMeta, "Create automation");
+  const createSuccessPath =
+    initialSandboxProfileId === undefined
+      ? undefined
+      : (automation: CreatedAutomationNavigationTarget) =>
+          createProfileAutomationDetailPath({
+            profileId: automation.target.sandboxProfileId,
+            automationId: automation.id,
+          });
 
   function updateKind(nextKind: AutomationTypeValue): void {
     const nextSearchParams = new URLSearchParams(searchParams);
@@ -37,11 +59,15 @@ export function AutomationCreatePage(): React.JSX.Element {
       {kind === "scheduled" ? (
         <CreateScheduledAutomationEditor
           automationTypeField={automationTypeField}
+          initialSandboxProfileId={initialSandboxProfileId}
+          {...(createSuccessPath === undefined ? {} : { createSuccessPath })}
           navigate={navigate}
         />
       ) : (
         <CreateWebhookAutomationEditor
           automationTypeField={automationTypeField}
+          initialSandboxProfileId={initialSandboxProfileId}
+          {...(createSuccessPath === undefined ? {} : { createSuccessPath })}
           navigate={navigate}
         />
       )}

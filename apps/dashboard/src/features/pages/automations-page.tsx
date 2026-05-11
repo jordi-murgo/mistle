@@ -3,72 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
-import type {
-  AutomationListItemViewModel,
-  AutomationListScheduleSourceViewModel,
-} from "../automations/automation-list-types.js";
+import { toAutomationListItemViewModel } from "../automations/automation-list-view-model.js";
 import { AutomationListView } from "../automations/automation-list-view.js";
 import { listAutomations } from "../automations/automations-service.js";
-import type { AutomationListItem } from "../automations/automations-types.js";
-import { formatAutomationUpdatedAt } from "../automations/webhook-automation-formatters.js";
 import { automationsListQueryKey } from "../automations/webhook-automations-query-keys.js";
-import { formatDateTime, formatTimeZoneOffset } from "../shared/date-formatters.js";
 import { PageFrame } from "../shared/page-frame.js";
+import { readKeysetPaginationCursors } from "../shared/pagination-search-params.js";
 
 const AUTOMATIONS_LIST_LIMIT = 25;
-
-function parseCursor(rawValue: string | null): string | null {
-  if (rawValue === null) {
-    return null;
-  }
-
-  const normalized = rawValue.trim();
-  return normalized.length === 0 ? null : normalized;
-}
-
-function toAutomationListScheduleSourceViewModel(
-  source: Extract<AutomationListItem["source"], { kind: "schedule" }>,
-): AutomationListScheduleSourceViewModel {
-  const offsetDateTime = source.nextScheduledAt ?? new Date().toISOString();
-
-  return {
-    kind: "schedule",
-    cronExpression: source.cronExpression,
-    timezone: source.timezone,
-    nextScheduledAtLabel:
-      source.nextScheduledAt === null
-        ? null
-        : formatDateTime(source.nextScheduledAt, source.timezone),
-    timezoneOffsetLabel: formatTimeZoneOffset({
-      isoDateTime: offsetDateTime,
-      timeZone: source.timezone,
-    }),
-  };
-}
-
-function toAutomationListItemViewModel(
-  automation: AutomationListItem,
-): AutomationListItemViewModel {
-  return {
-    id: automation.id,
-    kind: automation.kind,
-    name: automation.name,
-    enabled: automation.enabled,
-    target: automation.target,
-    ...(automation.issue === undefined ? {} : { issue: automation.issue }),
-    source:
-      automation.source.kind === "webhook"
-        ? automation.source
-        : toAutomationListScheduleSourceViewModel(automation.source),
-    updatedAtLabel: formatAutomationUpdatedAt(automation.updatedAt),
-  };
-}
 
 export function AutomationsPage(): React.JSX.Element {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const after = parseCursor(searchParams.get("after"));
-  const before = after === null ? parseCursor(searchParams.get("before")) : null;
+  const { after, before } = readKeysetPaginationCursors(searchParams);
 
   const automationsQuery = useQuery({
     queryKey: automationsListQueryKey({
