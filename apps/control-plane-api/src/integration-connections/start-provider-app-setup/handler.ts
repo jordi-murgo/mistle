@@ -3,25 +3,8 @@ import { withHttpErrorHandler } from "@mistle/http/errors.js";
 
 import { withRequiredSession } from "../../middleware/with-required-session.js";
 import type { AppContextBindings, AppSession } from "../../types.js";
-import { IntegrationConnectionsBadRequestCodes } from "../constants.js";
 import { startProviderAppSetup } from "../services/provider-app-setup.js";
 import { route } from "./route.js";
-
-function resolveStartInvalidInputCode(routeSegment: string) {
-  if (routeSegment === "github-app") {
-    return IntegrationConnectionsBadRequestCodes.INVALID_GITHUB_APP_MANIFEST_START_INPUT;
-  }
-
-  if (routeSegment === "github-app-installation") {
-    return IntegrationConnectionsBadRequestCodes.INVALID_GITHUB_APP_INSTALLATION_START_INPUT;
-  }
-
-  if (routeSegment === "slack-app") {
-    return IntegrationConnectionsBadRequestCodes.INVALID_SLACK_APP_MANIFEST_START_INPUT;
-  }
-
-  return IntegrationConnectionsBadRequestCodes.INVALID_UPDATE_CONNECTION_INPUT;
-}
 
 const routeHandler = async (
   ctx: Parameters<RouteHandler<typeof route, AppContextBindings>>[0],
@@ -45,7 +28,6 @@ const routeHandler = async (
       connectionId,
       routeSegment,
       body,
-      invalidInputCode: resolveStartInvalidInputCode(routeSegment),
     },
   );
 
