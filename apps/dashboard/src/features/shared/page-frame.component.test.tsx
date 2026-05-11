@@ -76,7 +76,7 @@ describe("PageFrame", () => {
     expect(container.querySelector('[data-slot="page-header"]')).toBeDefined();
   });
 
-  it("separates tabbed pages into above-tabs and below-tabs regions", () => {
+  it("lets tabbed pages stretch their below-tabs region under the header", () => {
     const { container } = render(
       <PageFrame
         breadcrumbs={<nav aria-label="Page breadcrumbs">Parent / Child</nav>}
@@ -90,7 +90,10 @@ describe("PageFrame", () => {
     const aboveTabs = container.querySelector('[data-slot="page-frame-above-tabs"]');
     const belowTabs = container.querySelector('[data-slot="page-frame-below-tabs"]');
 
+    expect(container.firstElementChild?.className).toContain("min-h-svh");
     expect(aboveTabs?.className).toContain("p-4");
+    expect(belowTabs?.className).toContain("flex");
+    expect(belowTabs?.className).toContain("flex-col");
     expect(belowTabs?.className).toContain("min-h-0");
     expect(belowTabs?.className).toContain("flex-1");
     expect(container.firstElementChild?.className).not.toContain("px-4");
