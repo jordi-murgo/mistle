@@ -30,6 +30,8 @@ import type {
 import { organizationSandboxStorageSettingsQueryKey } from "../settings/organization/sandbox-storage-service.js";
 import type { SandboxProfileBindingEditorRow } from "./sandbox-profile-binding-config-editor.js";
 import {
+  applyCreatedSandboxProfileVersionDraftToVersions,
+  applyDiscardedSandboxProfileVersionDraftToVersions,
   applyPublishedSandboxProfileVersionToProfile,
   applyPublishedSandboxProfileVersionToVersions,
   createTimezoneOptions,
@@ -367,6 +369,7 @@ function renderSandboxProfileEditor(input?: {
       configStatus: "valid" | "invalid";
     };
   }[];
+  integrationBindingsError?: string;
   integrationsLoading?: boolean;
   defaultPersistenceMode?: SandboxProfileVersion["defaultPersistenceMode"];
   persistentSandboxesEnabled?: boolean;
@@ -456,7 +459,20 @@ function renderSandboxProfileEditor(input?: {
     createdAt: "2026-04-23T00:00:00.000Z",
     updatedAt: "2026-04-23T00:00:00.000Z",
   });
-  if (input?.integrationsLoading === true) {
+  if (input?.integrationBindingsError !== undefined) {
+    queryClient.setQueryData(sandboxProfileVersionsQueryKey(profileId), {
+      versions,
+    });
+    queryClient.getQueryCache().build(queryClient, {
+      queryKey: sandboxProfileVersionIntegrationBindingsQueryKey({
+        profileId,
+        version,
+      }),
+      queryFn: async () => {
+        throw new Error(input.integrationBindingsError);
+      },
+    });
+  } else if (input?.integrationsLoading === true) {
     queryClient.setQueryData(sandboxProfileVersionsQueryKey(profileId), {
       versions,
     });
@@ -1629,6 +1645,103 @@ describe("SandboxProfileEditorPage", () => {
     ]);
   });
 
+  it("applies the created draft response to the cached versions before navigation", () => {
+    const draftVersion = createSandboxProfileVersionFixture({
+      sandboxProfileId: "sbp_test",
+      version: 2,
+      state: "draft",
+      isActive: false,
+    });
+
+    expect(
+      applyCreatedSandboxProfileVersionDraftToVersions({
+        versions: [
+          createSandboxProfileVersionFixture({
+            sandboxProfileId: "sbp_test",
+            version: 1,
+            state: "published",
+            isActive: true,
+          }),
+        ],
+        draftVersion,
+      }),
+    ).toEqual([
+      createSandboxProfileVersionFixture({
+        sandboxProfileId: "sbp_test",
+        version: 1,
+        state: "published",
+        isActive: true,
+      }),
+      draftVersion,
+    ]);
+  });
+
+  it("replaces stale cached drafts with the created draft response", () => {
+    const draftVersion = createSandboxProfileVersionFixture({
+      sandboxProfileId: "sbp_test",
+      version: 3,
+      state: "draft",
+      isActive: false,
+    });
+
+    expect(
+      applyCreatedSandboxProfileVersionDraftToVersions({
+        versions: [
+          createSandboxProfileVersionFixture({
+            sandboxProfileId: "sbp_test",
+            version: 1,
+            state: "published",
+            isActive: true,
+          }),
+          createSandboxProfileVersionFixture({
+            sandboxProfileId: "sbp_test",
+            version: 2,
+            state: "draft",
+            isActive: false,
+          }),
+        ],
+        draftVersion,
+      }),
+    ).toEqual([
+      createSandboxProfileVersionFixture({
+        sandboxProfileId: "sbp_test",
+        version: 1,
+        state: "published",
+        isActive: true,
+      }),
+      draftVersion,
+    ]);
+  });
+
+  it("applies the discarded draft response to the cached versions before navigation", () => {
+    expect(
+      applyDiscardedSandboxProfileVersionDraftToVersions({
+        versions: [
+          createSandboxProfileVersionFixture({
+            sandboxProfileId: "sbp_test",
+            version: 1,
+            state: "published",
+            isActive: true,
+          }),
+          createSandboxProfileVersionFixture({
+            sandboxProfileId: "sbp_test",
+            version: 2,
+            state: "draft",
+            isActive: false,
+          }),
+        ],
+        discardedVersion: 2,
+      }),
+    ).toEqual([
+      createSandboxProfileVersionFixture({
+        sandboxProfileId: "sbp_test",
+        version: 1,
+        state: "published",
+        isActive: true,
+      }),
+    ]);
+  });
+
   it("keeps resources and tools inline with the integration rows", () => {
     renderSandboxProfileEditor();
 
@@ -1667,11 +1780,23 @@ describe("SandboxProfileEditorPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Sandbox Profile" }));
 
     expect(screen.queryByText("Loading integrations and resources...")).toBeNull();
+    expect(screen.queryByText("Loading integrations...")).toBeNull();
     expect(
       screen.queryByText(
         "Choose a Git provider in Integrations before selecting repository resources.",
       ),
     ).toBeNull();
+  });
+
+  it("shows integration binding load failures without a loading placeholder", async () => {
+    renderSandboxProfileEditor({
+      integrationBindingsError: "Bindings failed to load.",
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Sandbox Profile" }));
+
+    expect(await screen.findByText("Could not load integration bindings")).toBeDefined();
+    expect(screen.queryByText("Loading integrations...")).toBeNull();
   });
 
   it("shows the setup script editor in the sandbox profile section", () => {
@@ -2244,6 +2369,17 @@ describe("SandboxProfileEditorPage", () => {
       "View published",
       "Discard draft",
     ]);
+  });
+
+  it("discards a draft with unsaved local changes", () => {
+    renderDraftActionsHarness({
+      hasUnpersistedIntegrationChanges: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sandbox profile actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Discard draft" }));
+
+    expect(screen.getByText("Discarded")).toBeDefined();
   });
 
   it("opens the sandbox profile tab from the profile default route when a published version exists", async () => {

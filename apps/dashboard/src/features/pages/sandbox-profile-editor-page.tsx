@@ -31,7 +31,7 @@ import {
   TextLink,
 } from "@mistle/ui";
 import { SidebarSimpleIcon, SpinnerGapIcon, TerminalIcon } from "@phosphor-icons/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -110,6 +110,8 @@ import type {
   SandboxProfileBindingEditorRow,
 } from "./sandbox-profile-binding-config-editor.js";
 import {
+  applyCreatedSandboxProfileVersionDraftToVersions,
+  applyDiscardedSandboxProfileVersionDraftToVersions,
   applyPublishedSandboxProfileVersionToProfile,
   applyPublishedSandboxProfileVersionToVersions,
   resolveSandboxProfileEditorVersionMode,
@@ -719,6 +721,39 @@ type LoadedSandboxProfileEditorPageInput = {
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
 };
 
+async function clearSandboxProfileVersionDraftQueryState(input: {
+  queryClient: QueryClient;
+  profileId: string;
+  version: number;
+}): Promise<void> {
+  const queryKeys = [
+    sandboxProfileVersionIntegrationBindingsQueryKey({
+      profileId: input.profileId,
+      version: input.version,
+    }),
+    sandboxProfileVersionSetupScriptQueryKey({
+      profileId: input.profileId,
+      version: input.version,
+    }),
+  ];
+
+  await Promise.all(
+    queryKeys.map((queryKey) =>
+      input.queryClient.cancelQueries({
+        exact: true,
+        queryKey,
+      }),
+    ),
+  );
+
+  for (const queryKey of queryKeys) {
+    input.queryClient.removeQueries({
+      exact: true,
+      queryKey,
+    });
+  }
+}
+
 function LoadedSandboxProfileEditorPage(
   input: LoadedSandboxProfileEditorPageInput,
 ): React.JSX.Element {
@@ -726,6 +761,7 @@ function LoadedSandboxProfileEditorPage(
   const [versionActionError, setVersionActionError] = useState<string | null>(null);
   const [isDeleteProfileDialogOpen, setIsDeleteProfileDialogOpen] = useState(false);
   const [deleteProfileError, setDeleteProfileError] = useState<string | null>(null);
+  const [draftEditorResetKey, setDraftEditorResetKey] = useState(0);
   const automationUsagesQuery = useQuery({
     queryKey: sandboxProfileAutomationUsagesQueryKey(input.profileId),
     queryFn: async ({ signal }) =>
@@ -741,19 +777,33 @@ function LoadedSandboxProfileEditorPage(
       createSandboxProfileVersionDraft({
         profileId: input.profileId,
       }),
-    onSuccess: async () => {
+    onSuccess: async (draftVersion) => {
       setVersionActionError(null);
-      await Promise.all([
-        input.invalidateProfileVersions(input.profileId),
-        input.invalidateSandboxProfiles(),
-        input.invalidateProfileDetail(input.profileId),
-      ]);
+      await clearSandboxProfileVersionDraftQueryState({
+        queryClient,
+        profileId: input.profileId,
+        version: draftVersion.version,
+      });
+      queryClient.setQueryData<{ versions: readonly SandboxProfileVersion[] } | undefined>(
+        sandboxProfileVersionsQueryKey(input.profileId),
+        (currentVersions) => ({
+          versions: applyCreatedSandboxProfileVersionDraftToVersions({
+            versions: currentVersions?.versions,
+            draftVersion,
+          }),
+        }),
+      );
       void input.navigate(
         createSandboxProfileEditorPath({
           profileId: input.profileId,
           view: "draft",
         }),
       );
+      void Promise.all([
+        input.invalidateProfileVersions(input.profileId),
+        input.invalidateSandboxProfiles(),
+        input.invalidateProfileDetail(input.profileId),
+      ]);
     },
     onError: (error: unknown) => {
       setVersionActionError(
@@ -835,19 +885,43 @@ function LoadedSandboxProfileEditorPage(
         profileId: input.profileId,
         version: inputValue.draftVersion,
       }),
-    onSuccess: async () => {
+    onSuccess: async (result, inputValue) => {
       setVersionActionError(null);
-      await Promise.all([
-        input.invalidateProfileVersions(input.profileId),
-        input.invalidateSandboxProfiles(),
-        input.invalidateProfileDetail(input.profileId),
-      ]);
+      await clearSandboxProfileVersionDraftQueryState({
+        queryClient,
+        profileId: input.profileId,
+        version: result.discardedVersion,
+      });
+      if (inputValue.draftVersion !== result.discardedVersion) {
+        await clearSandboxProfileVersionDraftQueryState({
+          queryClient,
+          profileId: input.profileId,
+          version: inputValue.draftVersion,
+        });
+      }
+      setDraftEditorResetKey((currentKey) => currentKey + 1);
+      queryClient.setQueryData<{ versions: readonly SandboxProfileVersion[] } | undefined>(
+        sandboxProfileVersionsQueryKey(input.profileId),
+        (currentVersions) => {
+          const nextVersions = applyDiscardedSandboxProfileVersionDraftToVersions({
+            versions: currentVersions?.versions,
+            discardedVersion: result.discardedVersion,
+          });
+
+          return nextVersions === undefined ? currentVersions : { versions: nextVersions };
+        },
+      );
       void input.navigate(
         createSandboxProfileEditorPath({
           profileId: input.profileId,
           view: "published",
         }),
       );
+      void Promise.all([
+        input.invalidateProfileVersions(input.profileId),
+        input.invalidateSandboxProfiles(),
+        input.invalidateProfileDetail(input.profileId),
+      ]);
     },
     onError: (error: unknown) => {
       setVersionActionError(
@@ -1024,6 +1098,7 @@ function LoadedSandboxProfileEditorPage(
       currentVersion={
         input.versions.find((version) => version.version === resolvedMode.mode.version) ?? null
       }
+      draftEditorResetKey={draftEditorResetKey}
       mode={resolvedMode.mode}
       navigate={input.navigate}
       onMakeChanges={() => {
@@ -1119,6 +1194,7 @@ function ReadySandboxProfileEditorPage(input: {
   profile: SandboxProfile;
   mode: SandboxProfileEditorVersionMode;
   currentVersion: SandboxProfileVersion | null;
+  draftEditorResetKey: number;
   versions: readonly SandboxProfileVersion[];
   routeSectionId: SandboxProfileEditorSectionId;
   publishSuccessNavigationKey: string | null;
@@ -1531,6 +1607,7 @@ function ReadySandboxProfileEditorPage(input: {
           activeSectionId={sectionId}
           currentVersion={input.currentVersion}
           draftFieldsAreReadOnly={draftFieldsAreReadOnly}
+          draftEditorResetKey={input.draftEditorResetKey}
           integrationDraftState={integrationDraftState}
           integrationsLoader={integrationsLoader}
           invalidateProfileVersions={input.invalidateProfileVersions}
@@ -1866,6 +1943,7 @@ function SandboxProfileEditorSectionPanels(input: {
   activeSectionId: SandboxProfileEditorSectionId;
   currentVersion: SandboxProfileVersion | null;
   draftFieldsAreReadOnly: boolean;
+  draftEditorResetKey: number;
   integrationDraftState: SandboxProfileDraftSectionState;
   integrationsLoader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
   invalidateProfileVersions: (profileId: string) => Promise<void>;
@@ -1927,7 +2005,7 @@ function SandboxProfileEditorSectionPanels(input: {
         </SandboxProfilePanelSection>
       )}
       <LoadedSandboxProfileIntegrationSetupSection
-        key={`${input.profileId}:integration-setup`}
+        key={`${input.profileId}:${String(input.mode.version)}:${String(input.draftEditorResetKey)}:integration-setup`}
         loader={input.integrationsLoader}
         onDraftStateChange={input.onIntegrationDraftStateChange}
         profileId={input.profileId}
@@ -1938,7 +2016,7 @@ function SandboxProfileEditorSectionPanels(input: {
       <SandboxProfilePanelSection>
         <LoadedSandboxProfileSetupScriptSection
           disabled={input.draftFieldsAreReadOnly}
-          key={`${input.profileId}:${String(input.mode.version)}:setup-script`}
+          key={`${input.profileId}:${String(input.mode.version)}:${String(input.draftEditorResetKey)}:setup-script`}
           integrationRows={resolveSandboxProfileSetupScriptIntegrationRows(
             input.integrationsLoader.initialRows,
             input.integrationDraftState.integrationRows,
@@ -1957,6 +2035,7 @@ function SandboxProfileEditorSectionPanels(input: {
             disabled={input.draftFieldsAreReadOnly}
             invalidateProfileVersions={input.invalidateProfileVersions}
             isDraft={input.mode.kind === "draft"}
+            key={`${input.profileId}:${String(input.mode.version)}:${String(input.draftEditorResetKey)}:persistence-mode`}
             onDraftStateChange={input.onPersistenceDraftStateChange}
             profileId={input.profileId}
             version={input.currentVersion}
@@ -2497,7 +2576,7 @@ function SandboxProfileLifecycleActions(input: {
   const discardChangesMenuItem =
     discardChangesInput === null ? null : (
       <DropdownMenuItem
-        disabled={input.hasUnpersistedDraftChanges || versionActionIsDisabled}
+        disabled={versionActionIsDisabled}
         onClick={() => {
           input.onDiscardChangesAndLeaveDraft(discardChangesInput);
         }}
@@ -2597,17 +2676,11 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   readOnly: boolean;
   loader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const showBindingsUnavailableNotice = input.loader.integrationBindingsQuery.isError;
   const showDirectoryUnavailableNotice = input.loader.integrationDirectoryQuery.isError;
 
-  if (
-    input.loader.integrationBindingsQuery.isPending ||
-    input.loader.integrationDirectoryQuery.isPending ||
-    input.loader.initialRows === null ||
-    input.loader.integrationBindingsQuery.isError ||
-    input.loader.integrationDirectoryQuery.isError
-  ) {
+  if (showBindingsUnavailableNotice || showDirectoryUnavailableNotice) {
     return (
       <SandboxProfilePanelSection>
         <SandboxProfileIntegrationsSetupUnavailableState
@@ -2617,13 +2690,17 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
           integrationDirectoryError={
             showDirectoryUnavailableNotice ? input.loader.integrationDirectoryQuery.error : null
           }
-          isPending={
-            input.loader.integrationBindingsQuery.isPending ||
-            input.loader.integrationDirectoryQuery.isPending
-          }
         />
       </SandboxProfilePanelSection>
     );
+  }
+
+  if (
+    input.loader.integrationBindingsQuery.isPending ||
+    input.loader.integrationDirectoryQuery.isPending ||
+    input.loader.initialRows === null
+  ) {
+    return null;
   }
 
   return (
@@ -2647,20 +2724,9 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
 export function SandboxProfileIntegrationsSetupUnavailableState(input: {
   integrationBindingsError: unknown;
   integrationDirectoryError: unknown;
-  isPending: boolean;
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4">
-      {input.isPending ? (
-        <div
-          aria-live="polite"
-          className="text-muted-foreground flex items-center gap-2 text-sm"
-          role="status"
-        >
-          <SpinnerGapIcon aria-hidden className="size-4 animate-spin" />
-          <span>Loading integrations...</span>
-        </div>
-      ) : null}
       {input.integrationBindingsError !== null ? (
         <Notice title="Could not load integration bindings" variant="alert">
           {resolveApiErrorMessage({
@@ -2714,28 +2780,26 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
   }, [onDraftStateChange, integrationsState.hasUnsavedChanges, integrationsState.integrationRows]);
 
   return (
-    <>
-      <SandboxProfilePanelSection>
-        <SandboxProfileIntegrationsSetupSection
-          availableConnections={integrationsState.availableConnections}
-          availableTargets={integrationsState.availableTargets}
-          integrationBindingsQuery={{
-            isError: false,
-            error: null,
-            isPending: false,
-          }}
-          integrationDirectoryQuery={input.integrationDirectoryQuery}
-          integrationRows={integrationsState.integrationRows}
-          integrationSaveError={integrationsState.integrationSaveError}
-          disabled={input.disabled}
-          readOnly={input.readOnly}
-          onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
-          onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
-          onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
-          onIntegrationSaveErrorDismiss={integrationsState.onIntegrationSaveErrorDismiss}
-        />
-      </SandboxProfilePanelSection>
-    </>
+    <SandboxProfilePanelSection>
+      <SandboxProfileIntegrationsSetupSection
+        availableConnections={integrationsState.availableConnections}
+        availableTargets={integrationsState.availableTargets}
+        integrationBindingsQuery={{
+          isError: false,
+          error: null,
+          isPending: false,
+        }}
+        integrationDirectoryQuery={input.integrationDirectoryQuery}
+        integrationRows={integrationsState.integrationRows}
+        integrationSaveError={integrationsState.integrationSaveError}
+        disabled={input.disabled}
+        readOnly={input.readOnly}
+        onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
+        onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
+        onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
+        onIntegrationSaveErrorDismiss={integrationsState.onIntegrationSaveErrorDismiss}
+      />
+    </SandboxProfilePanelSection>
   );
 }
 
@@ -2748,9 +2812,9 @@ function LoadedSandboxProfileSetupScriptSection(input: {
   isDraft: boolean;
   setupAssistantControl: SetupScriptAssistantControl;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   if (input.loader.setupScriptQuery.isPending) {
-    return <SandboxProfileSetupScriptPanel disabled={true} value="" />;
+    return null;
   }
 
   if (input.loader.setupScriptQuery.isError) {
