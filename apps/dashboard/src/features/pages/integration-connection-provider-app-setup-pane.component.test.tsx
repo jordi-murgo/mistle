@@ -81,7 +81,6 @@ function getTextControlById(id: string): HTMLInputElement | HTMLTextAreaElement 
 
 function renderProviderAppSetupPane(input?: {
   connection?: IntegrationConnection;
-  controlPlaneApiOrigin?: string;
   initialEntry?: string;
   methodId?: string;
   routeSegment?: string;
@@ -89,8 +88,7 @@ function renderProviderAppSetupPane(input?: {
   webhookSource?: IntegrationWebhookSource | null;
 }) {
   Object.assign(import.meta.env, {
-    VITE_CONTROL_PLANE_API_ORIGIN:
-      input?.controlPlaneApiOrigin ?? "https://control-plane.example.com",
+    VITE_CONTROL_PLANE_API_ORIGIN: "https://control-plane.example.com",
   });
   resetDashboardConfigForTest();
 
@@ -210,7 +208,6 @@ describe("ProviderAppSetupPane", () => {
 
   it("uses the provider-facing webhook callback base for generated redirect URLs", async () => {
     const rendered = renderProviderAppSetupPane({
-      controlPlaneApiOrigin: "http://localhost:3000",
       webhookCallbackUrl:
         "https://public-control-plane.example.com/base/p/integration/webhooks/slack-default/eps_public",
     });
@@ -345,32 +342,6 @@ describe("ProviderAppSetupPane", () => {
     });
 
     expect(installButton.hasAttribute("disabled")).toBe(false);
-  });
-
-  it("keeps GitHub installed app management available when local setup edits are incomplete", () => {
-    renderProviderAppSetupPane({
-      connection: createGitHubConnection({
-        config: {
-          app_id: "12345",
-          app_slug: "mistle-github-app",
-          client_id: "Iv1.providerowned",
-          installation_id: "98765",
-        },
-        configuredSecretNames: ["appPrivateKeyPem", "clientSecret", "webhookSecret"],
-        externalSubjectId: "github-org",
-      }),
-      methodId: "github-app-installation",
-      routeSegment: "github-app",
-    });
-
-    const manageButton = screen.getByRole("button", { name: "Manage installation" });
-    expect(manageButton.hasAttribute("disabled")).toBe(false);
-
-    fireEvent.change(getTextControlById("github-app-appId"), {
-      target: { value: "" },
-    });
-
-    expect(manageButton.hasAttribute("disabled")).toBe(false);
   });
 
   it("renders a dedicated GitHub App created screen after the manifest callback", () => {
