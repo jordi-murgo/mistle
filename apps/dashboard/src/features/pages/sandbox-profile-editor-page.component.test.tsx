@@ -95,6 +95,7 @@ type SandboxProfileEditorTestVersionState =
   | "draft-with-published"
   | "published"
   | "published-with-draft"
+  | "published-pending-with-draft"
   | "published-pending-with-older-active"
   | "published-manual-refresh-no-snapshot"
   | "published-no-snapshot"
@@ -209,6 +210,21 @@ function createSandboxProfileVersionsForTest(input: {
           state: "draft",
         }),
       ];
+    case "published-pending-with-draft":
+      return [
+        createVersion({
+          state: "published",
+          usable: false,
+          latestSnapshotJob: createRunningSnapshotJobFixture({
+            id: "ssj_pending_initial_materialization",
+            trigger: "publish",
+          }),
+        }),
+        createVersion({
+          version: input.version + 1,
+          state: "draft",
+        }),
+      ];
     case "published-pending-with-older-active":
       return [
         createVersion({
@@ -310,6 +326,8 @@ function resolveSandboxProfileEditorTestRouteView(input: {
   switch (input.versionState) {
     case "published":
     case "published-with-draft":
+    case "draft-with-published":
+    case "published-pending-with-draft":
     case "published-pending-with-older-active":
     case "published-failed-with-older-active":
     case "published-manual-refresh-no-snapshot":
@@ -319,7 +337,6 @@ function resolveSandboxProfileEditorTestRouteView(input: {
     case "published-failed":
       return "published";
     case "draft":
-    case "draft-with-published":
       return "draft";
   }
 }
@@ -1251,7 +1268,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByRole("menuitem", { name: "Discard draft" })).toBeDefined();
   });
 
-  it("returns to the sandbox profile tab when resuming an existing draft from snapshots", () => {
+  it("returns to the published sandbox profile tab when a published profile has an existing draft", () => {
     const { profileId, router } = renderSandboxProfileEditor({
       versionState: "published-with-draft",
     });
@@ -1268,7 +1285,8 @@ describe("SandboxProfileEditorPage", () => {
       "true",
     );
     expect(router.state.location.pathname).toBe(`/sandbox-profiles/${profileId}/sandbox-profile`);
-    expect(screen.getByText("Viewing: Draft")).toBeDefined();
+    expect(screen.getByText("Viewing: Published (v3)")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Resume editing" })).toBeDefined();
   });
 
   it("does not show the publish success notice again after it is dismissed and the panel remounts", () => {
@@ -2123,6 +2141,7 @@ describe("SandboxProfileEditorPage", () => {
 
   it("keeps draft publish action enabled", () => {
     renderSandboxProfileEditor({
+      view: "draft",
       versionState: "draft-with-published",
     });
 
@@ -2215,6 +2234,7 @@ describe("SandboxProfileEditorPage", () => {
 
   it("shows draft actions for draft profiles with a published version", () => {
     renderSandboxProfileEditor({
+      view: "draft",
       versionState: "draft-with-published",
     });
 
@@ -2233,6 +2253,17 @@ describe("SandboxProfileEditorPage", () => {
     });
 
     expect(await screen.findByText("Viewing: Published (v3)")).toBeDefined();
+    expect(router.state.location.pathname).toBe(`/sandbox-profiles/${profileId}/sandbox-profile`);
+  });
+
+  it("opens the published sandbox profile tab from the profile default route when a draft also exists", async () => {
+    const { profileId, router } = renderSandboxProfileEditor({
+      view: "default",
+      versionState: "draft-with-published",
+    });
+
+    expect(await screen.findByText("Viewing: Published (v2)")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Resume editing" })).toBeDefined();
     expect(router.state.location.pathname).toBe(`/sandbox-profiles/${profileId}/sandbox-profile`);
   });
 
@@ -2255,6 +2286,19 @@ describe("SandboxProfileEditorPage", () => {
     expect(await screen.findByText("Viewing: Draft")).toBeDefined();
     expect(router.state.location.pathname).toBe(
       `/sandbox-profiles/${profileId}/sandbox-profile/draft`,
+    );
+  });
+
+  it("keeps the published route when a published version is materializing and a draft exists", async () => {
+    const { profileId, router } = renderSandboxProfileEditor({
+      view: "published",
+      versionState: "published-pending-with-draft",
+    });
+
+    expect(await screen.findByText("Viewing: Published (v3)")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Resume editing" })).toBeDefined();
+    expect(router.state.location.pathname).toBe(
+      `/sandbox-profiles/${profileId}/sandbox-profile/published`,
     );
   });
 

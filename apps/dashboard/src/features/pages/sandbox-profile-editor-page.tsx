@@ -406,19 +406,19 @@ function shouldBlockSandboxProfileEditorUnpersistedChangesNavigation(input: {
   return currentSectionId === null || nextSectionId === null;
 }
 
-function resolveDefaultSandboxProfileEditorView(input: {
-  versions: readonly SandboxProfileVersion[];
-}): SandboxProfileRouteView {
-  return input.versions.some((version) => version.state === "draft") ? "draft" : "published";
+function resolveDefaultSandboxProfileEditorView(
+  versions: readonly SandboxProfileVersion[],
+): SandboxProfileRouteView {
+  return versions.some((version) => version.state === "published") ? "published" : "draft";
 }
 
 function shouldRedirectPublishedSandboxProfileViewToDraft(input: {
-  activeVersion: number | null;
   versions: readonly SandboxProfileVersion[];
 }): boolean {
-  return (
-    input.activeVersion === null && input.versions.some((version) => version.state === "draft")
-  );
+  const hasDraftVersion = input.versions.some((version) => version.state === "draft");
+  const hasPublishedVersion = input.versions.some((version) => version.state === "published");
+
+  return hasDraftVersion && !hasPublishedVersion;
 }
 
 export function SandboxProfileEditorPage(props: SandboxProfileEditorPageProps): React.JSX.Element {
@@ -668,11 +668,7 @@ function EditSandboxProfileEditorPage(): React.JSX.Element {
   });
   const publishSuccessMessage = navigationState.notice === "publish-success";
   const navigate = shellContext.navigate;
-  const routeView =
-    route?.view ??
-    resolveDefaultSandboxProfileEditorView({
-      versions: shellContext.versions,
-    });
+  const routeView = route?.view ?? resolveDefaultSandboxProfileEditorView(shellContext.versions);
   const onPublishSuccessNavigationConsumed = useCallback(() => {
     void navigate(location.pathname + location.search, {
       replace: true,
@@ -976,7 +972,6 @@ function LoadedSandboxProfileEditorPage(
   if (
     input.view === "published" &&
     shouldRedirectPublishedSandboxProfileViewToDraft({
-      activeVersion: input.profile.activeVersion,
       versions: input.versions,
     })
   ) {
