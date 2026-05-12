@@ -118,8 +118,8 @@ const SandboxProfileToolsColumns = [
 ] satisfies readonly ResponsiveFieldListColumn[];
 
 const SandboxProfileProxiedConnectionColumns = [
-  { key: "connection", label: "Connection", desktopWidth: "minmax(10rem,0.8fr)" },
-  { key: "account", label: "Account", desktopWidth: "minmax(14rem,1fr)" },
+  { key: "connection", label: "Service", desktopWidth: "minmax(10rem,0.8fr)" },
+  { key: "account", label: "Credential Connection", desktopWidth: "minmax(14rem,1fr)" },
   {
     key: "actions",
     label: <span className="sr-only">Actions</span>,
@@ -828,6 +828,7 @@ export function SandboxProfileIntegrationsSetupSection(
     connectionId: gitRow?.connectionId,
     availableConnections: input.availableConnections,
   });
+  const gitServiceChoice = gitChoices.find((choice) => choice.id === gitTargetKey);
   const showGitProxiedConnection =
     !hasNoGitProviderOptions && (gitIssue !== null || gitTargetKey !== null);
 
@@ -998,7 +999,7 @@ export function SandboxProfileIntegrationsSetupSection(
               isLastRow={!showGitProxiedConnection && connectorRows.length === 0}
             >
               <ResponsiveFieldListCell columnKey="connection">
-                <RuntimeSettingLabel>Agent</RuntimeSettingLabel>
+                <RuntimeSettingLabel>OpenAI</RuntimeSettingLabel>
               </ResponsiveFieldListCell>
               <ResponsiveFieldListCell columnKey="account">
                 <ConnectionSelectionCell
@@ -1050,7 +1051,11 @@ export function SandboxProfileIntegrationsSetupSection(
                 isLastRow={connectorRows.length === 0}
               >
                 <ResponsiveFieldListCell columnKey="connection">
-                  <RuntimeSettingLabel>Git provider</RuntimeSettingLabel>
+                  <RuntimeSettingLabel>
+                    {gitIssue === null && gitServiceChoice !== undefined
+                      ? gitServiceChoice.title
+                      : "Git provider"}
+                  </RuntimeSettingLabel>
                 </ResponsiveFieldListCell>
                 <ResponsiveFieldListCell columnKey="account">
                   {gitIssue === "missing-connection" ? (

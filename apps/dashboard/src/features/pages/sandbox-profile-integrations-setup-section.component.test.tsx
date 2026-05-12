@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { type ComponentProps, useState } from "react";
 import { MemoryRouter } from "react-router";
@@ -26,6 +27,63 @@ afterEach(() => {
 });
 
 describe("SandboxProfileIntegrationsSetupSection", () => {
+  it("labels proxied connection service rows with their integration names", () => {
+    const storyGithubConnectionWithoutResources = {
+      ...StoryGithubConnection,
+      resources: [],
+    };
+
+    render(
+      <TestSandboxProfileIntegrationsSetupSection
+        overrides={{
+          availableConnections: [
+            StoryOpenAiConnection,
+            storyGithubConnectionWithoutResources,
+            StoryJiraConnection,
+          ],
+          availableTargets: [StoryOpenAiTarget, StoryGithubTarget, StoryJiraTarget],
+          integrationRows: [
+            {
+              clientId: "agent-row",
+              connectionId: StoryOpenAiConnection.id,
+              kind: "agent",
+              config: {},
+            },
+            {
+              clientId: "git-row",
+              connectionId: storyGithubConnectionWithoutResources.id,
+              kind: "git",
+              config: {},
+            },
+            {
+              clientId: "jira-row",
+              connectionId: StoryJiraConnection.id,
+              kind: "connector",
+              config: {},
+            },
+          ],
+        }}
+      />,
+    );
+
+    const proxiedConnectionsSection = screen
+      .getByRole("heading", { name: "Proxied Connections" })
+      .closest("section");
+    if (proxiedConnectionsSection === null) {
+      throw new Error("Expected Proxied Connections heading to be inside a section.");
+    }
+    const proxiedConnections = within(proxiedConnectionsSection);
+
+    expect(proxiedConnections.getAllByText("Service").length).toBeGreaterThan(0);
+    expect(proxiedConnections.getAllByText("Credential Connection").length).toBeGreaterThan(0);
+    expect(proxiedConnections.getByText("OpenAI")).toBeDefined();
+    expect(proxiedConnections.getByText("GitHub")).toBeDefined();
+    expect(proxiedConnections.getByText("Jira")).toBeDefined();
+    expect(proxiedConnections.getByText("Primary OpenAI Workspace")).toBeDefined();
+    expect(proxiedConnections.getByText("GitHub Production")).toBeDefined();
+    expect(proxiedConnections.getByText("Jira Production")).toBeDefined();
+  });
+
   it("links disconnected connector setup to the integration add flow", () => {
     render(
       <TestSandboxProfileIntegrationsSetupSection
@@ -219,10 +277,22 @@ function TestSandboxProfileIntegrationsSetupSection(input: {
     onIntegrationSaveErrorDismiss: () => {},
     ...input.overrides,
   };
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      mutations: {
+        retry: false,
+      },
+      queries: {
+        retry: false,
+      },
+    },
+  });
 
   return (
-    <MemoryRouter>
-      <SandboxProfileIntegrationsSetupSection {...props} />
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <SandboxProfileIntegrationsSetupSection {...props} />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
