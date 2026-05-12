@@ -5,11 +5,10 @@ import { listSandboxProfiles } from "../sandbox-profiles/sandbox-profiles-servic
 import type { SandboxProfile } from "../sandbox-profiles/sandbox-profiles-types.js";
 import { buildWebhookAutomationSandboxProfileOptions } from "./webhook-automation-option-builders.js";
 
-export const SCHEDULED_AUTOMATION_SANDBOX_PROFILES_QUERY_KEY: readonly [
+export const AUTOMATION_SANDBOX_PROFILES_QUERY_KEY: readonly ["automations", "sandbox-profiles"] = [
   "automations",
-  "scheduled",
   "sandbox-profiles",
-] = ["automations", "scheduled", "sandbox-profiles"];
+];
 
 async function listAllSandboxProfiles(input: {
   signal?: AbortSignal;
@@ -35,13 +34,13 @@ async function listAllSandboxProfiles(input: {
   }
 }
 
-export function useScheduledAutomationPrerequisites(): {
+export function useAutomationSandboxProfileOptions(): {
   sandboxProfileOptions: ReturnType<typeof buildWebhookAutomationSandboxProfileOptions>;
   errorMessage: string | null;
   isPending: boolean;
 } {
   const sandboxProfilesQuery = useQuery({
-    queryKey: SCHEDULED_AUTOMATION_SANDBOX_PROFILES_QUERY_KEY,
+    queryKey: AUTOMATION_SANDBOX_PROFILES_QUERY_KEY,
     queryFn: async ({ signal }) => listAllSandboxProfiles({ signal }),
     retry: false,
   });
