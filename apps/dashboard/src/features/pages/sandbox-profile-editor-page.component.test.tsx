@@ -1872,18 +1872,18 @@ describe("SandboxProfileEditorPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Sandbox Profile" }));
 
     const runtimeHeading = screen.getByRole("heading", { name: "Runtime" });
-    const [agentLabel] = screen.getAllByText("Agent");
+    const agentLabel = screen.getAllByText("Agent")[0];
     if (agentLabel === undefined) {
-      throw new Error("Expected the runtime section to render an Agent row.");
+      throw new Error("Expected runtime Agent label to render.");
     }
     const gitProviderLabel = screen.getByText("Git Provider");
     const sandboxRuntimeLabel = screen.getByText("Sandbox Runtime");
     const proxiedConnectionsHeading = screen.getByRole("heading", { name: "Proxied Connections" });
 
     expectElementToFollow(runtimeHeading, agentLabel);
-    expectElementToFollow(agentLabel, gitProviderLabel);
-    expectElementToFollow(gitProviderLabel, sandboxRuntimeLabel);
-    expectElementToFollow(sandboxRuntimeLabel, proxiedConnectionsHeading);
+    expectElementToFollow(agentLabel, sandboxRuntimeLabel);
+    expectElementToFollow(sandboxRuntimeLabel, gitProviderLabel);
+    expectElementToFollow(gitProviderLabel, proxiedConnectionsHeading);
     expect(screen.queryByText("Integrations & Tools")).toBeNull();
   });
 
