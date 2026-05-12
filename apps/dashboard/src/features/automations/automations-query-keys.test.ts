@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   AUTOMATIONS_QUERY_KEY_PREFIX,
   automationsListQueryKey,
+  scheduledAutomationDetailQueryKey,
   webhookAutomationDetailQueryKey,
-  webhookAutomationsListQueryKey,
-} from "./webhook-automations-query-keys.js";
+} from "./automations-query-keys.js";
 
-describe("webhook automations query keys", () => {
+describe("automations query keys", () => {
   it("builds the shared automations prefix", () => {
     expect(AUTOMATIONS_QUERY_KEY_PREFIX).toEqual(["automations"]);
   });
@@ -30,22 +30,21 @@ describe("webhook automations query keys", () => {
     ).toEqual(["automations", "list", 25, null, null, "sbp_123"]);
   });
 
-  it("builds the webhook list query key", () => {
-    expect(
-      webhookAutomationsListQueryKey({
-        limit: 25,
-        after: "cursor_after",
-        before: null,
-      }),
-    ).toEqual(["automations", "webhooks", "list", 25, "cursor_after", null]);
-  });
-
-  it("builds the detail query key", () => {
+  it("builds the webhook detail query key", () => {
     expect(webhookAutomationDetailQueryKey("aut_123")).toEqual([
       "automations",
       "webhooks",
       "detail",
       "aut_123",
+    ]);
+  });
+
+  it("builds the scheduled detail query key", () => {
+    expect(scheduledAutomationDetailQueryKey("aut_456")).toEqual([
+      "automations",
+      "schedules",
+      "detail",
+      "aut_456",
     ]);
   });
 });
