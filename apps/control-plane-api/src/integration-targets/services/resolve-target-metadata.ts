@@ -10,6 +10,7 @@ import type {
   IntegrationFormConnectionMethodProviderAppSetup,
   IntegrationFormConnectionMethodSetupPaneMetadata,
   IntegrationFormConnectionMethodSetupStartForm,
+  IntegrationKind,
   IntegrationWebhookEventDefinition,
   IntegrationWebhookEventParameterDefinition,
   IntegrationWebhookSourceLifecycle,
@@ -24,6 +25,8 @@ function getTargetDefinition(input: { familyId: string; variantId: string }) {
     variantId: input.variantId,
   });
 }
+
+type RegisteredIntegrationDefinition = NonNullable<ReturnType<typeof getTargetDefinition>>;
 
 export function hasTargetDefinition(input: { familyId: string; variantId: string }): boolean {
   return getTargetDefinition(input) !== undefined;
@@ -94,6 +97,7 @@ type ResolvedWebhookEvent = {
 };
 
 export type ResolvedIntegrationTargetMetadata = {
+  kind: IntegrationKind;
   displayName: string;
   description: string;
   logoKey?: string;
@@ -633,41 +637,18 @@ export function resolveTargetMetadata(input: {
   });
 
   if (definition === undefined) {
-    if (input.displayNameOverride !== null && input.descriptionOverride !== null) {
-      return {
-        displayName: input.displayNameOverride,
-        description: input.descriptionOverride,
-      };
-    }
-
     throw new Error(
-      `Integration definition '${input.familyId}::${input.variantId}' was not found and target metadata overrides are incomplete.`,
+      `Integration definition '${input.familyId}::${input.variantId}' was not found.`,
     );
   }
 
   if (definition.description === undefined || definition.description.trim().length === 0) {
     if (input.descriptionOverride !== null) {
-      return {
+      return buildResolvedIntegrationTargetMetadata({
+        definition,
         displayName: input.displayNameOverride ?? definition.displayName,
         description: input.descriptionOverride,
-        logoKey: definition.logoKey,
-        connectionMethods: definition.connectionMethods.map((method) =>
-          resolveConnectionMethod(method),
-        ),
-        ...(definition.webhookSource === undefined
-          ? {}
-          : {
-              webhookSource: {
-                lifecycle: definition.webhookSource.lifecycle,
-                requiresSourceSelection: true,
-              },
-            }),
-        ...(definition.supportedWebhookEvents === undefined
-          ? {}
-          : {
-              supportedWebhookEvents: cloneWebhookEvents(definition.supportedWebhookEvents),
-            }),
-      };
+      });
     }
 
     throw new Error(
@@ -675,25 +656,38 @@ export function resolveTargetMetadata(input: {
     );
   }
 
-  return {
+  return buildResolvedIntegrationTargetMetadata({
+    definition,
     displayName: input.displayNameOverride ?? definition.displayName,
     description: input.descriptionOverride ?? definition.description,
-    logoKey: definition.logoKey,
-    connectionMethods: definition.connectionMethods.map((method) =>
+  });
+}
+
+function buildResolvedIntegrationTargetMetadata(input: {
+  definition: RegisteredIntegrationDefinition;
+  displayName: string;
+  description: string;
+}): ResolvedIntegrationTargetMetadata {
+  return {
+    kind: input.definition.kind,
+    displayName: input.displayName,
+    description: input.description,
+    logoKey: input.definition.logoKey,
+    connectionMethods: input.definition.connectionMethods.map((method) =>
       resolveConnectionMethod(method),
     ),
-    ...(definition.webhookSource === undefined
+    ...(input.definition.webhookSource === undefined
       ? {}
       : {
           webhookSource: {
-            lifecycle: definition.webhookSource.lifecycle,
+            lifecycle: input.definition.webhookSource.lifecycle,
             requiresSourceSelection: true,
           },
         }),
-    ...(definition.supportedWebhookEvents === undefined
+    ...(input.definition.supportedWebhookEvents === undefined
       ? {}
       : {
-          supportedWebhookEvents: cloneWebhookEvents(definition.supportedWebhookEvents),
+          supportedWebhookEvents: cloneWebhookEvents(input.definition.supportedWebhookEvents),
         }),
   };
 }

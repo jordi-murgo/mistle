@@ -37,6 +37,7 @@ export function buildConnectedIntegrationViewCards(input: {
 }): readonly OrganizationIntegrationsSettingsPageCard[] {
   return input.connectedCards.map((card) => ({
     targetKey: card.target.targetKey,
+    integrationKind: card.target.kind,
     displayName: card.displayName,
     description: formatConnectionCount(card.connections.length),
     configStatus: card.configStatus,
@@ -57,6 +58,7 @@ export function buildAvailableIntegrationViewCards(input: {
 
     return {
       targetKey: card.target.targetKey,
+      integrationKind: card.target.kind,
       displayName: card.displayName,
       description: card.description,
       configStatus: card.configStatus,

@@ -9,7 +9,8 @@ import {
 
 const ConnectedCards: readonly OrganizationIntegrationsSettingsPageCard[] = [
   {
-    targetKey: "github",
+    targetKey: "github-cloud",
+    integrationKind: "git",
     displayName: "GitHub",
     description: "2 connections",
     configStatus: "valid",
@@ -18,7 +19,8 @@ const ConnectedCards: readonly OrganizationIntegrationsSettingsPageCard[] = [
     onAction: () => {},
   },
   {
-    targetKey: "linear",
+    targetKey: "linear-default",
+    integrationKind: "connector",
     displayName: "Linear",
     description: "1 connection",
     configStatus: "invalid",
@@ -46,6 +48,12 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const NoConnectedIntegrations: Story = {
+  args: {
+    connectedCards: [],
+  },
+};
 
 export const LoadError: Story = {
   args: {
