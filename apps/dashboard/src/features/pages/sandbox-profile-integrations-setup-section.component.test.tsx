@@ -1,17 +1,21 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ComponentProps, useState } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  StoryAnthropicConnection,
+  StoryAnthropicTarget,
   StoryDatadogTarget,
   StoryGithubConnection,
   StoryGithubTarget,
   StoryJiraConnection,
   StoryJiraTarget,
+  StoryOpenCodeGoConnection,
+  StoryOpenCodeGoTarget,
   StoryOpenAiConnection,
   StoryOpenAiTarget,
   StorySlackConnection,
@@ -118,6 +122,157 @@ describe("SandboxProfileIntegrationsSetupSection", () => {
     expect(runtime.getByText("Primary OpenAI Workspace")).toBeDefined();
     expect(runtime.getByText("GitHub - GitHub Production")).toBeDefined();
     expect(runtime.getByText("Jira Production")).toBeDefined();
+  });
+
+  it("limits Codex proxied model providers to OpenAI and removes OpenCode-only agent bindings", async () => {
+    const removedRows: string[] = [];
+
+    render(
+      <TestSandboxProfileIntegrationsSetupSection
+        overrides={{
+          agentRuntimeId: "codex",
+          availableConnections: [
+            StoryOpenAiConnection,
+            StoryOpenCodeGoConnection,
+            StoryAnthropicConnection,
+          ],
+          availableTargets: [StoryOpenAiTarget, StoryOpenCodeGoTarget, StoryAnthropicTarget],
+          integrationRows: [
+            {
+              clientId: "openai-agent-row",
+              connectionId: StoryOpenAiConnection.id,
+              kind: "agent",
+              config: {},
+            },
+            {
+              clientId: "opencode-agent-row",
+              connectionId: StoryOpenCodeGoConnection.id,
+              kind: "agent",
+              config: {},
+            },
+            {
+              clientId: "anthropic-agent-row",
+              connectionId: StoryAnthropicConnection.id,
+              kind: "agent",
+              config: {},
+            },
+          ],
+          onRemoveIntegrationBindingRow: (clientId) => {
+            removedRows.push(clientId);
+          },
+        }}
+      />,
+    );
+
+    const proxiedConnections = within(getProxiedConnectionsSection());
+
+    expect(proxiedConnections.getByText("OpenAI")).toBeDefined();
+    expect(proxiedConnections.queryByText("OpenCode Go")).toBeNull();
+    expect(proxiedConnections.queryByText("Anthropic")).toBeNull();
+    await waitFor(() => {
+      expect(removedRows).toEqual(["opencode-agent-row", "anthropic-agent-row"]);
+    });
+  });
+
+  it("shows all configured OpenCode-compatible model providers as optional proxied connections", () => {
+    render(
+      <TestSandboxProfileIntegrationsSetupSection
+        overrides={{
+          agentRuntimeId: "opencode",
+          availableConnections: [
+            StoryOpenAiConnection,
+            StoryOpenCodeGoConnection,
+            StoryAnthropicConnection,
+          ],
+          availableTargets: [StoryOpenAiTarget, StoryOpenCodeGoTarget, StoryAnthropicTarget],
+          integrationRows: [
+            {
+              clientId: "openai-agent-row",
+              connectionId: StoryOpenAiConnection.id,
+              kind: "agent",
+              config: {},
+            },
+            {
+              clientId: "anthropic-agent-row",
+              connectionId: StoryAnthropicConnection.id,
+              kind: "agent",
+              config: {},
+            },
+          ],
+        }}
+      />,
+    );
+
+    const proxiedConnections = within(getProxiedConnectionsSection());
+
+    expect(proxiedConnections.getByText("OpenAI")).toBeDefined();
+    expect(proxiedConnections.getByText("OpenCode Go")).toBeDefined();
+    expect(proxiedConnections.getByText("Anthropic")).toBeDefined();
+    expect(proxiedConnections.getByText("Primary OpenAI Workspace")).toBeDefined();
+    expect(proxiedConnections.getByText("Anthropic Production")).toBeDefined();
+    expect(
+      proxiedConnections.getByRole("combobox", { name: "OpenCode Go connection" }),
+    ).toBeDefined();
+  });
+
+  it("keeps stale agent provider bindings visible so they can be removed", () => {
+    const removedRows: string[] = [];
+
+    render(
+      <TestSandboxProfileIntegrationsSetupSection
+        overrides={{
+          agentRuntimeId: "opencode",
+          availableConnections: [StoryOpenAiConnection],
+          availableTargets: [StoryOpenAiTarget],
+          integrationRows: [
+            {
+              clientId: "stale-agent-row",
+              connectionId: "missing-agent-connection",
+              kind: "agent",
+              config: {},
+            },
+          ],
+          onRemoveIntegrationBindingRow: (clientId) => {
+            removedRows.push(clientId);
+          },
+        }}
+      />,
+    );
+
+    const proxiedConnections = within(getProxiedConnectionsSection());
+
+    expect(screen.getByText("Some integrations need attention")).toBeDefined();
+    expect(proxiedConnections.getByText("Agent provider")).toBeDefined();
+    expect(proxiedConnections.getByText("Connection cannot be found")).toBeDefined();
+    fireEvent.click(proxiedConnections.getByRole("button", { name: "Remove agent provider" }));
+    expect(removedRows).toEqual(["stale-agent-row"]);
+  });
+
+  it("shows stale agent provider rows when the target is missing", () => {
+    render(
+      <TestSandboxProfileIntegrationsSetupSection
+        overrides={{
+          agentRuntimeId: "opencode",
+          availableConnections: [StoryAnthropicConnection],
+          availableTargets: [StoryOpenAiTarget],
+          integrationRows: [
+            {
+              clientId: "missing-agent-target-row",
+              connectionId: StoryAnthropicConnection.id,
+              kind: "agent",
+              config: {},
+            },
+          ],
+        }}
+      />,
+    );
+
+    const proxiedConnections = within(getProxiedConnectionsSection());
+
+    expect(screen.getByText("Some integrations need attention")).toBeDefined();
+    expect(proxiedConnections.getByText("Agent provider")).toBeDefined();
+    expect(proxiedConnections.getByText("Integration no longer available.")).toBeDefined();
+    expect(proxiedConnections.getByRole("button", { name: "Remove agent provider" })).toBeDefined();
   });
 
   it("links disconnected connector setup to the integration add flow", () => {
@@ -296,6 +451,7 @@ function TestSandboxProfileIntegrationsSetupSection(input: {
   overrides: Partial<SandboxProfileIntegrationsSetupSectionProps>;
 }): React.JSX.Element {
   const props: SandboxProfileIntegrationsSetupSectionProps = {
+    agentRuntimeId: "codex",
     availableConnections: [StoryOpenAiConnection, StoryGithubConnection],
     availableTargets: [StoryOpenAiTarget, StoryGithubTarget],
     integrationBindingsQuery: {
@@ -335,6 +491,17 @@ function TestSandboxProfileIntegrationsSetupSection(input: {
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+function getProxiedConnectionsSection(): HTMLElement {
+  const proxiedConnectionsSection = screen
+    .getByRole("heading", { name: "Runtime" })
+    .closest("section");
+  if (proxiedConnectionsSection === null) {
+    throw new Error("Expected Runtime heading to be inside a section.");
+  }
+
+  return proxiedConnectionsSection;
 }
 
 function queryEmptySectionCards(container: HTMLElement): Element[] {

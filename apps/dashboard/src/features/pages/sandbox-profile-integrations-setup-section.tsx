@@ -1,4 +1,8 @@
 import {
+  agentDefinitionAllowsRuntime,
+  createBrowserDefinitionsBundle,
+} from "@mistle/integrations-definitions/browser";
+import {
   Button,
   Dialog,
   DialogContent,
@@ -19,12 +23,15 @@ import {
 } from "@mistle/ui";
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
 import { resolveIntegrationLogoPath } from "../integrations/logo.js";
-import type { SandboxIntegrationBindingKind } from "../sandbox-profiles/sandbox-profiles-types.js";
+import type {
+  SandboxIntegrationBindingKind,
+  SandboxProfileVersion,
+} from "../sandbox-profiles/sandbox-profiles-types.js";
 import { ActionTile } from "../shared/action-tile.js";
 import {
   ResponsiveFieldList,
@@ -50,7 +57,7 @@ type IntegrationChoice = {
   id: string;
   hasSelectableConnections: boolean;
   logoKey: string | undefined;
-  title: React.ReactNode;
+  title: string;
 };
 
 type GitConnectionChoice = {
@@ -60,6 +67,7 @@ type GitConnectionChoice = {
 };
 
 type SandboxProfileIntegrationsSetupSectionProps = {
+  agentRuntimeId: SandboxProfileVersion["agentRuntimeId"];
   integrationBindingsQuery: {
     isError: boolean;
     error: unknown;
@@ -91,6 +99,9 @@ type SandboxProfileIntegrationsSetupSectionProps = {
 };
 
 const NoGitConnectionValue = "none";
+const NoProxiedConnectionValue = "none";
+const Definitions = createBrowserDefinitionsBundle();
+const IntegrationRegistry = Definitions.integrationRegistry;
 
 const SandboxProfileIntegrationConnectionColumns = [
   { key: "integration", label: "Integration", desktopWidth: "minmax(12rem,0.9fr)" },
@@ -149,6 +160,7 @@ function ConnectionSelectionCell(input: {
   availableConnections: readonly IntegrationConnectionSummary[];
   selectedConnectionId: string | undefined;
   onConnectionChange: (nextConnectionId: string) => void;
+  allowNone?: boolean;
   disabled?: boolean | undefined;
   readOnly?: boolean | undefined;
 }): React.JSX.Element {
@@ -194,6 +206,9 @@ function ConnectionSelectionCell(input: {
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
+        {input.allowNone === true ? (
+          <SelectItem value={NoProxiedConnectionValue}>None</SelectItem>
+        ) : null}
         {input.availableConnections.map((connection) => (
           <SelectItem key={connection.id} value={connection.id}>
             {connection.displayName}
@@ -296,6 +311,7 @@ function resolveKindChoices(input: {
   kind: SandboxIntegrationBindingKind;
   availableConnections: readonly IntegrationConnectionSummary[];
   availableTargets: readonly IntegrationTargetSummary[];
+  agentRuntimeId?: SandboxProfileVersion["agentRuntimeId"];
   includeDisconnectedTargets?: boolean;
 }): IntegrationChoice[] {
   const choices: IntegrationChoice[] = [];
@@ -305,6 +321,17 @@ function resolveKindChoices(input: {
     if (
       resolveBindingKindFromTarget(target) !== input.kind ||
       seenTargetKeys.has(target.targetKey)
+    ) {
+      continue;
+    }
+
+    if (
+      input.kind === "agent" &&
+      input.agentRuntimeId !== undefined &&
+      !targetAllowsAgentRuntime({
+        target,
+        agentRuntimeId: input.agentRuntimeId,
+      })
     ) {
       continue;
     }
@@ -326,6 +353,66 @@ function resolveKindChoices(input: {
   }
 
   return choices;
+}
+
+function targetAllowsAgentRuntime(input: {
+  target: IntegrationTargetSummary;
+  agentRuntimeId: SandboxProfileVersion["agentRuntimeId"];
+}): boolean {
+  const definition = IntegrationRegistry.getDefinition({
+    familyId: input.target.familyId,
+    variantId: input.target.variantId,
+  });
+
+  return agentDefinitionAllowsRuntime({
+    definition,
+    runtimeId: input.agentRuntimeId,
+  });
+}
+
+function resolveAgentBindingRowsForRuntime(input: {
+  agentRows: readonly SandboxProfileBindingEditorRow[];
+  availableConnections: readonly IntegrationConnectionSummary[];
+  availableTargets: readonly IntegrationTargetSummary[];
+  agentRuntimeId: SandboxProfileVersion["agentRuntimeId"];
+}): {
+  rowsByTargetKey: ReadonlyMap<string, SandboxProfileBindingEditorRow>;
+  staleRows: readonly SandboxProfileBindingEditorRow[];
+  runtimeIncompatibleRows: readonly SandboxProfileBindingEditorRow[];
+} {
+  const rowsByTargetKey = new Map<string, SandboxProfileBindingEditorRow>();
+  const staleRows: SandboxProfileBindingEditorRow[] = [];
+  const runtimeIncompatibleRows: SandboxProfileBindingEditorRow[] = [];
+
+  for (const row of input.agentRows) {
+    const metadata = resolveRowBindingMetadata({
+      row,
+      availableConnections: input.availableConnections,
+      availableTargets: input.availableTargets,
+    });
+    if (metadata === null || metadata.target === undefined) {
+      staleRows.push(row);
+      continue;
+    }
+
+    if (
+      !targetAllowsAgentRuntime({
+        target: metadata.target,
+        agentRuntimeId: input.agentRuntimeId,
+      })
+    ) {
+      runtimeIncompatibleRows.push(row);
+      continue;
+    }
+
+    rowsByTargetKey.set(metadata.target.targetKey, row);
+  }
+
+  return {
+    rowsByTargetKey,
+    staleRows,
+    runtimeIncompatibleRows,
+  };
 }
 
 function resolveConnectionsForTarget(
@@ -361,19 +448,6 @@ function resolveGitConnectionChoices(input: {
   }
 
   return choices;
-}
-
-function findTargetForConnection(
-  connectionId: string | undefined,
-  availableConnections: readonly IntegrationConnectionSummary[],
-): string | null {
-  if (connectionId === undefined) {
-    return null;
-  }
-
-  return (
-    availableConnections.find((connection) => connection.id === connectionId)?.targetKey ?? null
-  );
 }
 
 function buildDefaultConfig(input: {
@@ -529,6 +603,7 @@ export function SandboxProfileIntegrationsSetupSection(
     kind: "agent",
     availableConnections: input.availableConnections,
     availableTargets: input.availableTargets,
+    agentRuntimeId: input.agentRuntimeId,
   });
   const gitConnectionChoices = resolveGitConnectionChoices({
     availableConnections: input.availableConnections,
@@ -541,9 +616,22 @@ export function SandboxProfileIntegrationsSetupSection(
     includeDisconnectedTargets: true,
   });
 
-  const agentRow = input.integrationRows.find((row) => row.kind === "agent") ?? null;
+  const agentRows = useMemo(
+    () => input.integrationRows.filter((row) => row.kind === "agent"),
+    [input.integrationRows],
+  );
   const gitRow = input.integrationRows.find((row) => row.kind === "git") ?? null;
   const connectorRows = input.integrationRows.filter((row) => row.kind === "connector");
+  const agentRowResolution = useMemo(
+    () =>
+      resolveAgentBindingRowsForRuntime({
+        agentRows,
+        availableConnections: input.availableConnections,
+        availableTargets: input.availableTargets,
+        agentRuntimeId: input.agentRuntimeId,
+      }),
+    [agentRows, input.agentRuntimeId, input.availableConnections, input.availableTargets],
+  );
   const selectedConnectorTargetKeys = new Set(
     connectorRows
       .map(
@@ -559,11 +647,13 @@ export function SandboxProfileIntegrationsSetupSection(
   const addConnectorChoices = connectorChoices.filter(
     (choice) => !selectedConnectorTargetKeys.has(choice.id),
   );
-  const agentIssue = resolveBindingIssue({
-    row: agentRow,
-    availableConnections: input.availableConnections,
-    availableTargets: input.availableTargets,
-  });
+  const agentIssues = agentRows.map((row) =>
+    resolveBindingIssue({
+      row,
+      availableConnections: input.availableConnections,
+      availableTargets: input.availableTargets,
+    }),
+  );
   const gitIssue = resolveBindingIssue({
     row: gitRow,
     availableConnections: input.availableConnections,
@@ -577,7 +667,24 @@ export function SandboxProfileIntegrationsSetupSection(
         availableTargets: input.availableTargets,
       }) !== null,
   );
-  const hasUnresolvedRows = agentIssue !== null || gitIssue !== null || hasUnresolvedConnectorRows;
+  const hasUnresolvedAgentRows = agentIssues.some((issue) => issue !== null);
+  const hasUnresolvedRows =
+    hasUnresolvedAgentRows || gitIssue !== null || hasUnresolvedConnectorRows;
+
+  useEffect(() => {
+    if (controlsAreDisabled || isReadOnly) {
+      return;
+    }
+
+    for (const row of agentRowResolution.runtimeIncompatibleRows) {
+      input.onRemoveIntegrationBindingRow(row.clientId);
+    }
+  }, [
+    agentRowResolution.runtimeIncompatibleRows,
+    controlsAreDisabled,
+    input.onRemoveIntegrationBindingRow,
+    isReadOnly,
+  ]);
 
   function saveBindingConnection(
     kind: SandboxIntegrationBindingKind,
@@ -634,12 +741,6 @@ export function SandboxProfileIntegrationsSetupSection(
     }
   }
 
-  const agentTargetKey = findTargetForConnection(
-    agentRow?.connectionId,
-    input.availableConnections,
-  );
-  const agentIntegrationChoice =
-    agentChoices.find((choice) => choice.id === agentTargetKey) ?? agentChoices[0];
   const addConnectorActionIsDisabled = controlsAreDisabled || addConnectorChoices.length === 0;
 
   return (
@@ -760,52 +861,150 @@ export function SandboxProfileIntegrationsSetupSection(
                   columns={SandboxProfileIntegrationConnectionColumns}
                   gapClassName="gap-6"
                 >
-                  <ResponsiveFieldListRow
-                    className="py-4"
-                    gapClassName="gap-6"
-                    gridClassName="md:items-start"
-                    isLastRow={connectorRows.length === 0}
-                  >
-                    <ResponsiveFieldListCell columnKey="integration">
-                      {agentIntegrationChoice === undefined ? (
+                  {agentRowResolution.staleRows.length === 0 && agentChoices.length === 0 ? (
+                    <ResponsiveFieldListRow
+                      className="py-4"
+                      gapClassName="gap-6"
+                      gridClassName="md:items-start"
+                      isLastRow={connectorRows.length === 0}
+                    >
+                      <ResponsiveFieldListCell columnKey="integration">
                         <div
                           className={`${SandboxProfileIntegrationCellContentClassName} text-sm font-medium`}
                         >
-                          OpenAI
+                          Model provider
                         </div>
-                      ) : (
-                        <IntegrationNameCell
-                          logoKey={agentIntegrationChoice.logoKey}
-                          title={agentIntegrationChoice.title}
+                      </ResponsiveFieldListCell>
+                      <ResponsiveFieldListCell columnKey="proxied-connection">
+                        <div className={SandboxProfileIntegrationCellContentClassName}>
+                          <p className="text-muted-foreground text-sm">No providers configured.</p>
+                        </div>
+                      </ResponsiveFieldListCell>
+                      <ResponsiveFieldListCell columnKey="resources-and-tools" hideOnMobile>
+                        <div
+                          aria-hidden
+                          className={SandboxProfileIntegrationCellContentClassName}
                         />
-                      )}
-                    </ResponsiveFieldListCell>
-                    <ResponsiveFieldListCell columnKey="proxied-connection">
-                      <ConnectionSelectionCell
-                        ariaLabel="agent harness connection"
-                        availableConnections={resolveConnectionsForTarget(
-                          agentTargetKey ?? agentChoices[0]?.id ?? null,
-                          input.availableConnections,
-                        )}
-                        onConnectionChange={(nextConnectionId) => {
-                          if (controlsAreDisabled) {
-                            return;
-                          }
-                          saveBindingConnection("agent", agentRow, nextConnectionId);
-                        }}
-                        selectedConnectionId={agentRow?.connectionId}
-                        disabled={controlsAreDisabled}
-                        readOnly={isReadOnly}
+                      </ResponsiveFieldListCell>
+                      <ResponsiveFieldListCell
+                        className={SandboxProfileIntegrationActionCellClassName}
+                        columnKey="actions"
                       />
-                    </ResponsiveFieldListCell>
-                    <ResponsiveFieldListCell columnKey="resources-and-tools" hideOnMobile>
-                      <div aria-hidden className={SandboxProfileIntegrationCellContentClassName} />
-                    </ResponsiveFieldListCell>
-                    <ResponsiveFieldListCell
-                      className={SandboxProfileIntegrationActionCellClassName}
-                      columnKey="actions"
-                    />
-                  </ResponsiveFieldListRow>
+                    </ResponsiveFieldListRow>
+                  ) : null}
+
+                  {agentRowResolution.staleRows.map((row) => {
+                    const agentIssue = resolveBindingIssue({
+                      row,
+                      availableConnections: input.availableConnections,
+                      availableTargets: input.availableTargets,
+                    });
+
+                    return (
+                      <ResponsiveFieldListRow
+                        className={isReadOnly ? "py-4" : "py-4 pr-10 md:pr-0"}
+                        gapClassName="gap-6"
+                        gridClassName="md:items-start"
+                        key={row.clientId}
+                      >
+                        <ResponsiveFieldListCell columnKey="integration">
+                          <div
+                            className={`${SandboxProfileIntegrationCellContentClassName} text-sm font-medium`}
+                          >
+                            Agent provider
+                          </div>
+                        </ResponsiveFieldListCell>
+                        <ResponsiveFieldListCell columnKey="proxied-connection">
+                          <UnresolvedConnectionCell
+                            message={
+                              agentIssue === "missing-target"
+                                ? "Integration no longer available."
+                                : "Connection cannot be found"
+                            }
+                          />
+                        </ResponsiveFieldListCell>
+                        <ResponsiveFieldListCell columnKey="resources-and-tools" hideOnMobile>
+                          <div
+                            aria-hidden
+                            className={SandboxProfileIntegrationCellContentClassName}
+                          />
+                        </ResponsiveFieldListCell>
+                        <ResponsiveFieldListCell
+                          className={SandboxProfileIntegrationActionCellClassName}
+                          columnKey="actions"
+                        >
+                          {isReadOnly ? null : (
+                            <RemoveIntegrationBindingButton
+                              disabled={controlsAreDisabled}
+                              label="Remove agent provider"
+                              onRemove={() => {
+                                if (controlsAreDisabled) {
+                                  return;
+                                }
+
+                                input.onRemoveIntegrationBindingRow(row.clientId);
+                              }}
+                            />
+                          )}
+                        </ResponsiveFieldListCell>
+                      </ResponsiveFieldListRow>
+                    );
+                  })}
+
+                  {agentChoices.map((choice, choiceIndex) => {
+                    const agentRow = agentRowResolution.rowsByTargetKey.get(choice.id) ?? null;
+
+                    return (
+                      <ResponsiveFieldListRow
+                        className="py-4"
+                        gapClassName="gap-6"
+                        gridClassName="md:items-start"
+                        isLastRow={
+                          choiceIndex === agentChoices.length - 1 && connectorRows.length === 0
+                        }
+                        key={choice.id}
+                      >
+                        <ResponsiveFieldListCell columnKey="integration">
+                          <IntegrationNameCell logoKey={choice.logoKey} title={choice.title} />
+                        </ResponsiveFieldListCell>
+                        <ResponsiveFieldListCell columnKey="proxied-connection">
+                          <ConnectionSelectionCell
+                            allowNone={true}
+                            ariaLabel={`${choice.title} connection`}
+                            availableConnections={resolveConnectionsForTarget(
+                              choice.id,
+                              input.availableConnections,
+                            )}
+                            onConnectionChange={(nextConnectionId) => {
+                              if (controlsAreDisabled) {
+                                return;
+                              }
+                              if (nextConnectionId === NoProxiedConnectionValue) {
+                                if (agentRow !== null) {
+                                  input.onRemoveIntegrationBindingRow(agentRow.clientId);
+                                }
+                                return;
+                              }
+                              saveBindingConnection("agent", agentRow, nextConnectionId);
+                            }}
+                            selectedConnectionId={agentRow?.connectionId}
+                            disabled={controlsAreDisabled}
+                            readOnly={isReadOnly}
+                          />
+                        </ResponsiveFieldListCell>
+                        <ResponsiveFieldListCell columnKey="resources-and-tools" hideOnMobile>
+                          <div
+                            aria-hidden
+                            className={SandboxProfileIntegrationCellContentClassName}
+                          />
+                        </ResponsiveFieldListCell>
+                        <ResponsiveFieldListCell
+                          className={SandboxProfileIntegrationActionCellClassName}
+                          columnKey="actions"
+                        />
+                      </ResponsiveFieldListRow>
+                    );
+                  })}
 
                   {connectorRows.map((row, rowIndex) => {
                     const presentation = resolveConnectorRowPresentation({
