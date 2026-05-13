@@ -53,6 +53,22 @@ type ListSandboxInstancesContext = {
   tables: Pick<DataPlaneTables, "sandboxInstances">;
 };
 
+type StartedByFilterInput =
+  | {
+      startedByKind: "system" | "user";
+      startedById: string;
+    }
+  | {
+      startedByKind?: undefined;
+      startedById?: undefined;
+    };
+
+type ListSandboxInstancesServiceInput = Omit<
+  ListSandboxInstancesInput,
+  "startedById" | "startedByKind"
+> &
+  StartedByFilterInput;
+
 function createInvalidCursorErrorMessage(input: {
   cursorName: string;
   reason: (typeof KeysetCursorDecodeErrorReasons)[keyof typeof KeysetCursorDecodeErrorReasons];
@@ -70,7 +86,7 @@ function createInvalidCursorErrorMessage(input: {
 
 export async function listSandboxInstances(
   ctx: ListSandboxInstancesContext,
-  input: ListSandboxInstancesInput,
+  input: ListSandboxInstancesServiceInput,
 ): Promise<ListSandboxInstancesResponse> {
   try {
     const { sandboxInstances } = ctx.tables;
@@ -121,14 +137,22 @@ export async function listSandboxInstances(
               eq(table.organizationId, input.organizationId),
               eq(table.purpose, SandboxInstancePurposes.SESSION),
             );
+            const startedByScope =
+              input.startedByKind === undefined
+                ? organizationScope
+                : and(
+                    organizationScope,
+                    eq(table.startedByKind, input.startedByKind),
+                    eq(table.startedById, input.startedById),
+                  );
 
             if (cursor === undefined) {
-              return organizationScope;
+              return startedByScope;
             }
 
             if (direction === KeysetPaginationDirections.FORWARD) {
               return and(
-                organizationScope,
+                startedByScope,
                 or(
                   lt(table.createdAt, cursor.createdAt),
                   and(eq(table.createdAt, cursor.createdAt), lt(table.id, cursor.id)),
@@ -137,7 +161,7 @@ export async function listSandboxInstances(
             }
 
             return and(
-              organizationScope,
+              startedByScope,
               or(
                 gt(table.createdAt, cursor.createdAt),
                 and(eq(table.createdAt, cursor.createdAt), gt(table.id, cursor.id)),
@@ -160,6 +184,12 @@ export async function listSandboxInstances(
             and(
               eq(sandboxInstances.organizationId, input.organizationId),
               eq(sandboxInstances.purpose, SandboxInstancePurposes.SESSION),
+              ...(input.startedByKind === undefined
+                ? []
+                : [
+                    eq(sandboxInstances.startedByKind, input.startedByKind),
+                    eq(sandboxInstances.startedById, input.startedById),
+                  ]),
             ),
           );
 

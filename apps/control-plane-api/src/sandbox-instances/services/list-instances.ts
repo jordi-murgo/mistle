@@ -129,6 +129,16 @@ async function resolveSandboxProfileDisplayNames(
   );
 }
 
+type ListInstancesStartedByFilter =
+  | {
+      startedByKind: "system" | "user";
+      startedById: string;
+    }
+  | {
+      startedByKind?: undefined;
+      startedById?: undefined;
+    };
+
 export async function listInstances(
   {
     db,
@@ -142,12 +152,15 @@ export async function listInstances(
     limit?: number;
     after?: string;
     before?: string;
-  },
+  } & ListInstancesStartedByFilter,
 ): Promise<ListSandboxInstancesResult> {
   try {
     const sandboxInstances = await dataPlaneClient.listSandboxInstances({
       organizationId: input.organizationId,
       ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.startedByKind === undefined
+        ? {}
+        : { startedByKind: input.startedByKind, startedById: input.startedById }),
       ...(input.after === undefined ? {} : { after: input.after }),
       ...(input.before === undefined ? {} : { before: input.before }),
     });
