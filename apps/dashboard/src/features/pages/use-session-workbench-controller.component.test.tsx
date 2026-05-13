@@ -20,8 +20,10 @@ import {
   resolveStoppedSessionMessageForWorkbenchEntryPhase,
   resolveWorkbenchEntryPhase,
   shouldWaitForAutomationSessionThread,
+  buildOpenCodeComposerConfigResetKey,
   mapOpenCodePermissionsToServerRequests,
   resolveOpenCodePermissionResponse,
+  resolveOpenCodePromptModelOverride,
   useSessionWorkbenchController,
 } from "./use-session-workbench-controller.js";
 import { resolveSandboxStatusRefetchInterval } from "./use-session-workbench-lifecycle-state.js";
@@ -119,8 +121,9 @@ describe("useSessionWorkbenchController", () => {
     });
 
     expect(result.current.conversationPane.composerStateInput.requiresModelSelection).toBe(false);
+    expect(result.current.conversationPane.composerStateInput.showConfigControls).toBe(true);
     expect(result.current.conversationPane.composerStateInput.bootstrap.phase).toEqual({
-      status: "ready",
+      status: "unavailable",
     });
     expect(result.current.conversationPane.composerStateInput.contextUsage).toBeNull();
     expect(result.current.conversationPane.serverRequestsState.pendingServerRequests).toEqual([]);
@@ -158,6 +161,20 @@ describe("useSessionWorkbenchController", () => {
 
     expect(resolveOpenCodePermissionResponse({ decision: "always" })).toBe("always");
     expect(resolveOpenCodePermissionResponse({ decision: "decline" })).toBe("reject");
+  });
+
+  it("omits OpenCode prompt model overrides until the user selects a model", () => {
+    expect(resolveOpenCodePromptModelOverride(false, "openai/gpt-5")).toBeUndefined();
+    expect(resolveOpenCodePromptModelOverride(true, null)).toBeUndefined();
+    expect(resolveOpenCodePromptModelOverride(true, "openai/gpt-5")).toEqual({
+      providerID: "openai",
+      modelID: "gpt-5",
+    });
+  });
+
+  it("keys OpenCode composer model overrides by sandbox and session", () => {
+    expect(buildOpenCodeComposerConfigResetKey("sbi_one", "ses_one")).toBe("sbi_one:ses_one");
+    expect(buildOpenCodeComposerConfigResetKey(null, null)).toBe(":");
   });
 
   it("starts Codex recovery from a recoverable disconnect and preserves attempts for the same event", () => {
