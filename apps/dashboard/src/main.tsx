@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app.js";
+import { AnalyticsProvider } from "./lib/analytics/provider.js";
 
 import "./index.css";
 
@@ -17,8 +18,10 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
-      <Toaster position="top-right" />
+      <AnalyticsProvider>
+        <App />
+        <Toaster position="top-right" />
+      </AnalyticsProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

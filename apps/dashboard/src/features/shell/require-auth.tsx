@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from "react-router";
 
+import { AuthenticatedAnalytics } from "../../lib/analytics/authenticated.js";
 import type { SessionData } from "../auth/types.js";
 import {
   MISSING_ACTIVE_ORGANIZATION_ERROR_MESSAGE,
@@ -47,9 +48,18 @@ export function RequireAuth(): React.JSX.Element {
     return <Navigate replace state={{ from: location }} to="/auth/login" />;
   }
 
-  if (resolveActiveOrganizationIdFromSession(sessionQuery.data) === null) {
+  const activeOrganizationId = resolveActiveOrganizationIdFromSession(sessionQuery.data);
+  if (activeOrganizationId === null) {
     return <NoOrganizationAccessView />;
   }
 
-  return <Outlet />;
+  return (
+    <>
+      <AuthenticatedAnalytics
+        organizationId={activeOrganizationId}
+        userId={sessionQuery.data.user.id}
+      />
+      <Outlet />
+    </>
+  );
 }
