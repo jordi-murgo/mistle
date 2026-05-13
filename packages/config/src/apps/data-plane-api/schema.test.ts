@@ -9,15 +9,15 @@ import {
 describe("DataPlaneApiSandboxConfigSchema", () => {
   it("defaults the E2B domain to the hosted cloud domain", () => {
     const parsed = DataPlaneApiSandboxConfigSchema.parse({
-      provider: "e2b",
       e2b: {
+        enabled: true,
         apiKey: "test-api-key",
       },
     });
 
     expect(parsed).toEqual({
-      provider: "e2b",
       e2b: {
+        enabled: true,
         apiKey: "test-api-key",
         domain: "e2b.app",
       },
@@ -45,8 +45,8 @@ describe("DataPlaneApiSandboxConfigSchema", () => {
         baseUrl: "http://127.0.0.1:5100",
       },
       sandbox: {
-        provider: "docker",
         docker: {
+          enabled: true,
           socketPath: "/var/run/docker.sock",
         },
       },
@@ -57,6 +57,20 @@ describe("DataPlaneApiSandboxConfigSchema", () => {
 
     expect(parsed.controlPlaneApi).toEqual({
       baseUrl: "http://127.0.0.1:5100",
+    });
+  });
+
+  it("accepts disabled Docker settings without enabling Docker runtime inspection", () => {
+    const parsed = DataPlaneApiSandboxConfigSchema.parse({
+      docker: {
+        enabled: false,
+        socketPath: "/var/run/docker.sock",
+      },
+    });
+
+    expect(parsed.docker).toEqual({
+      enabled: false,
+      socketPath: "/var/run/docker.sock",
     });
   });
 
@@ -79,8 +93,8 @@ describe("DataPlaneApiSandboxConfigSchema", () => {
           gatewayBaseUrl: "http://127.0.0.1:5202",
         },
         sandbox: {
-          provider: "docker",
           docker: {
+            enabled: true,
             socketPath: "/var/run/docker.sock",
           },
         },
@@ -93,23 +107,20 @@ describe("DataPlaneApiSandboxConfigSchema", () => {
 });
 
 describe("getDataPlaneApiSandboxProviderValidationIssue", () => {
-  it("requires docker settings when the global provider is docker", () => {
+  it("does not require a singleton sandbox provider", () => {
     const issue = getDataPlaneApiSandboxProviderValidationIssue({
-      appSandbox: {
-        provider: "docker",
-      },
+      appSandbox: {},
     });
 
-    expect(issue).toEqual({
-      path: ["sandbox", "docker"],
-      message: "sandbox.docker is required when sandbox.provider is 'docker'.",
-    });
+    expect(issue).toBeNull();
   });
 
   it("does not require E2B credentials for the data-plane API", () => {
     const issue = getDataPlaneApiSandboxProviderValidationIssue({
       appSandbox: {
-        provider: "e2b",
+        e2b: {
+          enabled: false,
+        },
       },
     });
 

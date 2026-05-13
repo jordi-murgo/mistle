@@ -287,7 +287,6 @@ function buildDockerSandboxBaseConfig(env: NodeJS.ProcessEnv): ConfigRecord {
       },
     },
     sandbox: {
-      provider: "docker",
       storage: {
         backend: "docker_volume",
         docker_volume: {
@@ -295,6 +294,7 @@ function buildDockerSandboxBaseConfig(env: NodeJS.ProcessEnv): ConfigRecord {
         },
       },
       docker: {
+        enabled: true,
         socket_path: "/var/run/docker.sock",
         network_name: "mistle-single-container-network",
       },
@@ -322,12 +322,14 @@ function buildRemoteSandboxBaseConfig(env: NodeJS.ProcessEnv): ConfigRecord {
       },
     },
     sandbox: {
-      provider: "e2b",
       storage: {
         backend: "archil",
         archil: {
           mount_object_store: "sandbox_storage",
         },
+      },
+      e2b: {
+        enabled: true,
       },
     },
   });

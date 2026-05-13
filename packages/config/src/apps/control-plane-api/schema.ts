@@ -8,6 +8,29 @@ import {
 
 const DefaultE2BCloudDomain = "e2b.app";
 
+const ControlPlaneApiSandboxDockerConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
+const ControlPlaneApiSandboxE2BConfigSchema = z.discriminatedUnion("enabled", [
+  z
+    .object({
+      enabled: z.literal(true),
+      apiKey: z.string().min(1),
+      domain: z.string().min(1).default(DefaultE2BCloudDomain),
+    })
+    .strict(),
+  z
+    .object({
+      enabled: z.literal(false),
+      apiKey: z.string().min(1).optional(),
+      domain: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+
 const ControlPlaneApiAuthGoogleConfigSchema = z
   .object({
     clientId: z.string().min(1),
@@ -105,20 +128,14 @@ export const ControlPlaneApiPortAccessConfigSchema = z
 
 export const ControlPlaneApiSandboxRuntimeConfigSchema = z
   .object({
-    provider: z.enum(["docker", "e2b"]),
     defaultBaseImage: z.string().trim().min(1),
     gatewayWsUrl: z.string().trim().min(1),
     bootstrap: GlobalSandboxTokenConfigSchema.optional(),
     storageBackend: z
       .enum([SandboxStorageBackend.ARCHIL, SandboxStorageBackend.DOCKER_VOLUME])
       .optional(),
-    e2b: z
-      .object({
-        apiKey: z.string().min(1),
-        domain: z.string().min(1).default(DefaultE2BCloudDomain),
-      })
-      .strict()
-      .optional(),
+    docker: ControlPlaneApiSandboxDockerConfigSchema.optional(),
+    e2b: ControlPlaneApiSandboxE2BConfigSchema.optional(),
   })
   .strict();
 

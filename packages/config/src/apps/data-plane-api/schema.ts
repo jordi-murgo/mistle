@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { GlobalSandboxStorageConfigSchema } from "../../global/schema.js";
 
-const SandboxProviders = ["docker", "e2b"] as const;
 const DefaultE2BCloudDomain = "e2b.app";
 
 const HttpBaseUrlSchema = z.url().refine((value) => {
@@ -59,22 +58,55 @@ export const PartialDataPlaneApiControlPlaneApiConfigSchema = z
   })
   .strict();
 
-export const DataPlaneApiSandboxDockerConfigSchema = z
+export const DataPlaneApiSandboxDockerConfigSchema = z.discriminatedUnion("enabled", [
+  z
+    .object({
+      enabled: z.literal(true),
+      socketPath: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      enabled: z.literal(false),
+      socketPath: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+
+const PartialDataPlaneApiSandboxDockerConfigSchema = z
   .object({
-    socketPath: z.string().min(1),
+    enabled: z.boolean().optional(),
+    socketPath: z.string().min(1).optional(),
   })
   .strict();
 
-export const DataPlaneApiSandboxE2BConfigSchema = z
+export const DataPlaneApiSandboxE2BConfigSchema = z.discriminatedUnion("enabled", [
+  z
+    .object({
+      enabled: z.literal(true),
+      apiKey: z.string().min(1),
+      domain: z.string().min(1).default(DefaultE2BCloudDomain),
+    })
+    .strict(),
+  z
+    .object({
+      enabled: z.literal(false),
+      apiKey: z.string().min(1).optional(),
+      domain: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+
+const PartialDataPlaneApiSandboxE2BConfigSchema = z
   .object({
-    apiKey: z.string().min(1),
-    domain: z.string().min(1).default(DefaultE2BCloudDomain),
+    enabled: z.boolean().optional(),
+    apiKey: z.string().min(1).optional(),
+    domain: z.string().min(1).optional(),
   })
   .strict();
 
 export const DataPlaneApiSandboxConfigSchema = z
   .object({
-    provider: z.enum(SandboxProviders),
     storage: GlobalSandboxStorageConfigSchema.optional(),
     docker: DataPlaneApiSandboxDockerConfigSchema.optional(),
     e2b: DataPlaneApiSandboxE2BConfigSchema.optional(),
@@ -83,10 +115,9 @@ export const DataPlaneApiSandboxConfigSchema = z
 
 export const PartialDataPlaneApiSandboxConfigSchema = z
   .object({
-    provider: z.enum(SandboxProviders).optional(),
     storage: GlobalSandboxStorageConfigSchema.partial().optional(),
-    docker: DataPlaneApiSandboxDockerConfigSchema.partial().optional(),
-    e2b: DataPlaneApiSandboxE2BConfigSchema.partial().optional(),
+    docker: PartialDataPlaneApiSandboxDockerConfigSchema.optional(),
+    e2b: PartialDataPlaneApiSandboxE2BConfigSchema.optional(),
   })
   .strict();
 
@@ -120,23 +151,13 @@ export const PartialDataPlaneApiConfigSchema = z
   })
   .strict();
 
-const DataPlaneApiProviderRequirementMessages = {
-  DOCKER: "sandbox.docker is required when sandbox.provider is 'docker'.",
-} as const;
-
 export function getDataPlaneApiSandboxProviderValidationIssue(input: {
-  appSandbox: Pick<DataPlaneApiConfig["sandbox"], "provider" | "docker" | "e2b">;
+  appSandbox: Pick<DataPlaneApiConfig["sandbox"], "docker" | "e2b">;
 }): {
   path: readonly ["sandbox", "docker"];
   message: string;
 } | null {
-  if (input.appSandbox.provider === "docker" && input.appSandbox.docker === undefined) {
-    return {
-      path: ["sandbox", "docker"],
-      message: DataPlaneApiProviderRequirementMessages.DOCKER,
-    };
-  }
-
+  void input;
   return null;
 }
 
