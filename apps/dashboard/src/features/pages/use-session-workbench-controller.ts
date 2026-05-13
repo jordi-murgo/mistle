@@ -39,6 +39,10 @@ import {
   resolveSessionTerminalCwd,
 } from "./session-primary-repository-policy.js";
 import type { SessionStartupState } from "./session-startup-status.js";
+import type {
+  SessionTerminalContentInset,
+  SessionTerminalThemeMode,
+} from "./session-terminal-surface.js";
 import {
   hasAutomationSessionPreparationTimedOut,
   hasFreshSandboxStatusRead,
@@ -52,7 +56,12 @@ import {
 import type { SessionWorkbenchStatus } from "./session-workbench-state.js";
 import { useSessionBranchDiff } from "./use-session-branch-diff.js";
 import { useSessionDiffWorkbenchState } from "./use-session-diff-workbench-state.js";
-import { useSessionMainPanelHandoff } from "./use-session-main-panel-handoff.js";
+import {
+  useSessionMainPanelHandoff,
+  type SessionMainPanelHandoffLifecycle,
+  type SessionMainPanelHandoffRuntime,
+  type SessionMainPanelRuntimeId,
+} from "./use-session-main-panel-handoff.js";
 import { useSessionPortAccess } from "./use-session-port-access.js";
 import { useSessionPrimaryRepositoryState } from "./use-session-primary-repository-state.js";
 import { useSessionRepositoryStatus } from "./use-session-repository-status.js";
@@ -100,6 +109,9 @@ type SessionWorkbenchState = {
     error: ReturnType<typeof useSessionMainPanelHandoff>["error"];
     isCliToggleActive: boolean;
     showsChatComposer: boolean;
+    cliTerminalContentInset: SessionTerminalContentInset;
+    cliTerminalThemeMode: SessionTerminalThemeMode;
+    cliRuntimeDisplayName: "Codex" | "OpenCode";
     enterCliMode: () => Promise<void>;
     exitCliMode: () => Promise<void>;
   };
@@ -204,7 +216,7 @@ function resolveOpenCodePermissionResponse(
   result: unknown,
 ): OpenCodePermissionResponseInput["response"] {
   if (typeof result !== "object" || result === null || !("decision" in result)) {
-    return "reject";
+    throw new Error("OpenCode permission response is missing a decision.");
   }
 
   const decision = result.decision;
@@ -212,7 +224,7 @@ function resolveOpenCodePermissionResponse(
     return decision;
   }
 
-  return "reject";
+  throw new Error("OpenCode permission response has an unsupported decision.");
 }
 
 type UseSessionWorkbenchControllerResult = {
@@ -252,6 +264,7 @@ export function useSessionWorkbenchController(input: {
   const sessionClientRef = useRef<AgentStreamClient | null>(null);
   const rpcClientRef = useRef<CodexJsonRpcClient | null>(null);
   const sessionEventUnsubscribersRef = useRef<(() => void)[]>([]);
+  const activeHandoffRuntimeIdRef = useRef<SessionMainPanelRuntimeId>("codex");
   const selectedRepositoryPathRef = useRef<string | null>(null);
   const sessionState = useCodexSessionState({
     ensureTransportConnected: transportManager.ensureTransportConnected,
@@ -264,6 +277,82 @@ export function useSessionWorkbenchController(input: {
     ensureTransportConnected: transportManager.ensureTransportConnected,
   });
   const openCodeLifecycle = openCodeSessionState.lifecycle;
+  const codexLifecycleForHandoff = useMemo<SessionMainPanelHandoffLifecycle>(
+    () => ({
+      clearLifecycleErrorMessage: lifecycle.clearLifecycleErrorMessage,
+      connectSession: (connectInput): void => {
+        if (connectInput.targetThreadId === null) {
+          lifecycle.connectSession({
+            ...(connectInput.initialCwd === undefined
+              ? {}
+              : { initialCwd: connectInput.initialCwd }),
+            sandboxInstanceId: connectInput.sandboxInstanceId,
+            ...(connectInput.selectionPolicy === undefined
+              ? {}
+              : { selectionPolicy: connectInput.selectionPolicy }),
+            targetThreadId: null,
+          });
+          return;
+        }
+
+        lifecycle.connectSession({
+          ...(connectInput.providerThreadId === undefined
+            ? {}
+            : { providerThreadId: connectInput.providerThreadId }),
+          sandboxInstanceId: connectInput.sandboxInstanceId,
+          targetThreadId: connectInput.targetThreadId,
+        });
+      },
+      detachSessionConnection: lifecycle.detachSessionConnection,
+      lifecycleErrorMessage: lifecycle.lifecycleErrorMessage,
+      sessionConnectionState: lifecycle.sessionConnectionState,
+      sessionSnapshot:
+        lifecycle.sessionSnapshot === null
+          ? null
+          : {
+              activeConversationId: lifecycle.sessionSnapshot.activeThreadId,
+            },
+    }),
+    [
+      lifecycle.clearLifecycleErrorMessage,
+      lifecycle.connectSession,
+      lifecycle.detachSessionConnection,
+      lifecycle.lifecycleErrorMessage,
+      lifecycle.sessionConnectionState,
+      lifecycle.sessionSnapshot,
+    ],
+  );
+  const openCodeLifecycleForHandoff = useMemo<SessionMainPanelHandoffLifecycle>(
+    () => ({
+      clearLifecycleErrorMessage: openCodeLifecycle.clearLifecycleErrorMessage,
+      connectSession: (connectInput): void => {
+        openCodeLifecycle.connectSession({
+          ...(connectInput.initialCwd === undefined ? {} : { initialCwd: connectInput.initialCwd }),
+          sandboxInstanceId: connectInput.sandboxInstanceId,
+          ...(connectInput.targetThreadId === null
+            ? {}
+            : { targetSessionId: connectInput.targetThreadId }),
+        });
+      },
+      detachSessionConnection: openCodeLifecycle.detachSessionConnection,
+      lifecycleErrorMessage: openCodeLifecycle.lifecycleErrorMessage,
+      sessionConnectionState: openCodeLifecycle.sessionConnectionState,
+      sessionSnapshot:
+        openCodeLifecycle.sessionSnapshot === null
+          ? null
+          : {
+              activeConversationId: openCodeLifecycle.sessionSnapshot.activeSessionId,
+            },
+    }),
+    [
+      openCodeLifecycle.clearLifecycleErrorMessage,
+      openCodeLifecycle.connectSession,
+      openCodeLifecycle.detachSessionConnection,
+      openCodeLifecycle.lifecycleErrorMessage,
+      openCodeLifecycle.sessionConnectionState,
+      openCodeLifecycle.sessionSnapshot,
+    ],
+  );
   const opencodeLifecycleForWorkbench = useMemo(
     () => ({
       clearLifecycleErrorMessage: openCodeLifecycle.clearLifecycleErrorMessage,
@@ -315,15 +404,72 @@ export function useSessionWorkbenchController(input: {
   const codexConfig = sessionState.codexConfig;
   const serverRequests = sessionState.serverRequests;
   const sessionMessage = sessionState.sessionMessage;
+  const codexHandoffRuntime = useMemo<SessionMainPanelHandoffRuntime>(
+    () => ({
+      clearActiveThreadIdAfterCliLaunch:
+        sessionState.threadAuthority.clearActiveThreadIdAfterCliLaunch,
+      displayName: "Codex",
+      hydrateChatFromConversation: chat.hydrateChatFromThread,
+      lifecycle: codexLifecycleForHandoff,
+      preserveCliLaunchForRestore: false,
+      resetServerRequests: serverRequests.resetServerRequests,
+      restoreConversationId: sessionState.threadAuthority.providerThreadId,
+      resolveCliLaunchTarget: sessionState.threadAuthority.resolveCliLaunchTarget,
+    }),
+    [
+      chat.hydrateChatFromThread,
+      codexLifecycleForHandoff,
+      serverRequests.resetServerRequests,
+      sessionState.threadAuthority,
+    ],
+  );
+  const openCodeHandoffRuntime = useMemo<SessionMainPanelHandoffRuntime>(
+    () => ({
+      clearActiveThreadIdAfterCliLaunch: () => {},
+      displayName: "OpenCode",
+      hydrateChatFromConversation: openCodeSessionState.chat.hydrateChatFromSessionOrThrow,
+      lifecycle: openCodeLifecycleForHandoff,
+      preserveCliLaunchForRestore: true,
+      resetServerRequests: () => {},
+      restoreConversationId:
+        openCodeSessionState.lifecycle.sessionSnapshot?.activeSessionId ?? null,
+      resolveCliLaunchTarget: async () => {
+        const activeSessionId =
+          openCodeSessionState.lifecycle.sessionSnapshot?.activeSessionId ?? null;
+
+        if (activeSessionId === null) {
+          return {
+            type: "start_new",
+            shouldClearActiveThreadId: false,
+          };
+        }
+
+        return {
+          type: "resume",
+          threadId: activeSessionId,
+        };
+      },
+    }),
+    [
+      openCodeLifecycleForHandoff,
+      openCodeSessionState.chat.hydrateChatFromSessionOrThrow,
+      openCodeSessionState.lifecycle.sessionSnapshot?.activeSessionId,
+    ],
+  );
+  const handoffRuntimes = useMemo(
+    () => ({
+      codex: codexHandoffRuntime,
+      opencode: openCodeHandoffRuntime,
+    }),
+    [codexHandoffRuntime, openCodeHandoffRuntime],
+  );
 
   const handoff = useSessionMainPanelHandoff({
+    activeRuntimeIdRef: activeHandoffRuntimeIdRef,
     cliPtyState,
-    chat,
-    lifecycle,
+    runtimes: handoffRuntimes,
     selectedRepositoryPathRef,
     sandboxInstanceId: input.sandboxInstanceId,
-    serverRequests,
-    threadAuthority: sessionState.threadAuthority,
   });
   const workbenchLifecycleState = useSessionWorkbenchLifecycleState({
     sandboxInstanceId: input.sandboxInstanceId,
@@ -334,6 +480,7 @@ export function useSessionWorkbenchController(input: {
   });
   const sandboxStatus = workbenchLifecycleState.sandboxStatusQuery.data;
   const isOpenCodeRuntime = sandboxStatus?.runtimeContext?.agentRuntimeId === "opencode";
+  activeHandoffRuntimeIdRef.current = isOpenCodeRuntime ? "opencode" : "codex";
   const activeThreadCwd = isOpenCodeRuntime
     ? null
     : sessionState.lifecycle.sessionSnapshot?.activeThreadCwd;
@@ -445,16 +592,16 @@ export function useSessionWorkbenchController(input: {
   const enterCliDisabledReason =
     input.sandboxInstanceId === null
       ? "Session id is required."
-      : isOpenCodeRuntime
-        ? "OpenCode TUI handoff is not available from chat yet."
-        : sessionSnapshot === null
-          ? "TUI is available after the session is connected."
-          : !workbenchLifecycleState.connectionReadiness.canConnect
-            ? (workbenchLifecycleState.stoppedSessionMessage ??
-              "TUI is available only when the sandbox is running.")
-            : handoff.transitionState !== "stable_chat"
-              ? "Finish the current primary-panel transition before opening Codex TUI."
-              : null;
+      : sessionSnapshot === null
+        ? "TUI is available after the session is connected."
+        : !workbenchLifecycleState.connectionReadiness.canConnect
+          ? (workbenchLifecycleState.stoppedSessionMessage ??
+            "TUI is available only when the sandbox is running.")
+          : handoff.transitionState !== "stable_chat"
+            ? `Finish the current primary-panel transition before opening ${
+                isOpenCodeRuntime ? "OpenCode" : "Codex"
+              } TUI.`
+            : null;
   const attachmentControl = useSessionComposerAttachmentControl({
     attachmentTarget:
       !isOpenCodeRuntime &&
@@ -560,7 +707,16 @@ export function useSessionWorkbenchController(input: {
   }, [openCodeSessionState.chat]);
   const respondToOpenCodePermission = useCallback(
     (requestId: string | number, result: unknown): void => {
-      const response = resolveOpenCodePermissionResponse(result);
+      let response: OpenCodePermissionResponseInput["response"];
+      try {
+        response = resolveOpenCodePermissionResponse(result);
+      } catch (error) {
+        openCodeSessionState.sessionMessage.reportSessionErrorMessage(
+          error instanceof Error ? error.message : "Could not respond to OpenCode permission.",
+        );
+        return;
+      }
+
       void openCodeSessionState.chat
         .respondToPermission({
           requestId: String(requestId),
@@ -598,6 +754,9 @@ export function useSessionWorkbenchController(input: {
         error: handoff.error,
         isCliToggleActive: handoff.isCliToggleActive,
         showsChatComposer: handoff.transitionState === "stable_chat",
+        cliTerminalContentInset: isOpenCodeRuntime ? "none" : "default",
+        cliTerminalThemeMode: "system",
+        cliRuntimeDisplayName: isOpenCodeRuntime ? "OpenCode" : "Codex",
         enterCliMode: handoff.handoffToCli,
         exitCliMode: handoff.handoffToChat,
       },

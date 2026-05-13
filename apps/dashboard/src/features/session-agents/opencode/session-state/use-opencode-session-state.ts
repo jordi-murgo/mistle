@@ -9,16 +9,18 @@ import {
   type OpenCodeSessionSummary,
 } from "@mistle/integrations-definitions/agent-runtimes/opencode/client";
 import type { SandboxSessionTransport } from "@mistle/sandbox-session-client";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type Dispatch } from "react";
 
 import type { SessionBootstrapResult } from "../../codex/session-state/session-bootstrap/index.js";
 import {
   createInitialOpenCodeChatState,
   reduceOpenCodeChatState,
+  type OpenCodeChatAction,
   type OpenCodeChatState,
 } from "./opencode-chat-state.js";
 
 export type ConnectedOpenCodeSession = {
+  activeDirectory: string | null;
   activeSessionId: string;
   connectedAtIso: string;
   sandboxInstanceId: string;
@@ -66,6 +68,7 @@ export type UseOpenCodeSessionStateResult = {
     canInterruptTurn: boolean;
     chatState: OpenCodeChatState;
     hydrateChatFromSession: () => Promise<void>;
+    hydrateChatFromSessionOrThrow: () => Promise<void>;
     isHydratingChat: boolean;
     isInterruptingTurn: boolean;
     isRespondingToPermission: boolean;
@@ -175,6 +178,26 @@ export function mapOpenCodeProvidersToComposerModels(input: {
   );
 }
 
+async function hydrateConnectedOpenCodeChat(input: {
+  client: OpenCodeSessionClient;
+  directory?: string;
+  dispatchChatAction: Dispatch<OpenCodeChatAction>;
+  sessionId: string;
+}): Promise<void> {
+  const messages = await input.client.listMessages({
+    sessionId: input.sessionId,
+  });
+  const pendingPermissions = await input.client.listPermissions({
+    ...(input.directory === undefined ? {} : { directory: input.directory }),
+  });
+  input.dispatchChatAction({
+    type: "hydrate_messages",
+    sessionId: input.sessionId,
+    messages,
+    pendingPermissions,
+  });
+}
+
 export function useOpenCodeSessionState(input: {
   ensureTransportConnected: (input: { sandboxInstanceId: string }) => Promise<{
     sandboxInstanceId: string;
@@ -277,13 +300,12 @@ export function useOpenCodeSessionState(input: {
     }
     setIsHydratingChat(true);
     try {
-      const messages = await client.listMessages({
+      const directory = sessionSnapshot?.activeDirectory ?? undefined;
+      await hydrateConnectedOpenCodeChat({
+        client,
+        ...(directory === undefined ? {} : { directory }),
+        dispatchChatAction,
         sessionId,
-      });
-      dispatchChatAction({
-        type: "hydrate_messages",
-        sessionId,
-        messages,
       });
       setSessionErrorMessage(null);
     } catch (error) {
@@ -293,7 +315,33 @@ export function useOpenCodeSessionState(input: {
     } finally {
       setIsHydratingChat(false);
     }
-  }, [sessionSnapshot?.activeSessionId]);
+  }, [sessionSnapshot?.activeDirectory, sessionSnapshot?.activeSessionId]);
+
+  const hydrateChatFromSessionOrThrow = useCallback(async (): Promise<void> => {
+    const client = clientRef.current;
+    const sessionId = sessionSnapshot?.activeSessionId ?? null;
+    if (client === null || sessionId === null) {
+      throw new Error("Connect OpenCode before hydrating messages.");
+    }
+    setIsHydratingChat(true);
+    try {
+      const directory = sessionSnapshot?.activeDirectory ?? undefined;
+      await hydrateConnectedOpenCodeChat({
+        client,
+        ...(directory === undefined ? {} : { directory }),
+        dispatchChatAction,
+        sessionId,
+      });
+      setSessionErrorMessage(null);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Could not hydrate OpenCode messages.";
+      setSessionErrorMessage(errorMessage);
+      throw error instanceof Error ? error : new Error(errorMessage);
+    } finally {
+      setIsHydratingChat(false);
+    }
+  }, [sessionSnapshot?.activeDirectory, sessionSnapshot?.activeSessionId]);
 
   const refreshModelCatalog = useCallback(
     async (refreshInput: { directory?: string | null; force?: boolean }): Promise<void> => {
@@ -468,6 +516,7 @@ export function useOpenCodeSessionState(input: {
           });
           hydrationHasCompleted = true;
           setSessionSnapshot({
+            activeDirectory: directory ?? null,
             activeSessionId: session.id,
             connectedAtIso: new Date().toISOString(),
             sandboxInstanceId: connectInput.sandboxInstanceId,
@@ -612,6 +661,7 @@ export function useOpenCodeSessionState(input: {
       canInterruptTurn: chatState.status === "busy",
       chatState,
       hydrateChatFromSession,
+      hydrateChatFromSessionOrThrow,
       isHydratingChat,
       isInterruptingTurn,
       isRespondingToPermission,

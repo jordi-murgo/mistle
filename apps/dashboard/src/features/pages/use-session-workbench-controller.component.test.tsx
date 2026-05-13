@@ -83,6 +83,9 @@ describe("useSessionWorkbenchController", () => {
     expect(result.current.workbench.terminalPanelState.isVisible).toBe(false);
     expect(result.current.workbench.diffPanelState.isVisible).toBe(false);
     expect(result.current.workbench.diffPanelState.patch).toBe("");
+    expect(result.current.workbench.primaryPanelState.cliTerminalContentInset).toBe("default");
+    expect(result.current.workbench.primaryPanelState.cliTerminalThemeMode).toBe("system");
+    expect(result.current.workbench.primaryPanelState.cliRuntimeDisplayName).toBe("Codex");
     expect(result.current.workbench.portAccessState.processes).toEqual([]);
     expect(result.current.workbench.portAccessState.isPanelOpen).toBe(false);
     expect(result.current.workbench.sandboxLifecycleStatus).toBeNull();
@@ -129,8 +132,11 @@ describe("useSessionWorkbenchController", () => {
     expect(result.current.conversationPane.serverRequestsState.pendingServerRequests).toEqual([]);
     expect(result.current.workbench.primaryPanelState.canEnterCli).toBe(false);
     expect(result.current.workbench.primaryPanelState.disabledReason).toBe(
-      "OpenCode TUI handoff is not available from chat yet.",
+      "TUI is available after the session is connected.",
     );
+    expect(result.current.workbench.primaryPanelState.cliTerminalContentInset).toBe("none");
+    expect(result.current.workbench.primaryPanelState.cliTerminalThemeMode).toBe("system");
+    expect(result.current.workbench.primaryPanelState.cliRuntimeDisplayName).toBe("OpenCode");
   });
 
   it("maps OpenCode permission requests to actionable server requests", () => {
@@ -160,7 +166,9 @@ describe("useSessionWorkbenchController", () => {
     ]);
 
     expect(resolveOpenCodePermissionResponse({ decision: "always" })).toBe("always");
-    expect(resolveOpenCodePermissionResponse({ decision: "decline" })).toBe("reject");
+    expect(() => resolveOpenCodePermissionResponse({ decision: "decline" })).toThrow(
+      "OpenCode permission response has an unsupported decision.",
+    );
   });
 
   it("omits OpenCode prompt model overrides until the user selects a model", () => {
