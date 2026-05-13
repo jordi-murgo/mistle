@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { createTestQueryClient } from "../../test-support/query-client.js";
 import { sandboxInstanceStatusQueryKey } from "../sessions/sessions-query-keys.js";
+import type { SandboxInstanceStatusResult } from "../sessions/sessions-service.js";
 import { resolveInitialSessionConnectInput } from "./session-initial-connect-policy.js";
 import {
   hasAutomationSessionPreparationTimedOut,
@@ -19,6 +20,8 @@ import {
   resolveStoppedSessionMessageForWorkbenchEntryPhase,
   resolveWorkbenchEntryPhase,
   shouldWaitForAutomationSessionThread,
+  mapOpenCodePermissionsToServerRequests,
+  resolveOpenCodePermissionResponse,
   useSessionWorkbenchController,
 } from "./use-session-workbench-controller.js";
 import { resolveSandboxStatusRefetchInterval } from "./use-session-workbench-lifecycle-state.js";
@@ -90,6 +93,71 @@ describe("useSessionWorkbenchController", () => {
         .availableModels,
     ).toEqual([]);
     expect(result.current.conversationPane.serverRequestsState.pendingServerRequests).toEqual([]);
+  });
+
+  it("uses the OpenCode chat composer boundary for OpenCode runtime sessions", () => {
+    const queryClient = createControllerQueryClient();
+    const sandboxStatus: SandboxInstanceStatusResult = {
+      id: "sbi_opencode",
+      title: null,
+      status: "starting",
+      connectable: false,
+      failureCode: null,
+      failureMessage: null,
+      runtimeContext: {
+        agentRuntimeId: "opencode",
+        launchCwd: "/workspace/repo",
+        primaryRepositoryRoot: "/workspace/repo",
+      },
+      automationConversation: null,
+    };
+    queryClient.setQueryData(sandboxInstanceStatusQueryKey("sbi_opencode"), sandboxStatus);
+
+    const { result } = renderSessionWorkbenchController({
+      queryClient,
+      sandboxInstanceId: "sbi_opencode",
+    });
+
+    expect(result.current.conversationPane.composerStateInput.requiresModelSelection).toBe(false);
+    expect(result.current.conversationPane.composerStateInput.bootstrap.phase).toEqual({
+      status: "ready",
+    });
+    expect(result.current.conversationPane.composerStateInput.contextUsage).toBeNull();
+    expect(result.current.conversationPane.serverRequestsState.pendingServerRequests).toEqual([]);
+    expect(result.current.workbench.primaryPanelState.canEnterCli).toBe(false);
+    expect(result.current.workbench.primaryPanelState.disabledReason).toBe(
+      "OpenCode TUI handoff is not available from chat yet.",
+    );
+  });
+
+  it("maps OpenCode permission requests to actionable server requests", () => {
+    expect(
+      mapOpenCodePermissionsToServerRequests([
+        {
+          id: "perm_test",
+          sessionID: "ses_test",
+          permission: "bash",
+          patterns: ["pnpm test"],
+          metadata: {},
+          always: [],
+        },
+      ]),
+    ).toEqual([
+      {
+        requestId: "perm_test",
+        method: "opencode/permission/requestApproval",
+        kind: "opencode-permission",
+        sessionId: "ses_test",
+        permission: "bash",
+        patterns: ["pnpm test"],
+        availableDecisions: ["once", "always", "reject"],
+        status: "pending",
+        responseErrorMessage: null,
+      },
+    ]);
+
+    expect(resolveOpenCodePermissionResponse({ decision: "always" })).toBe("always");
+    expect(resolveOpenCodePermissionResponse({ decision: "decline" })).toBe("reject");
   });
 
   it("starts Codex recovery from a recoverable disconnect and preserves attempts for the same event", () => {
@@ -716,6 +784,7 @@ describe("useSessionWorkbenchController", () => {
         providerThreadId: "thread_123",
         sandboxInstanceId: "sbi_123",
         runtimeContext: {
+          agentRuntimeId: "codex",
           launchCwd: null,
           primaryRepositoryRoot: null,
         },

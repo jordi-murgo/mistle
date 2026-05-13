@@ -432,6 +432,9 @@ importers:
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^6.0.1
         version: 6.0.1(@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(rolldown@1.0.0-rc.17)(vite@8.0.10(@types/node@25.6.2)(esbuild@0.25.0)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.8.3)))(babel-plugin-react-compiler@1.0.0)(vite@8.0.10(@types/node@25.6.2)(esbuild@0.25.0)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.8.3))
@@ -913,6 +916,9 @@ importers:
       '@octokit/webhooks-methods':
         specifier: ^6.0.0
         version: 6.0.0
+      '@opencode-ai/sdk':
+        specifier: 1.14.41
+        version: 1.14.41
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
@@ -3035,6 +3041,9 @@ packages:
 
   '@openapi-contrib/openapi-schema-to-json-schema@3.2.0':
     resolution: {integrity: sha512-Gj6C0JwCr8arj0sYuslWXUBSP/KnUlEGnPW4qxlXvAl543oaNQgMgIgkQUA6vs5BCCvwTEiL8m/wdWzfl4UvSw==}
+
+  '@opencode-ai/sdk@1.14.41':
+    resolution: {integrity: sha512-RYb2dCUv0TWIvBNnnO6ANbAPYri6rKuWizSoVFw/Pw+SCDj9ASHM5gAZ+jkskp8gYMfLLHe/Fpkun/9mr8m0IQ==}
 
   '@opentelemetry/api-logs@0.216.0':
     resolution: {integrity: sha512-KmGTgvxTJ0J01d4mOeX1wMV5NUTNf9HebIuOOGDfIn0a/IrnXIQbOnlylDyl9tkDv4h0DUpdI/GqCdLzfTkUXg==}
@@ -14420,6 +14429,10 @@ snapshots:
   '@openapi-contrib/openapi-schema-to-json-schema@3.2.0':
     dependencies:
       fast-deep-equal: 3.1.3
+
+  '@opencode-ai/sdk@1.14.41':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@opentelemetry/api-logs@0.216.0':
     dependencies:
