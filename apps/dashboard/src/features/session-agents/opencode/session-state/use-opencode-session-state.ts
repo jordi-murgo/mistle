@@ -9,6 +9,7 @@ import {
   type OpenCodeSessionClient,
   type OpenCodeSessionSummary,
 } from "@mistle/integrations-definitions/agent-runtimes/opencode/client";
+import { waitForGeneratedOpenCodeConversationTitle } from "@mistle/integrations-definitions/agent-runtimes/opencode/title-generation";
 import type { SandboxSessionTransport } from "@mistle/sandbox-session-client";
 import { useCallback, useEffect, useReducer, useRef, useState, type Dispatch } from "react";
 
@@ -23,6 +24,7 @@ import {
 export type ConnectedOpenCodeSession = {
   activeDirectory: string | null;
   activeSessionId: string;
+  activeTitle: string;
   connectedAtIso: string;
   sandboxInstanceId: string;
 };
@@ -77,6 +79,7 @@ export type UseOpenCodeSessionStateResult = {
     respondToPermission: (
       input: Omit<OpenCodePermissionResponseInput, "sessionId">,
     ) => Promise<void>;
+    waitForGeneratedSessionTitle: () => Promise<string>;
     sendPrompt: (input: {
       directory?: string;
       model?: OpenCodePromptModelSelection;
@@ -520,6 +523,7 @@ export function useOpenCodeSessionState(input: {
           setSessionSnapshot({
             activeDirectory: directory ?? null,
             activeSessionId: session.id,
+            activeTitle: session.title,
             connectedAtIso: new Date().toISOString(),
             sandboxInstanceId: connectInput.sandboxInstanceId,
           });
@@ -595,6 +599,25 @@ export function useOpenCodeSessionState(input: {
     },
     [sessionSnapshot?.activeSessionId],
   );
+
+  const waitForGeneratedSessionTitle = useCallback(async (): Promise<string> => {
+    const client = clientRef.current;
+    const connectedSession = sessionSnapshot;
+    if (client === null || connectedSession === null) {
+      throw new Error("Connect OpenCode before reading the generated session title.");
+    }
+
+    const sessionId = connectedSession.activeSessionId;
+    return await waitForGeneratedOpenCodeConversationTitle({
+      previousTitle: connectedSession.activeTitle,
+      readCurrentTitle: async () => {
+        const session = await client.getSession({
+          sessionId,
+        });
+        return session.title;
+      },
+    });
+  }, [sessionSnapshot]);
 
   const abortSession = useCallback(async (): Promise<void> => {
     const client = clientRef.current;
@@ -676,6 +699,7 @@ export function useOpenCodeSessionState(input: {
       isStartingTurn,
       respondToPermission,
       sendPrompt,
+      waitForGeneratedSessionTitle,
     },
     sessionMessage: {
       clearSessionErrorMessage,
