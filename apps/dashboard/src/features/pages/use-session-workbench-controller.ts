@@ -14,6 +14,7 @@ import type { ChatState } from "../chat/chat-state.js";
 import { formatCodexContextUsage } from "../session-agents/codex/session-state/codex-context-usage.js";
 import { useCodexSessionState } from "../session-agents/codex/session-state/index.js";
 import {
+  buildOpenCodeAttachmentParts,
   parseOpenCodePromptModelSelection,
   useOpenCodeSessionState,
   type OpenCodeChatState,
@@ -604,13 +605,12 @@ export function useSessionWorkbenchController(input: {
             : null;
   const attachmentControl = useSessionComposerAttachmentControl({
     attachmentTarget:
-      !isOpenCodeRuntime &&
       input.sandboxInstanceId !== null &&
       sessionSnapshot !== null &&
-      activeSessionThreadId !== null
+      activeConversationThreadId !== null
         ? {
             sandboxInstanceId: input.sandboxInstanceId,
-            threadId: activeSessionThreadId,
+            threadId: activeConversationThreadId,
           }
         : null,
     ensureTransportConnected: transportManager.ensureTransportConnected,
@@ -634,15 +634,19 @@ export function useSessionWorkbenchController(input: {
     ],
   );
   const startTurn = useCallback(
-    async (turnInput: Parameters<typeof chat.startTurn>[0]): Promise<void> => {
+    async (
+      turnInput: Parameters<SessionComposerStateInput["turnControl"]["startTurn"]>[0],
+    ): Promise<void> => {
       if (isOpenCodeRuntime) {
         const selectedOpenCodeModel = resolveOpenCodePromptModelOverride(
           activeConfigControl.hasExplicitModelSelection,
           activeConfigControl.selectedModel,
         );
+        const attachmentParts = buildOpenCodeAttachmentParts(turnInput.uploadedAttachments ?? []);
         await openCodeSessionState.chat.sendPrompt({
           ...(selectedRepositoryPath === null ? {} : { directory: selectedRepositoryPath }),
           ...(selectedOpenCodeModel === undefined ? {} : { model: selectedOpenCodeModel }),
+          submittedAttachments: attachmentParts,
           submittedPrompt: turnInput.transcriptPrompt ?? turnInput.submittedPrompt,
         });
         return;

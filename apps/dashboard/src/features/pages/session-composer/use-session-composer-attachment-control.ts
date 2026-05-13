@@ -14,6 +14,7 @@ export type PreparedComposerAttachments = {
   prompt: string;
   submittedAttachments: readonly CodexTurnInputLocalImageItem[];
   displayAttachments: readonly ChatAttachment[];
+  uploadedAttachments: readonly UploadedSandboxFile[];
 };
 
 export type SessionComposerAttachmentControl = {
@@ -37,6 +38,23 @@ const DefaultSessionComposerAttachmentControlDependencies: SessionComposerAttach
     createUploadStreamClient: (transport) => new UploadStreamClient({ transport }),
   };
 
+function buildPreparedComposerAttachments(input: {
+  prompt: string;
+  supportsImageInspection: boolean;
+  uploadedAttachments: readonly UploadedSandboxFile[];
+}): PreparedComposerAttachments {
+  const representation = resolveMixedAttachmentTurnRepresentation({
+    prompt: input.prompt,
+    uploadedAttachments: input.uploadedAttachments,
+    supportsImageInspection: input.supportsImageInspection,
+  });
+
+  return {
+    ...representation,
+    uploadedAttachments: input.uploadedAttachments,
+  };
+}
+
 export function useSessionComposerAttachmentControl(input: {
   attachmentTarget: {
     sandboxInstanceId: string;
@@ -58,7 +76,7 @@ export function useSessionComposerAttachmentControl(input: {
       supportsImageInspection: boolean;
     }): Promise<PreparedComposerAttachments> => {
       if (prepareInput.files.length === 0) {
-        return resolveMixedAttachmentTurnRepresentation({
+        return buildPreparedComposerAttachments({
           prompt: prepareInput.prompt,
           uploadedAttachments: [],
           supportsImageInspection: prepareInput.supportsImageInspection,
@@ -87,7 +105,7 @@ export function useSessionComposerAttachmentControl(input: {
           );
         }
 
-        return resolveMixedAttachmentTurnRepresentation({
+        return buildPreparedComposerAttachments({
           prompt: prepareInput.prompt,
           uploadedAttachments,
           supportsImageInspection: prepareInput.supportsImageInspection,
