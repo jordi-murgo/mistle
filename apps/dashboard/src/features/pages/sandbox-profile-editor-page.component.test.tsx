@@ -1876,14 +1876,10 @@ describe("SandboxProfileEditorPage", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Sandbox Profile" }));
 
-    expect(
-      screen.queryByText(
-        "Choose a Git provider in Integrations before selecting repository resources.",
-      ),
-    ).toBeNull();
+    expect(screen.getByText("Git Connection")).toBeDefined();
   });
 
-  it("groups runtime rows without an integrations and tools label", () => {
+  it("keeps git connection separate from the combined integration table", () => {
     renderSandboxProfileEditor();
 
     fireEvent.click(screen.getByRole("tab", { name: "Sandbox Profile" }));
@@ -1893,18 +1889,32 @@ describe("SandboxProfileEditorPage", () => {
     if (agentLabel === undefined) {
       throw new Error("Expected runtime Agent label to render.");
     }
-    const gitProviderLabel = screen.getByText("Git Provider");
     const sandboxRuntimeLabel = screen.getByText("Sandbox Runtime");
-    const proxiedConnectionsHeading = screen.getByRole("heading", { name: "Proxied Connections" });
+    const gitConnectionLabel = screen.getByText("Git Connection");
+    const integrationColumnLabel = screen.getAllByText("Integration")[0];
+    if (integrationColumnLabel === undefined) {
+      throw new Error("Expected combined integration column label to render.");
+    }
+    const proxiedConnectionColumnLabel = screen.getAllByText("Proxied Connection")[0];
+    if (proxiedConnectionColumnLabel === undefined) {
+      throw new Error("Expected proxied connection column label to render.");
+    }
+    const resourcesAndToolsColumnLabel = screen.getAllByText("Resources & Tools")[0];
+    if (resourcesAndToolsColumnLabel === undefined) {
+      throw new Error("Expected resources and tools column label to render.");
+    }
 
     expectElementToFollow(runtimeHeading, agentLabel);
     expectElementToFollow(agentLabel, sandboxRuntimeLabel);
-    expectElementToFollow(sandboxRuntimeLabel, gitProviderLabel);
-    expectElementToFollow(gitProviderLabel, proxiedConnectionsHeading);
+    expectElementToFollow(sandboxRuntimeLabel, gitConnectionLabel);
+    expectElementToFollow(gitConnectionLabel, integrationColumnLabel);
+    expect(proxiedConnectionColumnLabel).toBeDefined();
+    expect(resourcesAndToolsColumnLabel).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Proxied Connections" })).toBeNull();
     expect(screen.queryByText("Integrations & Tools")).toBeNull();
   });
 
-  it("shows stale git guidance when a persisted git binding cannot be resolved", () => {
+  it("shows stale git connection errors when a persisted git binding cannot be resolved", () => {
     renderSandboxProfileEditor({
       bindings: [
         {
@@ -1932,11 +1942,6 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByRole("combobox", { name: "Sandbox Runtime" })).toBeDefined();
     expect(screen.queryByText("Loading integrations and resources...")).toBeNull();
     expect(screen.queryByText("Loading integrations...")).toBeNull();
-    expect(
-      screen.queryByText(
-        "Choose a Git provider in Integrations before selecting repository resources.",
-      ),
-    ).toBeNull();
   });
 
   it("keeps the runtime section quiet while sandbox providers are loading", () => {
