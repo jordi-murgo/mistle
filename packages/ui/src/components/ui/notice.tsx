@@ -14,9 +14,9 @@ const noticeVariants = cva(
       variant: {
         default: "",
         success:
-          "[&_[data-slot=notice-description]]:text-emerald-700 [&_[data-slot=notice-icon]]:text-current text-emerald-700",
+          "[&_[data-slot=notice-description]]:text-emerald-700 dark:[&_[data-slot=notice-description]]:text-emerald-100/85 [&_[data-slot=notice-icon]]:text-current text-emerald-700 dark:text-emerald-100",
         warning:
-          "[&_[data-slot=notice-description]]:text-amber-950/90 [&_[data-slot=notice-icon]]:text-current text-amber-950",
+          "[&_[data-slot=notice-description]]:text-amber-950/90 dark:[&_[data-slot=notice-description]]:text-amber-100/85 [&_[data-slot=notice-icon]]:text-current text-amber-950 dark:text-amber-100",
         alert:
           "[&_[data-slot=notice-description]]:text-destructive/90 [&_[data-slot=notice-icon]]:text-current text-destructive",
       },
@@ -49,12 +49,12 @@ const noticeVariants = cva(
       {
         variant: "warning",
         appearance: "boxed",
-        className: "bg-amber-50 border-amber-300/70",
+        className: "bg-amber-50 border-amber-300/70 dark:border-amber-400/30 dark:bg-amber-400/10",
       },
       {
         variant: "warning",
         appearance: "subtle",
-        className: "bg-amber-50/80",
+        className: "bg-amber-50/80 dark:bg-amber-400/10",
       },
       {
         variant: "alert",

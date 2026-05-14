@@ -1,6 +1,8 @@
 import { Navigate, Outlet, useLocation } from "react-router";
 
 import { AuthenticatedAnalytics } from "../../lib/analytics/authenticated.js";
+import { AppearanceProvider, SystemAppearanceProvider } from "../appearance/appearance-provider.js";
+import { readUserAppearanceFromSession } from "../appearance/appearance.js";
 import type { SessionData } from "../auth/types.js";
 import {
   MISSING_ACTIVE_ORGANIZATION_ERROR_MESSAGE,
@@ -37,7 +39,11 @@ export function RequireAuth(): React.JSX.Element {
   const location = useLocation();
 
   if (sessionQuery.isPending) {
-    return <PendingSessionShell />;
+    return (
+      <SystemAppearanceProvider>
+        <PendingSessionShell />
+      </SystemAppearanceProvider>
+    );
   }
 
   if (sessionQuery.isError) {
@@ -48,18 +54,23 @@ export function RequireAuth(): React.JSX.Element {
     return <Navigate replace state={{ from: location }} to="/auth/login" />;
   }
 
+  const appearance = readUserAppearanceFromSession(sessionQuery.data);
   const activeOrganizationId = resolveActiveOrganizationIdFromSession(sessionQuery.data);
   if (activeOrganizationId === null) {
-    return <NoOrganizationAccessView />;
+    return (
+      <AppearanceProvider appearance={appearance}>
+        <NoOrganizationAccessView />
+      </AppearanceProvider>
+    );
   }
 
   return (
-    <>
+    <AppearanceProvider appearance={appearance}>
       <AuthenticatedAnalytics
         organizationId={activeOrganizationId}
         userId={sessionQuery.data.user.id}
       />
       <Outlet />
-    </>
+    </AppearanceProvider>
   );
 }
