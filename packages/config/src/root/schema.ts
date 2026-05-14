@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { defaultMissingEnabledToFalse } from "../core/discriminated-union.js";
+
 const UrlSchema = z.string().trim().min(1);
 const DefaultE2BCloudDomain = "e2b.app";
 const DefaultE2BCpuCount = 2;
@@ -13,24 +15,9 @@ const ServiceEndpointSchema = z
   })
   .strict();
 
-function withDisabledPostHogDefault(value: unknown): unknown {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return value;
-  }
-
-  if ("enabled" in value) {
-    return value;
-  }
-
-  return {
-    ...value,
-    enabled: false,
-  };
-}
-
 const DashboardPostHogConfigSchema = z
   .preprocess(
-    withDisabledPostHogDefault,
+    defaultMissingEnabledToFalse,
     z.discriminatedUnion("enabled", [
       z
         .object({
@@ -135,6 +122,26 @@ const SandboxE2BProviderConfigSchema = z.discriminatedUnion("enabled", [
     })
     .strict(),
 ]);
+
+const BillingStripeConfigSchema = z
+  .preprocess(
+    defaultMissingEnabledToFalse,
+    z.discriminatedUnion("enabled", [
+      z
+        .object({
+          enabled: z.literal(true),
+          secret_key: z.string().trim().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          enabled: z.literal(false),
+          secret_key: z.string().trim().min(1).optional(),
+        })
+        .strict(),
+    ]),
+  )
+  .default({ enabled: false });
 
 const ControlPlaneApiAuthSchema = z
   .object({
@@ -311,6 +318,12 @@ export const ConfigSchema = z
           .strict(),
       })
       .strict(),
+    billing: z
+      .object({
+        stripe: BillingStripeConfigSchema,
+      })
+      .strict()
+      .default({ stripe: { enabled: false } }),
     sandbox: z
       .object({
         default_base_image: z.string().trim().min(1),
