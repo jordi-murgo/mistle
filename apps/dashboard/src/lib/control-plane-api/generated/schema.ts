@@ -10911,7 +10911,9 @@ export interface paths {
                   memoryMb: {
                     default: number;
                     max: number;
+                    maxPerVcpu?: number;
                     min: number;
+                    minPerVcpu?: number;
                     step: number;
                   };
                   storageMb?: {
