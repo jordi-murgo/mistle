@@ -35,7 +35,10 @@ import {
   useLocalSessionComposerConfigControl,
   useSessionComposerAttachmentControl,
   useSessionComposerConfigControl,
+  type SessionComposerRuntimeInput,
+  type SessionComposerSharedInput,
   type SessionComposerStateInput,
+  type SessionTurnControl,
 } from "./session-composer/index.js";
 import { type MainPanelTransitionState } from "./session-main-panel-handoff-state.js";
 import {
@@ -180,11 +183,6 @@ type SessionConversationPaneState = {
   };
 };
 
-type RuntimeComposerStateInput = Omit<
-  SessionComposerStateInput,
-  "attachmentControl" | "repositoryStatus"
->;
-
 type SessionWorkbenchRuntimeAdapter = {
   displayName: "Codex" | "OpenCode";
   cliTerminalContentInset: SessionTerminalContentInset;
@@ -195,7 +193,7 @@ type SessionWorkbenchRuntimeAdapter = {
       typeof useCodexSessionState
     >["chat"]["dismissUserMessageAction"];
   };
-  composerStateInput: RuntimeComposerStateInput;
+  composerRuntimeInput: SessionComposerRuntimeInput;
   serverRequestsState: SessionConversationPaneState["serverRequestsState"];
 };
 
@@ -687,9 +685,7 @@ export function useSessionWorkbenchController(input: {
     ],
   );
   const startCodexTurn = useCallback(
-    async (
-      turnInput: Parameters<SessionComposerStateInput["turnControl"]["startTurn"]>[0],
-    ): Promise<void> => {
+    async (turnInput: Parameters<SessionTurnControl["startTurn"]>[0]): Promise<void> => {
       const sandboxInstanceId = input.sandboxInstanceId;
       const cachedTitle = sandboxStatus?.title;
       const messagePayload = turnInput.transcriptPrompt ?? turnInput.submittedPrompt;
@@ -729,9 +725,7 @@ export function useSessionWorkbenchController(input: {
     ],
   );
   const startOpenCodeTurn = useCallback(
-    async (
-      turnInput: Parameters<SessionComposerStateInput["turnControl"]["startTurn"]>[0],
-    ): Promise<void> => {
+    async (turnInput: Parameters<SessionTurnControl["startTurn"]>[0]): Promise<void> => {
       const sandboxInstanceId = input.sandboxInstanceId;
       const cachedTitle = sandboxStatus?.title;
       const messagePayload = turnInput.transcriptPrompt ?? turnInput.submittedPrompt;
@@ -822,7 +816,7 @@ export function useSessionWorkbenchController(input: {
         chatState: chat.chatState,
         dismissUserMessageAction: chat.dismissUserMessageAction,
       },
-      composerStateInput: {
+      composerRuntimeInput: {
         bootstrap: sessionState.bootstrap,
         configControl,
         turnControl: {
@@ -840,8 +834,10 @@ export function useSessionWorkbenchController(input: {
         sessionErrorMessage: sessionMessage.sessionErrorMessage,
         clearSessionErrorMessage: sessionMessage.clearSessionErrorMessage,
         contextUsage,
-        requiresModelSelection: true,
-        showConfigControls: true,
+        modelSelection: {
+          required: true,
+          showControls: true,
+        },
       },
       serverRequestsState: {
         isRespondingToServerRequest: serverRequests.isRespondingToServerRequest,
@@ -880,7 +876,7 @@ export function useSessionWorkbenchController(input: {
           openCodeSessionState.lifecycle.sessionSnapshot?.activeSessionId ?? null,
         chatState: mapOpenCodeChatStateForConversation(openCodeSessionState.chat.chatState),
       },
-      composerStateInput: {
+      composerRuntimeInput: {
         bootstrap: openCodeComposerBootstrap,
         configControl: openCodeConfigControl,
         turnControl: {
@@ -898,8 +894,10 @@ export function useSessionWorkbenchController(input: {
         sessionErrorMessage: openCodeSessionState.sessionMessage.sessionErrorMessage,
         clearSessionErrorMessage: openCodeSessionState.sessionMessage.clearSessionErrorMessage,
         contextUsage: null,
-        requiresModelSelection: false,
-        showConfigControls: true,
+        modelSelection: {
+          required: false,
+          showControls: true,
+        },
       },
       serverRequestsState: {
         isRespondingToServerRequest: openCodeSessionState.chat.isRespondingToPermission,
@@ -927,6 +925,10 @@ export function useSessionWorkbenchController(input: {
     ],
   );
   const activeRuntime = isOpenCodeRuntime ? openCodeRuntime : codexRuntime;
+  const sharedComposerInput: SessionComposerSharedInput = {
+    attachmentControl,
+    repositoryStatus,
+  };
 
   return {
     workbench: {
@@ -981,9 +983,8 @@ export function useSessionWorkbenchController(input: {
         ? {}
         : { dismissUserMessageAction: activeRuntime.conversation.dismissUserMessageAction }),
       composerStateInput: {
-        ...activeRuntime.composerStateInput,
-        attachmentControl,
-        repositoryStatus,
+        ...activeRuntime.composerRuntimeInput,
+        ...sharedComposerInput,
       },
       serverRequestsState: activeRuntime.serverRequestsState,
     },
