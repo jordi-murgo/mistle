@@ -240,7 +240,9 @@ export interface SandboxRuntimeControl {
     env?: Readonly<Record<string, string>>;
   }): Promise<string>;
   ensureSandboxd(input: SandboxRuntimeEnsureSandboxdRequest): Promise<void>;
+  beginInit(input: SandboxRuntimeControlRequest): Promise<void>;
   init(input: SandboxRuntimeControlRequest): Promise<void>;
+  waitInit(input: { id: string; env?: Readonly<Record<string, string>> }): Promise<void>;
   resume(input: SandboxRuntimeControlRequest): Promise<void>;
   readOperationLog(input: { id: string; operation: "init" | "resume" }): Promise<string | null>;
   close(): Promise<void>;
