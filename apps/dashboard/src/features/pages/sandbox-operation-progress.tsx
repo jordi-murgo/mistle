@@ -1,6 +1,7 @@
 import { Notice } from "@mistle/ui";
 import {
   CheckCircleIcon,
+  CaretDownIcon,
   CircleIcon,
   SpinnerGapIcon,
   WarningCircleIcon,
@@ -49,6 +50,7 @@ type SandboxLifecycleTimelineItem = {
 
 const SandboxOperationEventsLimit = 100;
 const SandboxOperationEventsRefetchIntervalMs = 1_000;
+const TranscriptContainerClassName = "flex max-h-72 min-h-48 flex-col overflow-hidden bg-[#111817]";
 const TerminalFontFamily =
   '"JetBrains Mono Variable", "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 const OperationTerminalTheme: ITheme = {
@@ -206,9 +208,7 @@ export function SandboxOperationProgressView(
         {shouldShowTimeline ? (
           <SandboxOperationTimeline isSplit={displayMode === "both"} items={lifecycleItems} />
         ) : null}
-        {shouldShowTranscript ? (
-          <SandboxOperationTranscript isSplit={displayMode === "both"} events={transcriptEvents} />
-        ) : null}
+        {shouldShowTranscript ? <SandboxOperationTranscript events={transcriptEvents} /> : null}
       </div>
     </section>
   );
@@ -219,6 +219,7 @@ function SandboxOperationTimeline(input: {
   items: readonly SandboxLifecycleTimelineItem[];
 }): React.JSX.Element {
   const scrollContainerRef = useRef<HTMLOListElement | null>(null);
+  const [expandedEventIds, setExpandedEventIds] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -239,31 +240,70 @@ function SandboxOperationTimeline(input: {
 
   return (
     <ol
-      className={`${resolveTimelineContainerClassName(input.isSplit)} space-y-3`}
+      className={`${resolveTimelineContainerClassName(input.isSplit)} space-y-2`}
       ref={scrollContainerRef}
     >
-      {input.items.map(({ event, startedAt }) => (
-        <li className="grid grid-cols-[1rem_minmax(0,1fr)] gap-2" key={event.id}>
-          <span className="pt-0.5">{renderStatusIcon(event.status)}</span>
-          <span className="min-w-0">
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-sm font-medium">{formatLifecyclePhase(event.phase)}</span>
-              <span className={resolveStatusClassName(event.status)}>
-                {formatLifecycleStatus(event.status)}
+      {input.items.map(({ event, startedAt }) => {
+        const diagnosticMessage = resolveLifecycleDiagnosticMessage(event);
+        const isExpanded = expandedEventIds.has(event.id);
+        const phaseLabel = formatLifecyclePhase(event.phase);
+
+        return (
+          <li className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-2" key={event.id}>
+            <span className="pt-0.5">{renderStatusIcon(event.status)}</span>
+            <div className="min-w-0">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-sm font-medium">{phaseLabel}</span>
+                <span className="sr-only">Status: {formatLifecycleStatus(event.status)}</span>
+                <time className="text-xs text-muted-foreground" dateTime={event.observedAt}>
+                  {formatLifecycleItemTime({ event, startedAt })}
+                </time>
+                {diagnosticMessage === null ? null : (
+                  <button
+                    aria-expanded={isExpanded}
+                    aria-label={`${isExpanded ? "Hide" : "Show"} ${phaseLabel} details`}
+                    className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    onClick={() => {
+                      setExpandedEventIds((currentIds) =>
+                        toggleExpandedTimelineEventId(currentIds, event.id),
+                      );
+                    }}
+                    type="button"
+                  >
+                    <CaretDownIcon
+                      aria-hidden
+                      className={`size-3.5 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
+                    />
+                  </button>
+                )}
               </span>
-            </span>
-            <time className="mt-1 block text-xs text-muted-foreground" dateTime={event.observedAt}>
-              {formatLifecycleItemTime({ event, startedAt })}
-            </time>
-          </span>
-        </li>
-      ))}
+              {diagnosticMessage === null || !isExpanded ? null : (
+                <p className="mt-1 whitespace-pre-wrap break-words rounded border border-border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                  {diagnosticMessage}
+                </p>
+              )}
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }
 
+function toggleExpandedTimelineEventId(
+  currentIds: ReadonlySet<string>,
+  eventId: string,
+): ReadonlySet<string> {
+  const nextIds = new Set(currentIds);
+  if (nextIds.has(eventId)) {
+    nextIds.delete(eventId);
+  } else {
+    nextIds.add(eventId);
+  }
+  return nextIds;
+}
+
 function SandboxOperationTranscript(input: {
-  isSplit: boolean;
   events: readonly SandboxOperationEvent[];
 }): React.JSX.Element {
   const outputChunks = useMemo(
@@ -273,7 +313,7 @@ function SandboxOperationTranscript(input: {
 
   if (outputChunks.length === 0) {
     return (
-      <div className={resolveTranscriptContainerClassName(input.isSplit)}>
+      <div className={TranscriptContainerClassName}>
         <SandboxOperationTranscriptHeader />
         <div className="min-h-0 flex-1 overflow-auto p-3">
           <p className="font-mono text-xs text-[#8fa09c]">No output yet.</p>
@@ -283,7 +323,7 @@ function SandboxOperationTranscript(input: {
   }
 
   return (
-    <div className={resolveTranscriptContainerClassName(input.isSplit)}>
+    <div className={TranscriptContainerClassName}>
       <SandboxOperationTranscriptHeader />
       <SandboxOperationTranscriptTerminal outputChunks={outputChunks} />
     </div>
@@ -388,12 +428,6 @@ function resolveTimelineContainerClassName(isSplit: boolean): string {
     : "max-h-72 min-h-48 overflow-auto p-3";
 }
 
-function resolveTranscriptContainerClassName(isSplit: boolean): string {
-  return isSplit
-    ? "flex max-h-72 min-h-48 flex-col overflow-hidden bg-[#111817]"
-    : "flex max-h-72 min-h-48 flex-col overflow-hidden bg-[#111817]";
-}
-
 function createLifecycleTimelineItems(
   events: readonly SandboxOperationEvent[],
 ): SandboxLifecycleTimelineItem[] {
@@ -452,23 +486,6 @@ function renderStatusIcon(status: SandboxOperationEvent["status"]): React.JSX.El
   return <CircleIcon aria-hidden className="size-4 text-muted-foreground" />;
 }
 
-function resolveStatusClassName(status: SandboxOperationEvent["status"]): string {
-  const baseClassName = "rounded border px-1.5 py-0.5 text-[11px] leading-none";
-  if (status === "completed") {
-    return `${baseClassName} border-emerald-200 bg-emerald-50 text-emerald-800`;
-  }
-
-  if (status === "failed") {
-    return `${baseClassName} border-destructive/20 bg-destructive/10 text-destructive`;
-  }
-
-  if (status === "warning") {
-    return `${baseClassName} border-amber-200 bg-amber-50 text-amber-800`;
-  }
-
-  return `${baseClassName} border-border bg-muted text-muted-foreground`;
-}
-
 function formatLifecyclePhase(phase: SandboxOperationEvent["phase"]): string {
   if (phase === null) {
     return "Operation";
@@ -518,6 +535,30 @@ function formatLifecycleStatus(status: SandboxOperationEvent["status"]): string 
   }
 
   return status.replaceAll("_", " ");
+}
+
+function resolveLifecycleDiagnosticMessage(event: SandboxOperationEvent): string | null {
+  if (event.status !== "failed" && event.status !== "warning") {
+    return null;
+  }
+
+  const message = event.message.trim();
+  const error = readStringAttribute(event.attributes, "error")?.trim() ?? "";
+
+  if (message.length === 0) {
+    return error.length === 0 ? null : error;
+  }
+
+  if (error.length === 0 || error === message) {
+    return message;
+  }
+
+  return `${message}\n${error}`;
+}
+
+function readStringAttribute(attributes: Record<string, unknown>, key: string): string | undefined {
+  const value = attributes[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 function formatEventTime(value: string): string {
