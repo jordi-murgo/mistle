@@ -62,6 +62,7 @@ import {
 } from "./sandbox-profile-editor-page-model.js";
 import {
   SandboxProfileDefaultRedirect,
+  SetupAssistantCloseDialog,
   SandboxProfileEditorPage,
   SandboxProfileEditorShell,
   SandboxProfileEditorView,
@@ -2475,7 +2476,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(setupAssistantButton.hasAttribute("disabled")).toBe(false);
   });
 
-  it("toggles the Setup Assistant panel from the setup script action", async () => {
+  it("opens the Setup Assistant panel from the setup script action", async () => {
     renderSandboxProfileEditor({
       bindings: [
         {
@@ -2501,20 +2502,72 @@ describe("SandboxProfileEditorPage", () => {
         name: "Close Setup Assistant panel",
       }),
     ).toBeTruthy();
+  });
 
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Setup Assistant",
-      }),
+  it("confirms before closing an active Setup Assistant sandbox", () => {
+    let confirmed = false;
+    let canceled = false;
+
+    render(
+      <SetupAssistantCloseDialog
+        errorMessage={null}
+        isOpen
+        isPending={false}
+        onCancel={() => {
+          canceled = true;
+        }}
+        onConfirm={() => {
+          confirmed = true;
+        }}
+      />,
     );
 
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("button", {
-          name: "Close Setup Assistant panel",
-        }),
-      ).toBeNull();
-    });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("Stop Setup Assistant?")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Closing the Setup Assistant stops its temporary sandbox. The setup script draft stays in the editor.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(canceled).toBe(true);
+    expect(confirmed).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop and close" }));
+    expect(confirmed).toBe(true);
+  });
+
+  it("blocks duplicate Setup Assistant stop confirmations while stopping", () => {
+    let canceled = false;
+    let confirmed = false;
+
+    render(
+      <SetupAssistantCloseDialog
+        errorMessage="Stop request timed out."
+        isOpen
+        isPending
+        onCancel={() => {
+          canceled = true;
+        }}
+        onConfirm={() => {
+          confirmed = true;
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Stop request timed out.")).toBeTruthy();
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    const confirmButton = screen.getByRole("button", { name: "Stopping..." });
+    expect(cancelButton.hasAttribute("disabled")).toBe(true);
+    expect(confirmButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(cancelButton);
+    fireEvent.click(confirmButton);
+
+    expect(canceled).toBe(false);
+    expect(confirmed).toBe(false);
   });
 
   it("disables setup script testing for empty and published scripts", () => {
