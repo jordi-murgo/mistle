@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
 import { EditorView } from "@codemirror/view";
-import { SlackBrowserDefinition } from "@mistle/integrations-definitions/browser";
+import {
+  GitHubCloudBrowserDefinition,
+  SlackBrowserDefinition,
+} from "@mistle/integrations-definitions/browser";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type JSX } from "react";
@@ -133,10 +136,12 @@ type SandboxProfileEditorTestRouteSection = "sandbox-profile" | "automations" | 
 
 const SlackAutomationConnectionId = "icn_slack_test";
 const SlackAutomationWebhookSourceId = "iws_slack_test";
+const GitHubAutomationConnectionId = "icn_github_test";
+const GitHubAutomationWebhookSourceId = "iws_github_test";
 
-function createSlackAutomationConnection(): IntegrationConnection {
+function createSlackAutomationConnection(input: { id?: string } = {}): IntegrationConnection {
   return {
-    id: SlackAutomationConnectionId,
+    id: input.id ?? SlackAutomationConnectionId,
     targetKey: "slack-default",
     displayName: "Slack Engineering",
     status: "active",
@@ -191,6 +196,92 @@ function createSlackAutomationWebhookSource(): IntegrationWebhookSource {
       definition: SlackBrowserDefinition,
       events: ["app_mention"],
       permissions: [{ permission: "app_mentions:read" }],
+    }),
+    createdAt: "2026-04-23T00:00:00.000Z",
+    updatedAt: "2026-04-23T00:00:00.000Z",
+  };
+}
+
+function createGitHubAutomationConnection(input: { id?: string } = {}): IntegrationConnection {
+  return {
+    id: input.id ?? GitHubAutomationConnectionId,
+    targetKey: "github-cloud",
+    displayName: "GitHub",
+    status: "active",
+    createdAt: "2026-04-23T00:00:00.000Z",
+    updatedAt: "2026-04-23T00:00:00.000Z",
+  };
+}
+
+function createGitHubAutomationTarget(): IntegrationTarget {
+  return {
+    targetKey: "github-cloud",
+    familyId: GitHubCloudBrowserDefinition.familyId,
+    variantId: GitHubCloudBrowserDefinition.variantId,
+    kind: GitHubCloudBrowserDefinition.kind,
+    enabled: true,
+    config: {},
+    displayName: GitHubCloudBrowserDefinition.displayName,
+    description: "GitHub repositories",
+    ...(GitHubCloudBrowserDefinition.logoKey === undefined
+      ? {}
+      : { logoKey: GitHubCloudBrowserDefinition.logoKey }),
+    supportedWebhookEvents: [
+      {
+        eventType: "github.pull_request.opened",
+        providerEventType: "pull_request",
+        displayName: "Pull request opened",
+        requirements: {
+          anyOf: [
+            {
+              event: "pull_request",
+              permissions: [{ permission: "pull_requests", access: "read" }],
+            },
+          ],
+        },
+      },
+      {
+        eventType: "github.issue_comment.created",
+        providerEventType: "issue_comment",
+        displayName: "Issue comment created",
+        requirements: {
+          anyOf: [
+            {
+              event: "issue_comment",
+              permissions: [{ permission: "issues", access: "read" }],
+            },
+          ],
+        },
+      },
+    ],
+    targetHealth: {
+      configStatus: "valid",
+    },
+  };
+}
+
+function createGitHubAutomationWebhookSource(
+  input: {
+    id?: string;
+    connectionId?: string;
+    events?: readonly ("pull_request" | "issue_comment")[];
+    permissions?: readonly { permission: string; access: string }[];
+  } = {},
+): IntegrationWebhookSource {
+  return {
+    id: input.id ?? GitHubAutomationWebhookSourceId,
+    targetKey: "github-cloud",
+    integrationConnectionId: input.connectionId ?? GitHubAutomationConnectionId,
+    displayName: "GitHub webhook",
+    endpointKey: "ep_github_test",
+    status: "active",
+    providerMetadata: createStoryWebhookTriggerCapabilitiesProviderMetadata({
+      definition: GitHubCloudBrowserDefinition,
+      events: input.events ?? ["pull_request", "issue_comment"],
+      permissions: input.permissions ?? [
+        { permission: "pull_requests", access: "read" },
+        { permission: "issues", access: "read" },
+      ],
     }),
     createdAt: "2026-04-23T00:00:00.000Z",
     updatedAt: "2026-04-23T00:00:00.000Z",
@@ -1613,6 +1704,82 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByText("Slack Mention")).toBeDefined();
     expect(screen.getByText("Slack connection required.")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Unavailable" })).toBeNull();
+  });
+
+  it("shows the GitHub PR review template when the profile can receive pull request events", () => {
+    renderSandboxProfileEditor({
+      automationConnections: [createGitHubAutomationConnection()],
+      automationTargets: [createGitHubAutomationTarget()],
+      automationWebhookSources: [createGitHubAutomationWebhookSource()],
+      bindings: [
+        {
+          id: "binding-github",
+          connectionId: GitHubAutomationConnectionId,
+          kind: "git",
+          config: {},
+        },
+      ],
+      routeSection: "automations",
+      versionState: "published",
+    });
+
+    expect(screen.getByRole("heading", { name: "Create from template" })).toBeDefined();
+    expect(screen.getByText("GitHub PR Review")).toBeDefined();
+    expect(
+      screen.getByText("Review a pull request when it is opened or requested with pr-review."),
+    ).toBeDefined();
+    expect(screen.queryByText("GitHub connection required.")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Select" }).length).toBeGreaterThan(0);
+  });
+
+  it("does not make the GitHub PR review template selectable when required events are split across webhook sources", () => {
+    const pullRequestConnectionId = "icn_github_pull_request_test";
+    const issueCommentConnectionId = "icn_github_issue_comment_test";
+
+    renderSandboxProfileEditor({
+      automationConnections: [
+        createGitHubAutomationConnection({ id: pullRequestConnectionId }),
+        createGitHubAutomationConnection({ id: issueCommentConnectionId }),
+      ],
+      automationTargets: [createGitHubAutomationTarget()],
+      automationWebhookSources: [
+        createGitHubAutomationWebhookSource({
+          id: "iws_github_pull_request_test",
+          connectionId: pullRequestConnectionId,
+          events: ["pull_request"],
+          permissions: [{ permission: "pull_requests", access: "read" }],
+        }),
+        createGitHubAutomationWebhookSource({
+          id: "iws_github_issue_comment_test",
+          connectionId: issueCommentConnectionId,
+          events: ["issue_comment"],
+          permissions: [{ permission: "issues", access: "read" }],
+        }),
+      ],
+      bindings: [
+        {
+          id: "binding-github-pull-request",
+          connectionId: pullRequestConnectionId,
+          kind: "git",
+          config: {},
+        },
+        {
+          id: "binding-github-issue-comment",
+          connectionId: issueCommentConnectionId,
+          kind: "git",
+          config: {},
+        },
+      ],
+      routeSection: "automations",
+      versionState: "published",
+    });
+
+    expect(screen.getByRole("heading", { name: "Create from template" })).toBeDefined();
+    expect(screen.getByText("GitHub PR Review")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Select" })).toBeNull();
+    expect(
+      screen.getByText("The GitHub connection has not synced the required event capability."),
+    ).toBeDefined();
   });
 
   it("preserves the profile automation page cursor when selecting an automation", () => {

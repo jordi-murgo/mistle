@@ -28,15 +28,17 @@ import {
 } from "./scheduled-automation-form-types.js";
 import { ScheduledAutomationTypeSpecificSection } from "./scheduled-automation-form.js";
 import { createScheduledAutomation } from "./scheduled-automations-service.js";
-import { getTriggerTemplateById, type TriggerTemplate } from "./trigger-templates.js";
+import {
+  getTriggerTemplateById,
+  resolveTriggerTemplateEventOptionIds,
+  type TriggerTemplate,
+} from "./trigger-templates.js";
 import { useAutomationSandboxProfileOptions } from "./use-automation-sandbox-profile-options.js";
 import {
   resolveNoActiveProfileVersionMessage,
   resolveSelectedProfileTriggerState,
 } from "./use-webhook-automation-editor-state.js";
 import { useWebhookAutomationEventPrerequisites } from "./use-webhook-automation-prerequisites.js";
-import { resolveConversationKeyFieldOptions } from "./webhook-automation-conversation-key-field.js";
-import { isWebhookAutomationEventOptionUnavailable } from "./webhook-automation-event-option-availability.js";
 import {
   toCreateWebhookAutomationPayload,
   toWebhookAutomationFormValues,
@@ -47,7 +49,10 @@ import {
   type WebhookAutomationFormValueKey,
   type WebhookAutomationFormValues,
 } from "./webhook-automation-form-types.js";
-import { WebhookAutomationTypeSpecificSection } from "./webhook-automation-form.js";
+import {
+  WebhookAutomationInstructionsSection,
+  WebhookAutomationTypeSpecificSection,
+} from "./webhook-automation-form.js";
 import { DefaultWebhookAutomationMessageTemplate } from "./webhook-automation-input-template.js";
 import {
   buildWebhookAutomationEventOptions,
@@ -228,12 +233,10 @@ function resolveNormalizedConversationKeyTemplate(input: {
     webhookEventOptions: input.eventOptions,
     selectedTriggerIds: input.values.triggerIds,
     conversationKeyTemplate: input.values.conversationKeyTemplate,
+    triggerParameterValues: input.values.triggerParameterValues,
     triggerIdsError: undefined,
   });
-  const conversationKeyFieldOptions = resolveConversationKeyFieldOptions({
-    selectedEventOptions: formState.selectedTriggerOptions,
-    currentTemplate: input.values.conversationKeyTemplate,
-  });
+  const conversationKeyFieldOptions = formState.conversationKeySelectionState;
 
   if (conversationKeyFieldOptions.options.length === 0) {
     return input.values.conversationKeyTemplate;
@@ -257,15 +260,24 @@ function applyTriggerIdsChange(input: {
   values: CreateAutomationFormValues;
   triggerIds: string[];
   eventOptions: readonly WebhookAutomationEventOption[];
+  triggerParameterValuesByEventType?: WebhookAutomationFormValues["triggerParameterValues"];
 }): CreateAutomationFormValues {
   const nextValues: CreateAutomationFormValues = {
     ...input.values,
     triggerIds: input.triggerIds,
     triggerParameterValues: Object.fromEntries(
-      input.triggerIds.map((triggerId) => [
-        triggerId,
-        input.values.triggerParameterValues[triggerId] ?? {},
-      ]),
+      input.triggerIds.map((triggerId) => {
+        const eventOption = input.eventOptions.find((option) => option.id === triggerId);
+        const templateParameterValues =
+          eventOption === undefined
+            ? undefined
+            : input.triggerParameterValuesByEventType?.[eventOption.eventType];
+
+        return [
+          triggerId,
+          templateParameterValues ?? input.values.triggerParameterValues[triggerId] ?? {},
+        ];
+      }),
     ),
   };
 
@@ -276,31 +288,6 @@ function applyTriggerIdsChange(input: {
       eventOptions: input.eventOptions,
     }),
   };
-}
-
-function resolveTemplateTriggerIds(input: {
-  eventTypes: readonly string[];
-  eventOptions: readonly WebhookAutomationEventOption[];
-}): string[] | null {
-  const triggerIds: string[] = [];
-  for (const eventType of input.eventTypes) {
-    const matchingOptions = input.eventOptions.filter(
-      (eventOption) =>
-        eventOption.eventType === eventType &&
-        !isWebhookAutomationEventOptionUnavailable(eventOption),
-    );
-    if (matchingOptions.length !== 1) {
-      return null;
-    }
-
-    const [matchingOption] = matchingOptions;
-    if (matchingOption === undefined) {
-      throw new Error(`Expected matching trigger option for '${eventType}'.`);
-    }
-    triggerIds.push(matchingOption.id);
-  }
-
-  return triggerIds;
 }
 
 function resolveDefaultInputTemplate(kind: AutomationTypeValue): string {
@@ -492,8 +479,8 @@ function useCreateAutomationEditorState(input: CreateAutomationEditorProps) {
       return;
     }
 
-    const templateTriggerIds = resolveTemplateTriggerIds({
-      eventTypes: initialTemplate.eventTypes,
+    const templateTriggerIds = resolveTriggerTemplateEventOptionIds({
+      template: initialTemplate,
       eventOptions: webhookEventOptions,
     });
     if (templateTriggerIds === null) {
@@ -506,6 +493,11 @@ function useCreateAutomationEditorState(input: CreateAutomationEditorProps) {
         values: currentValues,
         triggerIds: templateTriggerIds,
         eventOptions: webhookEventOptions,
+        ...(initialTemplate.triggerParameterValuesByEventType === undefined
+          ? {}
+          : {
+              triggerParameterValuesByEventType: initialTemplate.triggerParameterValuesByEventType,
+            }),
       }),
     );
     setAppliedTemplateId(input.initialTemplateId);
@@ -713,10 +705,22 @@ function useCreateAutomationEditorState(input: CreateAutomationEditorProps) {
         });
       }
 
-      return {
+      const nextValues = {
         ...currentValues,
         [key]: value,
       };
+
+      if (key === "triggerParameterValues") {
+        return {
+          ...nextValues,
+          conversationKeyTemplate: resolveNormalizedConversationKeyTemplate({
+            values: nextValues,
+            eventOptions: webhookEventOptions,
+          }),
+        };
+      }
+
+      return nextValues;
     });
     setFieldErrors((currentErrors) => {
       if (key === "triggerIds") {
@@ -744,6 +748,22 @@ function useCreateAutomationEditorState(input: CreateAutomationEditorProps) {
       const { triggerParameterValues: _triggerParameterValues, ...remainingErrors } = currentErrors;
 
       void _triggerParameterValues;
+
+      return remainingErrors;
+    });
+    setValidationSummaryError(null);
+    setFormError(null);
+  }
+
+  function onWebhookInstructionsChange(value: string): void {
+    setFormValues((currentValues) => ({
+      ...currentValues,
+      instructions: value,
+    }));
+    setFieldErrors((currentErrors) => {
+      const { instructions: _instructions, ...remainingErrors } = currentErrors;
+
+      void _instructions;
 
       return remainingErrors;
     });
@@ -842,6 +862,7 @@ function useCreateAutomationEditorState(input: CreateAutomationEditorProps) {
     onKindChange,
     onCommonValueChange,
     onWebhookValueChange,
+    onWebhookInstructionsChange,
     onScheduledValueChange,
     onSubmit,
   };
@@ -887,6 +908,7 @@ export function CreateAutomationEditor(
     webhookEventOptions: state.webhookEventOptions,
     selectedTriggerIds: state.formValues.triggerIds,
     conversationKeyTemplate: state.formValues.conversationKeyTemplate,
+    triggerParameterValues: state.formValues.triggerParameterValues,
     triggerIdsError: state.fieldErrors.triggerIds,
   });
 
@@ -943,6 +965,16 @@ export function CreateAutomationEditor(
       shouldShowPrimaryRepositoryField={presentation.shouldShowPrimaryRepositoryField}
       submitLabel={presentation.submitLabel}
       validationSummaryError={state.validationSummaryError}
+      extraSectionsBeforeMessage={
+        state.kind === "trigger" ? (
+          <WebhookAutomationInstructionsSection
+            disabled={state.isSaving}
+            instructionsLabelId="automation-instructions-label"
+            onValueChange={state.onWebhookInstructionsChange}
+            value={state.formValues.instructions}
+          />
+        ) : undefined
+      }
       typeSpecificSection={
         state.kind === null ? null : state.kind === "scheduled" ? (
           <ScheduledAutomationTypeSpecificSection
