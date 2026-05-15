@@ -26,6 +26,7 @@ import { resolveApiErrorMessage } from "../api/error-message.js";
 import { SingleSelectStringComboboxField } from "../forms/single-select-string-combobox-field.js";
 import {
   deleteSandboxProfileVersionRefreshSchedule,
+  putSandboxProfileVersionMaintenanceScript,
   putSandboxProfileVersionRefreshSchedule,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
 import type { SandboxProfileVersion } from "../sandbox-profiles/sandbox-profiles-types.js";
@@ -42,6 +43,12 @@ import {
   type CronExpressionBreakdown,
 } from "./sandbox-profile-editor-page-model.js";
 import { SandboxProfileEditorHorizontalTabContent } from "./sandbox-profile-editor-sections.js";
+import {
+  SandboxProfileSetupScriptTestButton,
+  SandboxProfileSetupScriptTestPanel,
+  useSandboxProfileMaintenanceScriptTestRun,
+} from "./sandbox-profile-setup-script-test.js";
+import { SandboxSetupScriptEditor } from "./sandbox-setup-script-editor.js";
 
 export type SnapshotPanelState =
   | {
@@ -156,7 +163,9 @@ export function resolveSnapshotPanelState(
 export function SandboxProfileSnapshotPanel(input: {
   isActionPending: boolean;
   invalidateProfileVersions: (profileId: string) => Promise<void>;
+  maintenanceScript: string | null;
   onPublishSuccessMessageDismiss: () => void;
+  onMaintenanceRefreshSnapshot: () => void;
   onRefreshSnapshot: () => void;
   onRetryPublishSnapshot: () => void;
   publishSuccessMessageKey: Key;
@@ -164,11 +173,27 @@ export function SandboxProfileSnapshotPanel(input: {
   profileId: string;
   refreshSchedule: SnapshotRefreshSchedule;
   state: SnapshotPanelState;
+  canRunMaintenanceScript: boolean;
+  canRunMaintenanceRefresh: boolean;
   version: number | null;
 }): React.JSX.Element {
   return (
     <SandboxProfileSnapshotPanelView
       isActionPending={input.isActionPending}
+      canRunMaintenanceRefresh={input.canRunMaintenanceRefresh}
+      maintenanceScriptSection={
+        input.version === null ? null : (
+          <SandboxProfileMaintenanceScriptSection
+            canRunMaintenanceScript={input.canRunMaintenanceScript}
+            disabled={input.isActionPending}
+            invalidateProfileVersions={input.invalidateProfileVersions}
+            maintenanceScript={input.maintenanceScript}
+            profileId={input.profileId}
+            version={input.version}
+          />
+        )
+      }
+      onMaintenanceRefreshSnapshot={input.onMaintenanceRefreshSnapshot}
       onPublishSuccessMessageDismiss={input.onPublishSuccessMessageDismiss}
       onRefreshSnapshot={input.onRefreshSnapshot}
       onRetryPublishSnapshot={input.onRetryPublishSnapshot}
@@ -193,6 +218,9 @@ export function SandboxProfileSnapshotPanel(input: {
 
 export function SandboxProfileSnapshotPanelView(input: {
   isActionPending: boolean;
+  canRunMaintenanceRefresh: boolean;
+  maintenanceScriptSection: ReactNode;
+  onMaintenanceRefreshSnapshot: () => void;
   onPublishSuccessMessageDismiss: () => void;
   onRefreshSnapshot: () => void;
   onRetryPublishSnapshot: () => void;
@@ -244,7 +272,9 @@ export function SandboxProfileSnapshotPanelView(input: {
       <ActionTile
         action={
           <SnapshotStatusAction
+            canRunMaintenanceRefresh={input.canRunMaintenanceRefresh}
             isActionPending={input.isActionPending}
+            onMaintenanceRefreshSnapshot={input.onMaintenanceRefreshSnapshot}
             onRefreshSnapshot={input.onRefreshSnapshot}
             onRetryPublishSnapshot={input.onRetryPublishSnapshot}
             state={input.state}
@@ -270,6 +300,8 @@ export function SandboxProfileSnapshotPanelView(input: {
           title="Snapshot creation progress"
         />
       )}
+
+      {input.maintenanceScriptSection}
 
       {input.refreshScheduleSection}
     </SandboxProfileEditorHorizontalTabContent>
@@ -320,7 +352,9 @@ export function resolveRetainedSnapshotOperationState(input: {
 }
 
 function SnapshotStatusAction(input: {
+  canRunMaintenanceRefresh: boolean;
   isActionPending: boolean;
+  onMaintenanceRefreshSnapshot: () => void;
   onRefreshSnapshot: () => void;
   onRetryPublishSnapshot: () => void;
   state: SnapshotStatusState;
@@ -336,22 +370,39 @@ function SnapshotStatusAction(input: {
     );
   }
 
-  const actionLabel =
-    input.state.kind === "publish-snapshot-error" ? "Retry snapshot creation" : "Refresh snapshot";
+  if (input.state.kind === "publish-snapshot-error") {
+    return (
+      <Button
+        className="w-fit shrink-0"
+        disabled={input.isActionPending}
+        onClick={input.onRetryPublishSnapshot}
+        type="button"
+      >
+        Retry snapshot creation
+      </Button>
+    );
+  }
 
   return (
-    <Button
-      className="w-fit shrink-0"
-      disabled={input.isActionPending}
-      onClick={
-        input.state.kind === "publish-snapshot-error"
-          ? input.onRetryPublishSnapshot
-          : input.onRefreshSnapshot
-      }
-      type="button"
-    >
-      {actionLabel}
-    </Button>
+    <ButtonGroup>
+      <Button
+        className="w-fit shrink-0"
+        disabled={input.isActionPending}
+        onClick={input.onRefreshSnapshot}
+        type="button"
+      >
+        Refresh from setup script
+      </Button>
+      <Button
+        className="w-fit shrink-0"
+        disabled={input.isActionPending || !input.canRunMaintenanceRefresh}
+        onClick={input.onMaintenanceRefreshSnapshot}
+        type="button"
+        variant="secondary"
+      >
+        Run maintenance refresh
+      </Button>
+    </ButtonGroup>
   );
 }
 
@@ -495,6 +546,103 @@ function SandboxProfileSnapshotRefreshScheduleSection(input: {
       }}
       previewAfter={new Date()}
     />
+  );
+}
+
+function SandboxProfileMaintenanceScriptSection(input: {
+  canRunMaintenanceScript: boolean;
+  disabled: boolean;
+  invalidateProfileVersions: (profileId: string) => Promise<void>;
+  maintenanceScript: string | null;
+  profileId: string;
+  version: number;
+}): React.JSX.Element {
+  const [draftValue, setDraftValue] = useState(input.maintenanceScript ?? "");
+  const [persistedValue, setPersistedValue] = useState(input.maintenanceScript ?? "");
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const saveMutation = useMutation({
+    mutationFn: async (maintenanceScript: string) =>
+      putSandboxProfileVersionMaintenanceScript({
+        profileId: input.profileId,
+        version: input.version,
+        maintenanceScript: maintenanceScript.trim().length === 0 ? null : maintenanceScript,
+      }),
+    onSuccess: async (result) => {
+      const nextValue = result.maintenanceScript ?? "";
+      setMutationError(null);
+      setDraftValue(nextValue);
+      setPersistedValue(nextValue);
+      await input.invalidateProfileVersions(input.profileId);
+    },
+    onError: (error: unknown) => {
+      setMutationError(
+        resolveApiErrorMessage({
+          error,
+          fallbackMessage: "Could not save maintenance script.",
+        }),
+      );
+    },
+  });
+  const isMutating = saveMutation.isPending;
+  const hasChanges = draftValue !== persistedValue;
+  const maintenanceScriptTest = useSandboxProfileMaintenanceScriptTestRun({
+    canRun: input.canRunMaintenanceScript,
+    disabled: input.disabled || isMutating,
+    maintenanceScript: draftValue,
+    profileId: input.profileId,
+    version: input.version,
+  });
+
+  useEffect(() => {
+    const nextValue = input.maintenanceScript ?? "";
+    setDraftValue(nextValue);
+    setPersistedValue(nextValue);
+    setMutationError(null);
+  }, [input.maintenanceScript]);
+
+  function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    saveMutation.mutate(draftValue);
+  }
+
+  return (
+    <FormPageSection>
+      <form onSubmit={handleSubmit}>
+        <div className="flex flex-col gap-4 p-4">
+          <Field>
+            <FieldHeader>
+              <FieldLabel id="sandbox-profile-maintenance-script-label">
+                Maintenance script
+              </FieldLabel>
+            </FieldHeader>
+            <FieldContent>
+              <SandboxSetupScriptEditor
+                ariaLabelledBy="sandbox-profile-maintenance-script-label"
+                disabled={input.disabled || isMutating}
+                onChange={setDraftValue}
+                placeholderText="#!/usr/bin/env bash"
+                value={draftValue}
+              />
+            </FieldContent>
+          </Field>
+
+          {mutationError === null ? null : (
+            <Notice title="Maintenance script action failed" variant="alert">
+              {mutationError}
+            </Notice>
+          )}
+
+          <SandboxProfileSetupScriptTestPanel {...maintenanceScriptTest.panelProps} />
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={input.disabled || isMutating || !hasChanges} type="submit">
+              Save maintenance script
+            </Button>
+            <SandboxProfileSetupScriptTestButton {...maintenanceScriptTest.buttonProps} />
+          </div>
+        </div>
+      </form>
+    </FormPageSection>
   );
 }
 

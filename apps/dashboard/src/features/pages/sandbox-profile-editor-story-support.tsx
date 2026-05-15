@@ -403,6 +403,7 @@ function createRuntimeStoryVersion(input: {
     defaultPersistenceMode: "ephemeral",
     sandboxProvider: runtimeState === "docker" ? "docker" : "e2b",
     sandboxConnectionId: runtimeState === "e2b-connection" ? StoryE2BSandboxConnection.id : null,
+    maintenanceScript: null,
     sandboxResources:
       runtimeState === "docker"
         ? null
@@ -442,7 +443,7 @@ function SetupScriptStoryControls(input: {
 
   return (
     <SandboxProfileSetupScriptTestButton
-      isDraft={input.isDraft}
+      canRun={input.isDraft}
       status={input.testStatus}
       {...(input.testStatus === "running" ? { onStop: noopStoryAction } : {})}
       {...(showSetupAssistantAction
@@ -842,10 +843,7 @@ function SandboxProfileEditorPageStoryView(
                       />
                     }
                     testPanel={
-                      <SandboxProfileSetupScriptTestPanel
-                        isDraft={mode.kind === "draft"}
-                        status={setupScriptTestStatus}
-                      />
+                      <SandboxProfileSetupScriptTestPanel status={setupScriptTestStatus} />
                     }
                     value={setupScriptDraft}
                   />
@@ -858,7 +856,10 @@ function SandboxProfileEditorPageStoryView(
         if (sectionId === "snapshot") {
           return (
             <SandboxProfileSnapshotPanelView
+              canRunMaintenanceRefresh={false}
               isActionPending={false}
+              maintenanceScriptSection={null}
+              onMaintenanceRefreshSnapshot={() => {}}
               onPublishSuccessMessageDismiss={() => {}}
               onRefreshSnapshot={() => {}}
               onRetryPublishSnapshot={() => {}}
