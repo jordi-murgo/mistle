@@ -53,16 +53,12 @@ import {
 } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
-import {
-  listWebhookAutomationsForSandboxProfile,
-  type WebhookAutomationSandboxProfileUsage,
-} from "../automations/automations-service.js";
 import { useAppPageBreadcrumbs } from "../navigation/app-breadcrumbs.js";
 import { NavigationBlockerDialog } from "../navigation/navigation-blocker-dialog.js";
 import { useAppPageMeta } from "../navigation/route-meta.js";
 import { SandboxProfilesApiError } from "../sandbox-profiles/sandbox-profiles-api-errors.js";
 import {
-  sandboxProfileAutomationUsagesQueryKey,
+  sandboxProfileTriggerUsagesQueryKey,
   sandboxProfileDetailQueryKey,
   sandboxProfileVersionIntegrationBindingsQueryKey,
   sandboxProfileVersionSetupScriptQueryKey,
@@ -74,7 +70,7 @@ import {
   deleteSandboxProfile,
   discardSandboxProfileVersionDraft,
   getSandboxProfile,
-  getSandboxProfileVersionDraftAutomationImpact,
+  getSandboxProfileVersionDraftTriggerImpact,
   getSandboxProfileVersionPublishability,
   listSandboxProviders,
   listSandboxProfileVersions,
@@ -87,9 +83,9 @@ import {
 import type {
   SandboxIntegrationBindingKind,
   SandboxProfile,
-  SandboxProfileVersionDraftAutomationImpactAutomation,
-  SandboxProfileVersionDraftAutomationImpactIssue,
-  SandboxProfileVersionDraftAutomationImpact,
+  SandboxProfileVersionDraftTriggerImpactTrigger,
+  SandboxProfileVersionDraftTriggerImpactIssue,
+  SandboxProfileVersionDraftTriggerImpact,
   SandboxProfileVersion,
   SandboxProfileVersionIntegrationBinding,
 } from "../sandbox-profiles/sandbox-profiles-types.js";
@@ -104,12 +100,15 @@ import { PageFrame, resolvePageFrameText } from "../shared/page-frame.js";
 import { SettingsSwitchField } from "../shared/settings-switch-field.js";
 import { useRequiredOrganizationId } from "../shell/require-auth.js";
 import {
+  listWebhookTriggersForSandboxProfile,
+  type WebhookTriggerSandboxProfileUsage,
+} from "../triggers/triggers-service.js";
+import {
   createSandboxBaseSetupScriptContextFromGeneratedInventory,
   resolveSandboxBaseRepositoryHandles,
   SetupScriptTimingDescription,
 } from "./sandbox-base-inventory-copy.js";
 import { SandboxOperationProgress } from "./sandbox-operation-progress.js";
-import { SandboxProfileAutomationsSection } from "./sandbox-profile-automations-section.js";
 import type {
   IntegrationConnectionSummary,
   IntegrationTargetSummary,
@@ -165,6 +164,7 @@ import {
   resolveSnapshotPanelState,
   type SnapshotPanelState,
 } from "./sandbox-profile-snapshot-panel.js";
+import { SandboxProfileTriggersSection } from "./sandbox-profile-triggers-section.js";
 import { SandboxSetupScriptEditor } from "./sandbox-setup-script-editor.js";
 import { SessionCliPanel } from "./session-cli-panel.js";
 import {
@@ -191,7 +191,7 @@ type SandboxProfileEditorPageProps =
       mode: "edit";
     };
 
-type SandboxProfileEditorSectionId = "sandbox-profile" | "automations" | "snapshot";
+type SandboxProfileEditorSectionId = "sandbox-profile" | "triggers" | "snapshot";
 type SandboxProfileEditorNavigationState = {
   notice: "publish-success" | null;
 };
@@ -306,7 +306,7 @@ pnpm dev:bootstrap`;
 
 const SandboxProfileEditorSectionIds = {
   SANDBOX_PROFILE: "sandbox-profile",
-  AUTOMATIONS: "automations",
+  TRIGGERS: "triggers",
   SNAPSHOT: "snapshot",
 } satisfies Record<string, SandboxProfileEditorSectionId>;
 const PublishSuccessNavigationState: SandboxProfileEditorNavigationState = {
@@ -330,8 +330,8 @@ function createSandboxProfileSnapshotsPath(profileId: string): string {
   return `/sandbox-profiles/${profileId}/snapshots`;
 }
 
-function createSandboxProfileAutomationsPath(profileId: string): string {
-  return `/sandbox-profiles/${profileId}/automations`;
+function createSandboxProfileTriggersPath(profileId: string): string {
+  return `/sandbox-profiles/${profileId}/triggers`;
 }
 
 function pathnameMatchesPathOrChild(input: { basePath: string; pathname: string }): boolean {
@@ -347,8 +347,8 @@ function createSandboxProfileTabPath(input: {
     return createSandboxProfileSnapshotsPath(input.profileId);
   }
 
-  if (input.sectionId === SandboxProfileEditorSectionIds.AUTOMATIONS) {
-    return createSandboxProfileAutomationsPath(input.profileId);
+  if (input.sectionId === SandboxProfileEditorSectionIds.TRIGGERS) {
+    return createSandboxProfileTriggersPath(input.profileId);
   }
 
   return createSandboxProfileEditorPath({
@@ -404,11 +404,11 @@ function readSandboxProfileEditorSectionPathSegment(input: {
 
   if (
     pathnameMatchesPathOrChild({
-      basePath: createSandboxProfileAutomationsPath(input.profileId),
+      basePath: createSandboxProfileTriggersPath(input.profileId),
       pathname: input.pathname,
     })
   ) {
-    return SandboxProfileEditorSectionIds.AUTOMATIONS;
+    return SandboxProfileEditorSectionIds.TRIGGERS;
   }
 
   return null;
@@ -447,12 +447,12 @@ function readSandboxProfileEditorRoute(input: {
 
   if (
     pathnameMatchesPathOrChild({
-      basePath: createSandboxProfileAutomationsPath(input.profileId),
+      basePath: createSandboxProfileTriggersPath(input.profileId),
       pathname: input.pathname,
     })
   ) {
     return {
-      sectionId: SandboxProfileEditorSectionIds.AUTOMATIONS,
+      sectionId: SandboxProfileEditorSectionIds.TRIGGERS,
     };
   }
 
@@ -830,10 +830,10 @@ function LoadedSandboxProfileEditorPage(
   const [isDeleteProfileDialogOpen, setIsDeleteProfileDialogOpen] = useState(false);
   const [deleteProfileError, setDeleteProfileError] = useState<string | null>(null);
   const [draftEditorResetKey, setDraftEditorResetKey] = useState(0);
-  const automationUsagesQuery = useQuery({
-    queryKey: sandboxProfileAutomationUsagesQueryKey(input.profileId),
+  const triggerUsagesQuery = useQuery({
+    queryKey: sandboxProfileTriggerUsagesQueryKey(input.profileId),
     queryFn: async ({ signal }) =>
-      listWebhookAutomationsForSandboxProfile({
+      listWebhookTriggersForSandboxProfile({
         sandboxProfileId: input.profileId,
         signal,
       }),
@@ -1212,23 +1212,23 @@ function LoadedSandboxProfileEditorPage(
       profile={input.profile}
       profileId={input.profileId}
       versions={input.versions}
-      deleteProfileAutomationUsages={automationUsagesQuery.data ?? []}
-      deleteProfileAutomationUsagesError={
-        automationUsagesQuery.isError
+      deleteProfileTriggerUsages={triggerUsagesQuery.data ?? []}
+      deleteProfileTriggerUsagesError={
+        triggerUsagesQuery.isError
           ? resolveApiErrorMessage({
-              error: automationUsagesQuery.error,
+              error: triggerUsagesQuery.error,
               fallbackMessage: "Could not load triggers.",
             })
           : null
       }
-      deleteProfileAutomationUsagesIsPending={
-        isDeleteProfileDialogOpen && automationUsagesQuery.isPending
+      deleteProfileTriggerUsagesIsPending={
+        isDeleteProfileDialogOpen && triggerUsagesQuery.isPending
       }
       deleteProfileError={deleteProfileError}
       deleteProfileIsPending={deleteProfileMutation.isPending}
       isDeleteProfileDialogOpen={isDeleteProfileDialogOpen}
       onConfirmDeleteProfile={() => {
-        if (automationUsagesQuery.isPending || automationUsagesQuery.isError) {
+        if (triggerUsagesQuery.isPending || triggerUsagesQuery.isError) {
           return;
         }
         deleteProfileMutation.mutate();
@@ -1273,9 +1273,9 @@ function ReadySandboxProfileEditorPage(input: {
   routeView: SandboxProfileRouteView;
   versionActionError: string | null;
   versionActionIsPending: boolean;
-  deleteProfileAutomationUsages: readonly WebhookAutomationSandboxProfileUsage[];
-  deleteProfileAutomationUsagesError: string | null;
-  deleteProfileAutomationUsagesIsPending: boolean;
+  deleteProfileTriggerUsages: readonly WebhookTriggerSandboxProfileUsage[];
+  deleteProfileTriggerUsagesError: string | null;
+  deleteProfileTriggerUsagesIsPending: boolean;
   deleteProfileError: string | null;
   deleteProfileIsPending: boolean;
   isDeleteProfileDialogOpen: boolean;
@@ -1317,9 +1317,10 @@ function ReadySandboxProfileEditorPage(input: {
   const [publishRequestIsPending, setPublishRequestIsPending] = useState(false);
   const [saveDraftRequestIsPending, setSaveDraftRequestIsPending] = useState(false);
   const [publishFlushError, setPublishFlushError] = useState<string | null>(null);
-  const [draftAutomationImpactAffectedAutomations, setDraftAutomationImpactAffectedAutomations] =
-    useState<readonly SandboxProfileVersionDraftAutomationImpactAutomation[] | null>(null);
-  const [draftAutomationImpactError, setDraftAutomationImpactError] = useState<string | null>(null);
+  const [draftTriggerImpactAffectedTriggers, setDraftTriggerImpactAffectedTriggers] = useState<
+    readonly SandboxProfileVersionDraftTriggerImpactTrigger[] | null
+  >(null);
+  const [draftTriggerImpactError, setDraftTriggerImpactError] = useState<string | null>(null);
   const [setupAssistantError, setSetupAssistantError] = useState<string | null>(null);
   const [publishSuccessNoticeKey, setPublishSuccessNoticeKey] = useState(0);
   const [showPublishSuccessMessage, setShowPublishSuccessMessage] = useState(
@@ -1618,8 +1619,8 @@ function ReadySandboxProfileEditorPage(input: {
 
   async function handleSaveDraft(): Promise<void> {
     setSaveDraftRequestIsPending(true);
-    setDraftAutomationImpactAffectedAutomations(null);
-    setDraftAutomationImpactError(null);
+    setDraftTriggerImpactAffectedTriggers(null);
+    setDraftTriggerImpactError(null);
     try {
       const draftSaved = await saveDraftChanges();
       if (!draftSaved) {
@@ -1627,15 +1628,13 @@ function ReadySandboxProfileEditorPage(input: {
       }
 
       try {
-        const impact = await getSandboxProfileVersionDraftAutomationImpact({
+        const impact = await getSandboxProfileVersionDraftTriggerImpact({
           profileId: input.profileId,
           version: input.mode.version,
         });
-        setDraftAutomationImpactAffectedAutomations(
-          getDraftAutomationImpactAffectedAutomations(impact),
-        );
+        setDraftTriggerImpactAffectedTriggers(getDraftTriggerImpactAffectedTriggers(impact));
       } catch {
-        setDraftAutomationImpactError(DraftAutomationImpactCheckFailedMessage);
+        setDraftTriggerImpactError(DraftTriggerImpactCheckFailedMessage);
       }
     } finally {
       setSaveDraftRequestIsPending(false);
@@ -1670,9 +1669,9 @@ function ReadySandboxProfileEditorPage(input: {
       isSavingProfileName={metaState.isUpdating}
       mode={input.mode}
       shouldBlockUnpersistedChangesNavigation={shouldBlockUnpersistedChangesNavigation}
-      deleteProfileAutomationUsages={input.deleteProfileAutomationUsages}
-      deleteProfileAutomationUsagesError={input.deleteProfileAutomationUsagesError}
-      deleteProfileAutomationUsagesIsPending={input.deleteProfileAutomationUsagesIsPending}
+      deleteProfileTriggerUsages={input.deleteProfileTriggerUsages}
+      deleteProfileTriggerUsagesError={input.deleteProfileTriggerUsagesError}
+      deleteProfileTriggerUsagesIsPending={input.deleteProfileTriggerUsagesIsPending}
       deleteProfileError={input.deleteProfileError}
       deleteProfileIsPending={input.deleteProfileIsPending}
       onMakeChanges={input.onMakeChanges}
@@ -1719,10 +1718,10 @@ function ReadySandboxProfileEditorPage(input: {
       publishRequestIsPending={publishRequestIsPending}
       saveDraftRequestIsPending={saveDraftRequestIsPending}
       draftSaveError={publishFlushError}
-      draftAutomationImpactError={draftAutomationImpactError}
-      draftAutomationImpactAffectedAutomations={draftAutomationImpactAffectedAutomations}
-      onDraftAutomationImpactErrorDismiss={() => {
-        setDraftAutomationImpactError(null);
+      draftTriggerImpactError={draftTriggerImpactError}
+      draftTriggerImpactAffectedTriggers={draftTriggerImpactAffectedTriggers}
+      onDraftTriggerImpactErrorDismiss={() => {
+        setDraftTriggerImpactError(null);
       }}
       versionActionError={input.versionActionError}
       versionActionIsPending={input.versionActionIsPending}
@@ -2208,8 +2207,8 @@ function SandboxProfileEditorSectionPanels(input: {
   selectedAgentRuntimeId: SandboxProfileVersion["agentRuntimeId"];
   versionActionIsPending: boolean;
 }): React.JSX.Element {
-  if (input.activeSectionId === SandboxProfileEditorSectionIds.AUTOMATIONS) {
-    return <SandboxProfileAutomationsSection profileId={input.profileId} />;
+  if (input.activeSectionId === SandboxProfileEditorSectionIds.TRIGGERS) {
+    return <SandboxProfileTriggersSection profileId={input.profileId} />;
   }
 
   if (input.activeSectionId === SandboxProfileEditorSectionIds.SNAPSHOT) {
@@ -2479,53 +2478,47 @@ const SandboxProfileEditorTabs = [
     label: "Snapshots",
   },
   {
-    id: SandboxProfileEditorSectionIds.AUTOMATIONS,
+    id: SandboxProfileEditorSectionIds.TRIGGERS,
     label: "Triggers",
   },
 ] as const satisfies readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[];
 
 const DraftSaveErrorMessage = "Saving draft failed. Please try again later.";
-const DraftAutomationImpactCheckFailedMessage =
+const DraftTriggerImpactCheckFailedMessage =
   "Couldn't check whether this draft affects related triggers.";
 
-function getDraftAutomationImpactAffectedAutomations(
-  impact: SandboxProfileVersionDraftAutomationImpact,
-): readonly SandboxProfileVersionDraftAutomationImpactAutomation[] | null {
-  if (!impact.hasBreakingChanges || impact.affectedAutomations.length === 0) {
+function getDraftTriggerImpactAffectedTriggers(
+  impact: SandboxProfileVersionDraftTriggerImpact,
+): readonly SandboxProfileVersionDraftTriggerImpactTrigger[] | null {
+  if (!impact.hasBreakingChanges || impact.affectedTriggers.length === 0) {
     return null;
   }
 
-  return impact.affectedAutomations;
+  return impact.affectedTriggers;
 }
 
-function getAutomationDetailPath(
-  automation: SandboxProfileVersionDraftAutomationImpactAutomation,
-): string {
-  if (automation.kind === "schedule") {
-    return `/automations/schedules/${automation.id}`;
-  }
-
-  return `/automations/${automation.id}`;
+function getTriggerDetailPath(trigger: SandboxProfileVersionDraftTriggerImpactTrigger): string {
+  return `/triggers/${trigger.id}`;
 }
 
-function DraftAutomationImpactAutomationList(input: {
-  automations: readonly SandboxProfileVersionDraftAutomationImpactAutomation[];
+function DraftTriggerImpactTriggerList(input: {
+  triggers: readonly SandboxProfileVersionDraftTriggerImpactTrigger[];
 }): ReactNode {
   return (
     <ul className="list-disc space-y-2 pl-5">
-      {input.automations.map((automation) => (
-        <li key={automation.id}>
+      {input.triggers.map((trigger) => (
+        <li key={trigger.id}>
           <TextLink
             className="font-medium text-amber-900 decoration-amber-900/35 hover:text-amber-950 dark:text-amber-100 dark:decoration-amber-100/35 dark:hover:text-amber-50"
-            href={getAutomationDetailPath(automation)}
+            href={getTriggerDetailPath(trigger)}
             opensInNewWindow
           >
-            {automation.name}
+            {trigger.name}
           </TextLink>
           <div className="mt-1 space-y-0.5 text-amber-950/80 dark:text-amber-100/75">
-            {automation.issues.map((issue) => (
-              <div key={`${automation.id}:${issue.code}`}>
-                {formatDraftAutomationImpactIssueMessage(issue)}
+            {trigger.issues.map((issue) => (
+              <div key={`${trigger.id}:${issue.code}`}>
+                {formatDraftTriggerImpactIssueMessage(issue)}
               </div>
             ))}
           </div>
@@ -2535,8 +2528,8 @@ function DraftAutomationImpactAutomationList(input: {
   );
 }
 
-function formatDraftAutomationImpactIssueMessage(
-  issue: SandboxProfileVersionDraftAutomationImpactIssue,
+function formatDraftTriggerImpactIssueMessage(
+  issue: SandboxProfileVersionDraftTriggerImpactIssue,
 ): string {
   switch (issue.code) {
     case "AGENT_BINDING_REQUIRED":
@@ -2563,9 +2556,9 @@ function formatDraftAutomationImpactIssueMessage(
 }
 
 function DeleteSandboxProfileDialog(input: {
-  automationUsages: readonly WebhookAutomationSandboxProfileUsage[];
-  automationUsagesError: string | null;
-  automationUsagesIsPending: boolean;
+  triggerUsages: readonly WebhookTriggerSandboxProfileUsage[];
+  triggerUsagesError: string | null;
+  triggerUsagesIsPending: boolean;
   deleteError: string | null;
   isOpen: boolean;
   isPending: boolean;
@@ -2574,7 +2567,7 @@ function DeleteSandboxProfileDialog(input: {
   profileName: string;
 }): React.JSX.Element {
   const isBlocked =
-    input.isPending || input.automationUsagesIsPending || input.automationUsagesError !== null;
+    input.isPending || input.triggerUsagesIsPending || input.triggerUsagesError !== null;
 
   return (
     <Dialog
@@ -2590,24 +2583,24 @@ function DeleteSandboxProfileDialog(input: {
         </DialogHeader>
 
         <div className="space-y-4">
-          {input.automationUsagesIsPending ? (
+          {input.triggerUsagesIsPending ? (
             <p className="text-muted-foreground text-sm">Loading triggers...</p>
           ) : null}
 
-          {input.automationUsagesError === null ? null : (
+          {input.triggerUsagesError === null ? null : (
             <Notice title="Could not load triggers" variant="alert">
-              {input.automationUsagesError}
+              {input.triggerUsagesError}
             </Notice>
           )}
 
-          {input.automationUsages.length === 0 ||
-          input.automationUsagesIsPending ||
-          input.automationUsagesError !== null ? null : (
+          {input.triggerUsages.length === 0 ||
+          input.triggerUsagesIsPending ||
+          input.triggerUsagesError !== null ? null : (
             <div className="space-y-2">
               <p className="text-sm">These triggers use this profile and will break:</p>
               <ul className="list-disc space-y-1 pl-5 text-sm">
-                {input.automationUsages.map((automation) => (
-                  <li key={automation.id}>{automation.name}</li>
+                {input.triggerUsages.map((trigger) => (
+                  <li key={trigger.id}>{trigger.name}</li>
                 ))}
               </ul>
               <p className="text-sm">They will stop working until you delete or retarget them.</p>
@@ -2646,19 +2639,19 @@ export function SandboxProfileEditorView(input: {
   profileNameFallback: string;
   onSaveProfileName: (nextValue: string) => Promise<void>;
   mode: SandboxProfileEditorVersionMode;
-  deleteProfileAutomationUsages: readonly WebhookAutomationSandboxProfileUsage[];
-  deleteProfileAutomationUsagesError: string | null;
-  deleteProfileAutomationUsagesIsPending: boolean;
+  deleteProfileTriggerUsages: readonly WebhookTriggerSandboxProfileUsage[];
+  deleteProfileTriggerUsagesError: string | null;
+  deleteProfileTriggerUsagesIsPending: boolean;
   deleteProfileError: string | null;
   deleteProfileIsPending: boolean;
   draftSaveError?: string | null;
   versionActionError: string | null;
   versionActionIsPending: boolean;
-  draftAutomationImpactAffectedAutomations:
-    | readonly SandboxProfileVersionDraftAutomationImpactAutomation[]
+  draftTriggerImpactAffectedTriggers:
+    | readonly SandboxProfileVersionDraftTriggerImpactTrigger[]
     | null;
-  draftAutomationImpactError: string | null;
-  onDraftAutomationImpactErrorDismiss: () => void;
+  draftTriggerImpactError: string | null;
+  onDraftTriggerImpactErrorDismiss: () => void;
   publishRequestIsPending?: boolean;
   saveDraftRequestIsPending?: boolean;
   isDeleteProfileDialogOpen: boolean;
@@ -2716,9 +2709,9 @@ export function SandboxProfileEditorView(input: {
       />
 
       <DeleteSandboxProfileDialog
-        automationUsages={input.deleteProfileAutomationUsages}
-        automationUsagesError={input.deleteProfileAutomationUsagesError}
-        automationUsagesIsPending={input.deleteProfileAutomationUsagesIsPending}
+        triggerUsages={input.deleteProfileTriggerUsages}
+        triggerUsagesError={input.deleteProfileTriggerUsagesError}
+        triggerUsagesIsPending={input.deleteProfileTriggerUsagesIsPending}
         deleteError={input.deleteProfileError}
         isOpen={input.isDeleteProfileDialogOpen}
         isPending={input.deleteProfileIsPending}
@@ -2776,25 +2769,25 @@ export function SandboxProfileEditorView(input: {
                 {input.draftSaveError === undefined || input.draftSaveError === null ? null : (
                   <Notice variant="alert">{input.draftSaveError}</Notice>
                 )}
-                {input.draftAutomationImpactAffectedAutomations === null ? null : (
+                {input.draftTriggerImpactAffectedTriggers === null ? null : (
                   <Notice
                     title="Publishing this draft will break the following triggers"
                     variant="warning"
                   >
-                    <DraftAutomationImpactAutomationList
-                      automations={input.draftAutomationImpactAffectedAutomations}
+                    <DraftTriggerImpactTriggerList
+                      triggers={input.draftTriggerImpactAffectedTriggers}
                     />
                   </Notice>
                 )}
-                {input.draftAutomationImpactError === null ? null : (
+                {input.draftTriggerImpactError === null ? null : (
                   <Notice
                     autoHideAfterMs={NoticeAutoHideDurationsMs.LONG}
                     dismissible
-                    onDismiss={input.onDraftAutomationImpactErrorDismiss}
+                    onDismiss={input.onDraftTriggerImpactErrorDismiss}
                     title="Trigger checks failed"
                     variant="alert"
                   >
-                    {input.draftAutomationImpactError}
+                    {input.draftTriggerImpactError}
                   </Notice>
                 )}
                 {input.renderSectionPanel(sectionId)}

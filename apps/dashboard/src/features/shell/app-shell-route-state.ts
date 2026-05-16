@@ -2,7 +2,6 @@ import { isSettingsPath } from "../settings/model.js";
 import { isExistingSandboxSessionPath, isSessionsPath } from "./app-shell-sessions-sidebar-mode.js";
 
 export function resolveAppShellRouteState(pathname: string): {
-  inAutomations: boolean;
   inDashboardRoot: boolean;
   inIntegrations: boolean;
   inSandboxProfiles: boolean;
@@ -11,7 +10,6 @@ export function resolveAppShellRouteState(pathname: string): {
   inSettings: boolean;
 } {
   return {
-    inAutomations: pathname === "/automations" || pathname.startsWith("/automations/"),
     inDashboardRoot: pathname === "/",
     inIntegrations: pathname === "/integrations" || pathname.startsWith("/integrations/"),
     inSandboxProfiles:

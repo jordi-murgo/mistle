@@ -142,8 +142,8 @@ describe("app routing breadcrumb integration", () => {
           </Route>
           <Route
             element={<PageHarness />}
-            handle={ROUTE_HANDLES.sandboxProfileAutomations}
-            path="automations"
+            handle={ROUTE_HANDLES.sandboxProfileTriggers}
+            path="triggers"
           />
           <Route
             element={<PageHarness />}
@@ -155,21 +155,12 @@ describe("app routing breadcrumb integration", () => {
     </Route>,
   );
 
-  const automationRoutes = createRoutesFromElements(
+  const triggerRoutes = createRoutesFromElements(
     <Route element={<Outlet />} path="/">
-      <Route element={<Outlet />} handle={ROUTE_HANDLES.automations} path="automations">
+      <Route element={<Outlet />} handle={ROUTE_HANDLES.triggers} path="triggers">
         <Route element={<PageHarness />} index />
-        <Route element={<PageHarness />} handle={ROUTE_HANDLES.automationsNew} path="new" />
-        <Route
-          element={<PageHarness />}
-          handle={ROUTE_HANDLES.scheduledAutomationsDetail}
-          path="schedules/:automationId"
-        />
-        <Route
-          element={<PageHarness />}
-          handle={ROUTE_HANDLES.automationsDetail}
-          path=":automationId"
-        />
+        <Route element={<PageHarness />} handle={ROUTE_HANDLES.triggersNew} path="new" />
+        <Route element={<PageHarness />} handle={ROUTE_HANDLES.triggersDetail} path=":triggerId" />
       </Route>
     </Route>,
   );
@@ -360,7 +351,7 @@ describe("app routing breadcrumb integration", () => {
       failureCode: null,
       failureMessage: null,
       runtimeContext: null,
-      automationConversation: null,
+      triggerConversation: null,
       startupOperation: null,
     });
     const router = createMemoryRouter(dashboardRoutes, {
@@ -390,7 +381,7 @@ describe("app routing breadcrumb integration", () => {
       failureCode: null,
       failureMessage: null,
       runtimeContext: null,
-      automationConversation: null,
+      triggerConversation: null,
       startupOperation: null,
     });
     const router = createMemoryRouter(dashboardRoutes, {
@@ -429,9 +420,9 @@ describe("app routing breadcrumb integration", () => {
     expect(markup).toContain('data-slot="meta-title">Session');
   });
 
-  it("renders automations breadcrumbs for create and detail routes", async () => {
-    const router = createMemoryRouter(automationRoutes, {
-      initialEntries: ["/automations"],
+  it("renders triggers breadcrumbs for create and detail routes", async () => {
+    const router = createMemoryRouter(triggerRoutes, {
+      initialEntries: ["/triggers"],
     });
     let markup = renderRoutingMarkup(router);
 
@@ -439,18 +430,18 @@ describe("app routing breadcrumb integration", () => {
     expectMarkupToContainMetaTitle(markup, "Triggers");
     expectMarkupToContainMetaDescription(markup, "Manage triggers.");
 
-    await router.navigate("/automations/new");
+    await router.navigate("/triggers/new");
     markup = renderRoutingMarkup(router);
 
-    expectMarkupToContainHref(markup, "/automations");
+    expectMarkupToContainHref(markup, "/triggers");
     expectMarkupToContainCurrentPageLabel(markup, "Create");
     expectMarkupToContainMetaTitle(markup, "Create trigger");
     expect(markup).not.toContain("Create a webhook trigger.");
 
-    await router.navigate("/automations/aut_123");
+    await router.navigate("/triggers/aut_123");
     markup = renderRoutingMarkup(router);
 
-    expectMarkupToContainHref(markup, "/automations");
+    expectMarkupToContainHref(markup, "/triggers");
     expectMarkupToContainCurrentPageLabel(markup, "Edit");
     expect(markup).not.toContain("aut_123");
     expectMarkupToContainEmptyMetaTitle(markup);
@@ -458,8 +449,8 @@ describe("app routing breadcrumb integration", () => {
   });
 
   it("does not render supporting description text for create trigger", () => {
-    const router = createMemoryRouter(automationRoutes, {
-      initialEntries: ["/automations/new"],
+    const router = createMemoryRouter(triggerRoutes, {
+      initialEntries: ["/triggers/new"],
     });
     const markup = renderRoutingMarkup(router);
 

@@ -7,7 +7,7 @@ import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } f
 import type { ChatEntry } from "../chat/chat-types.js";
 import { ChatComposer } from "../chat/components/chat-composer.js";
 import { noopRespondToServerRequest } from "../chat/components/chat-story-support.js";
-import type { SandboxProfileVersionDraftAutomationImpactAutomation } from "../sandbox-profiles/sandbox-profiles-types.js";
+import type { SandboxProfileVersionDraftTriggerImpactTrigger } from "../sandbox-profiles/sandbox-profiles-types.js";
 import type {
   SandboxProviderSummary,
   SandboxProfileVersion,
@@ -107,8 +107,8 @@ export type SandboxProfileEditorPageStoryArgs = {
     kind: "error";
   };
   draftSaveErrorMessage?: string;
-  draftAutomationImpactError?: string;
-  draftAutomationImpactAffectedAutomations?: readonly SandboxProfileVersionDraftAutomationImpactAutomation[];
+  draftTriggerImpactError?: string;
+  draftTriggerImpactAffectedTriggers?: readonly SandboxProfileVersionDraftTriggerImpactTrigger[];
   initialBindings?: readonly {
     id: string;
     connectionId: string;
@@ -127,7 +127,7 @@ export type SandboxProfileEditorPageStoryArgs = {
 type IntegrationsSectionState = NonNullable<
   SandboxProfileEditorPageStoryArgs["integrationsSectionState"]
 >;
-type StorySectionId = "sandbox-profile" | "automations" | "snapshot";
+type StorySectionId = "sandbox-profile" | "triggers" | "snapshot";
 
 const StorySections = [
   {
@@ -139,7 +139,7 @@ const StorySections = [
     label: "Snapshots",
   },
   {
-    id: "automations",
+    id: "triggers",
     label: "Triggers",
   },
 ] as const satisfies readonly SandboxProfileEditorSection<StorySectionId>[];
@@ -802,16 +802,14 @@ function SandboxProfileEditorPageStoryView(
   const editorView = (
     <SandboxProfileEditorView
       activeSectionId={activeSectionId}
-      deleteProfileAutomationUsages={[]}
-      deleteProfileAutomationUsagesError={null}
-      deleteProfileAutomationUsagesIsPending={false}
+      deleteProfileTriggerUsages={[]}
+      deleteProfileTriggerUsagesError={null}
+      deleteProfileTriggerUsagesIsPending={false}
       deleteProfileError={null}
       deleteProfileIsPending={false}
-      draftAutomationImpactError={input.draftAutomationImpactError ?? null}
-      draftAutomationImpactAffectedAutomations={
-        input.draftAutomationImpactAffectedAutomations ?? null
-      }
-      onDraftAutomationImpactErrorDismiss={() => {}}
+      draftTriggerImpactError={input.draftTriggerImpactError ?? null}
+      draftTriggerImpactAffectedTriggers={input.draftTriggerImpactAffectedTriggers ?? null}
+      onDraftTriggerImpactErrorDismiss={() => {}}
       hasUnpersistedSetupScriptChanges={setupScriptDraft !== persistedSetupScript}
       isDeleteProfileDialogOpen={false}
       mode={mode}
@@ -974,7 +972,7 @@ function SandboxProfileEditorPageStoryView(
           );
         }
 
-        if (sectionId === "automations") {
+        if (sectionId === "triggers") {
           return (
             <div className="flex min-h-64 items-center justify-center rounded-md border bg-background p-6 text-center text-sm text-muted-foreground">
               No triggers use this sandbox profile.
