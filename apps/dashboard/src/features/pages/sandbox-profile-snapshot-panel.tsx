@@ -1,4 +1,5 @@
 import {
+  BrailleSpinner,
   Button,
   ButtonGroup,
   DefinitionList,
@@ -11,6 +12,7 @@ import {
   NoticeAutoHideDurationsMs,
   Switch,
 } from "@mistle/ui";
+import { CaretDownIcon } from "@phosphor-icons/react";
 import { useMutation } from "@tanstack/react-query";
 import {
   useEffect,
@@ -30,8 +32,6 @@ import {
   putSandboxProfileVersionRefreshSchedule,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
 import type { SandboxProfileVersion } from "../sandbox-profiles/sandbox-profiles-types.js";
-import { ActionTile } from "../shared/action-tile.js";
-import { ActivityStatus } from "../shared/activity-status.js";
 import { formatDateTime, formatTimeZoneOffset } from "../shared/date-formatters.js";
 import { FormPageSection } from "../shared/form-page.js";
 import { SandboxOperationProgress } from "./sandbox-operation-progress.js";
@@ -69,19 +69,24 @@ export type SnapshotPanelState =
     }
   | {
       kind: "publish-snapshot-error";
+      operationId: string | null;
       publishedVersion: number;
       runnableVersion: number | null;
+      sandboxInstanceId: string | null;
     }
   | {
       kind: "refresh-error";
       latestSnapshotCreatedAt: string | null;
       message: string;
+      operationId: string | null;
+      sandboxInstanceId: string | null;
     };
 
 type SnapshotStatusState = Extract<
   SnapshotPanelState,
   { kind: "creating" | "publish-snapshot-error" | "ready" | "refresh-error" }
 >;
+type SnapshotActionState = Exclude<SnapshotStatusState, { kind: "creating" }>;
 
 type SnapshotOperationProgressState = {
   operationId: string;
@@ -129,8 +134,10 @@ export function resolveSnapshotPanelState(
     if (!version.usable) {
       return {
         kind: "publish-snapshot-error",
+        operationId: latestSnapshotJob.id,
         publishedVersion: version.version,
         runnableVersion: activeVersion,
+        sandboxInstanceId: latestSnapshotJob.sandboxInstanceId,
       };
     }
 
@@ -139,14 +146,18 @@ export function resolveSnapshotPanelState(
       kind: "refresh-error",
       latestSnapshotCreatedAt: null,
       message,
+      operationId: latestSnapshotJob.id,
+      sandboxInstanceId: latestSnapshotJob.sandboxInstanceId,
     };
   }
 
   if (!version.usable) {
     return {
       kind: "publish-snapshot-error",
+      operationId: null,
       publishedVersion: version.version,
       runnableVersion: activeVersion,
+      sandboxInstanceId: null,
     };
   }
 
@@ -230,7 +241,22 @@ export function SandboxProfileSnapshotPanelView(input: {
   state: SnapshotPanelState;
   version: number | null;
 }): React.JSX.Element {
-  const retainedCreatingState = useRetainedCreatingSnapshotState(input.state);
+  const operationProgressState = useRetainedSnapshotOperationState(input.state);
+  const shouldDefaultDetailsExpanded =
+    operationProgressState !== null &&
+    (input.state.kind === "creating" ||
+      input.state.kind === "publish-snapshot-error" ||
+      input.state.kind === "refresh-error");
+  const [detailsExpanded, setDetailsExpanded] = useState(() => shouldDefaultDetailsExpanded);
+
+  useEffect(() => {
+    setDetailsExpanded(shouldDefaultDetailsExpanded);
+  }, [
+    shouldDefaultDetailsExpanded,
+    input.state.kind,
+    operationProgressState?.operationId,
+    operationProgressState?.sandboxInstanceId,
+  ]);
 
   if (input.state.kind === "draft-unavailable" || input.version === null) {
     return (
@@ -269,37 +295,18 @@ export function SandboxProfileSnapshotPanelView(input: {
         </Notice>
       ) : null}
 
-      <ActionTile
-        action={
-          <SnapshotStatusAction
-            canRunMaintenanceRefresh={input.canRunMaintenanceRefresh}
-            isActionPending={input.isActionPending}
-            onMaintenanceRefreshSnapshot={input.onMaintenanceRefreshSnapshot}
-            onRefreshSnapshot={input.onRefreshSnapshot}
-            onRetryPublishSnapshot={input.onRetryPublishSnapshot}
-            state={input.state}
-          />
-        }
-        actionContainerClassName="justify-start sm:min-w-48 sm:justify-end"
-        className="rounded bg-card py-4"
-        contentClassName="flex-1"
-        description={resolveSnapshotStatusSummaryDescription(input.state)}
-        padding="comfortable"
-        title={resolveSnapshotStatusTitle({
-          state: input.state,
-          version: input.version,
-        })}
+      <SnapshotStatusPanel
+        canRunMaintenanceRefresh={input.canRunMaintenanceRefresh}
+        detailsExpanded={detailsExpanded}
+        isActionPending={input.isActionPending}
+        onDetailsExpandedChange={setDetailsExpanded}
+        onMaintenanceRefreshSnapshot={input.onMaintenanceRefreshSnapshot}
+        onRefreshSnapshot={input.onRefreshSnapshot}
+        onRetryPublishSnapshot={input.onRetryPublishSnapshot}
+        operationProgressState={operationProgressState}
+        state={input.state}
+        version={input.version}
       />
-
-      {retainedCreatingState === null ? null : (
-        <SandboxOperationProgress
-          emptyMessage="Waiting for snapshot materialization events."
-          operationId={retainedCreatingState.operationId}
-          sandboxInstanceId={retainedCreatingState.sandboxInstanceId}
-          showLoadError={false}
-          title="Snapshot creation progress"
-        />
-      )}
 
       {input.maintenanceScriptSection}
 
@@ -308,7 +315,100 @@ export function SandboxProfileSnapshotPanelView(input: {
   );
 }
 
-function useRetainedCreatingSnapshotState(
+function SnapshotStatusPanel(input: {
+  canRunMaintenanceRefresh: boolean;
+  detailsExpanded: boolean;
+  isActionPending: boolean;
+  onDetailsExpandedChange: (expanded: boolean) => void;
+  onMaintenanceRefreshSnapshot: () => void;
+  onRefreshSnapshot: () => void;
+  onRetryPublishSnapshot: () => void;
+  operationProgressState: SnapshotOperationProgressState | null;
+  state: SnapshotStatusState;
+  version: number;
+}): React.JSX.Element {
+  const operationProgressState = input.operationProgressState;
+  const hasDetails = operationProgressState !== null;
+
+  return (
+    <section className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium">
+            {resolveSnapshotStatusTitle({
+              state: input.state,
+              version: input.version,
+            })}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {resolveSnapshotStatusSummaryDescription(input.state)}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+          {input.state.kind === "creating" ? (
+            <span
+              aria-label="Creating snapshot"
+              aria-live="polite"
+              className="sr-only"
+              role="status"
+            >
+              Creating snapshot
+            </span>
+          ) : null}
+          {hasDetails ? (
+            <button
+              aria-expanded={input.detailsExpanded}
+              className="focus-visible:border-ring focus-visible:ring-ring/50 inline-flex h-9 w-fit shrink-0 items-center gap-2 rounded-md px-2.5 text-sm font-medium text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-[3px]"
+              onClick={() => {
+                input.onDetailsExpandedChange(!input.detailsExpanded);
+              }}
+              type="button"
+            >
+              {input.state.kind === "creating" ? (
+                <>
+                  <BrailleSpinner className="text-muted-foreground" />
+                  <span>Creating snapshot</span>
+                </>
+              ) : (
+                "Snapshot creation details"
+              )}
+              <CaretDownIcon
+                aria-hidden
+                className={`size-4 transition-transform ${
+                  input.detailsExpanded ? "" : "-rotate-90"
+                }`}
+              />
+            </button>
+          ) : null}
+          {input.state.kind === "creating" ? null : (
+            <SnapshotStatusAction
+              canRunMaintenanceRefresh={input.canRunMaintenanceRefresh}
+              isActionPending={input.isActionPending}
+              onMaintenanceRefreshSnapshot={input.onMaintenanceRefreshSnapshot}
+              onRefreshSnapshot={input.onRefreshSnapshot}
+              onRetryPublishSnapshot={input.onRetryPublishSnapshot}
+              state={input.state}
+            />
+          )}
+        </div>
+      </div>
+
+      {operationProgressState !== null && input.detailsExpanded ? (
+        <div className="border-t border-border bg-background/60">
+          <SandboxOperationProgress
+            emptyMessage="Waiting for snapshot creation events."
+            operationId={operationProgressState.operationId}
+            sandboxInstanceId={operationProgressState.sandboxInstanceId}
+            showBorder={false}
+            showLoadError={false}
+          />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function useRetainedSnapshotOperationState(
   state: SnapshotPanelState,
 ): SnapshotOperationProgressState | null {
   const [retainedState, setRetainedState] = useState<SnapshotOperationProgressState | null>(
@@ -348,6 +448,16 @@ export function resolveRetainedSnapshotOperationState(input: {
     };
   }
 
+  if (
+    (input.state.kind === "publish-snapshot-error" || input.state.kind === "refresh-error") &&
+    input.state.operationId !== null
+  ) {
+    return {
+      operationId: input.state.operationId,
+      sandboxInstanceId: input.state.sandboxInstanceId,
+    };
+  }
+
   return input.retainedState;
 }
 
@@ -357,19 +467,8 @@ function SnapshotStatusAction(input: {
   onMaintenanceRefreshSnapshot: () => void;
   onRefreshSnapshot: () => void;
   onRetryPublishSnapshot: () => void;
-  state: SnapshotStatusState;
+  state: SnapshotActionState;
 }): React.JSX.Element {
-  if (input.state.kind === "creating") {
-    return (
-      <ActivityStatus
-        className="shrink-0 justify-start text-muted-foreground sm:justify-end"
-        label="Creating snapshot"
-        labelClassName="min-w-0 text-right"
-        labelKey={input.state.kind}
-      />
-    );
-  }
-
   if (input.state.kind === "publish-snapshot-error") {
     return (
       <Button

@@ -13,6 +13,7 @@ import type {
   SandboxProfileVersion,
 } from "../sandbox-profiles/sandbox-profiles-types.js";
 import { SessionComposerFixtureProps } from "../session-agents/codex/fixtures/session-fixtures.js";
+import { sandboxOperationEventsQueryKey } from "../sessions/sessions-query-keys.js";
 import type { SandboxOperationEvent } from "../sessions/sessions-types.js";
 import {
   createIntegrationsEditorSectionStoryQueryClient,
@@ -94,6 +95,7 @@ export type SandboxProfileEditorPageStoryArgs = {
     | "draft-unavailable"
     | "snapshot-unavailable-no-previous"
     | "creating-first-snapshot"
+    | "creating-snapshot-with-events"
     | "creating-snapshot"
     | "snapshot-ready"
     | "snapshot-failed"
@@ -141,6 +143,11 @@ const StorySections = [
     label: "Triggers",
   },
 ] as const satisfies readonly SandboxProfileEditorSection<StorySectionId>[];
+
+const StorySetupAssistantOperationId = "owfr_story_setup_assistant";
+const StorySetupAssistantSandboxInstanceId = "sbi_story_setup_assistant";
+const StorySnapshotOperationId = "ssj_story_creating_snapshot";
+const StorySnapshotSandboxInstanceId = "sbi_story_creating_snapshot";
 
 export const StoryBindings = [
   {
@@ -305,18 +312,20 @@ function createSnapshotPanelState(status: SnapshotStoryStatus): SnapshotPanelSta
   if (status === "snapshot-unavailable-no-previous") {
     return {
       kind: "publish-snapshot-error",
+      operationId: null,
       publishedVersion: 1,
       runnableVersion: null,
+      sandboxInstanceId: null,
     };
   }
 
-  if (status === "creating-snapshot") {
+  if (status === "creating-snapshot" || status === "creating-snapshot-with-events") {
     return {
       kind: "creating",
-      operationId: "ssj_story_creating_snapshot",
+      operationId: StorySnapshotOperationId,
       publishedVersion: 4,
       runnableVersion: 3,
-      sandboxInstanceId: "sbi_story_creating_snapshot",
+      sandboxInstanceId: StorySnapshotSandboxInstanceId,
     };
   }
 
@@ -333,8 +342,10 @@ function createSnapshotPanelState(status: SnapshotStoryStatus): SnapshotPanelSta
   if (status === "snapshot-failed") {
     return {
       kind: "publish-snapshot-error",
+      operationId: "ssj_story_failed_snapshot",
       publishedVersion: 4,
       runnableVersion: 3,
+      sandboxInstanceId: "sbi_story_failed_snapshot",
     };
   }
 
@@ -343,6 +354,8 @@ function createSnapshotPanelState(status: SnapshotStoryStatus): SnapshotPanelSta
       kind: "refresh-error",
       latestSnapshotCreatedAt: "Apr 27, 2026, 10:21 AM",
       message: "Snapshot materialization failed.",
+      operationId: "ssj_story_failed_refresh",
+      sandboxInstanceId: "sbi_story_failed_refresh",
     };
   }
 
@@ -569,28 +582,84 @@ function SetupAssistantPanel(input: {
 }
 
 const SetupAssistantStartupOperationEvents = [
-  setupAssistantStartupLifecycleEvent({
+  sandboxOperationLifecycleEvent({
     id: "soe_setup_assistant_provider_started",
     message: "Starting setup assistant sandbox.",
+    operationId: StorySetupAssistantOperationId,
+    operationKind: "start",
     phase: "provider",
+    sandboxInstanceId: StorySetupAssistantSandboxInstanceId,
     sequence: 1,
     source: "worker",
     status: "started",
   }),
-  setupAssistantStartupLifecycleEvent({
+  sandboxOperationLifecycleEvent({
     id: "soe_setup_assistant_sandboxd_started",
     message: "Starting sandbox daemon.",
+    operationId: StorySetupAssistantOperationId,
+    operationKind: "start",
     phase: "sandboxd",
+    sandboxInstanceId: StorySetupAssistantSandboxInstanceId,
     sequence: 2,
     source: "worker",
     status: "started",
   }),
 ] satisfies readonly SandboxOperationEvent[];
 
-function setupAssistantStartupLifecycleEvent(input: {
+const SnapshotCreationOperationEvents = [
+  sandboxOperationLifecycleEvent({
+    id: "soe_story_snapshot_provider_started",
+    message: "Starting snapshot sandbox.",
+    operationId: StorySnapshotOperationId,
+    operationKind: "snapshot",
+    phase: "provider",
+    sandboxInstanceId: StorySnapshotSandboxInstanceId,
+    sequence: 1,
+    source: "worker",
+    status: "started",
+  }),
+  sandboxOperationLifecycleEvent({
+    id: "soe_story_snapshot_provider_completed",
+    message: "Snapshot sandbox started.",
+    operationId: StorySnapshotOperationId,
+    operationKind: "snapshot",
+    phase: "provider",
+    sandboxInstanceId: StorySnapshotSandboxInstanceId,
+    sequence: 2,
+    source: "worker",
+    status: "completed",
+  }),
+  sandboxOperationLifecycleEvent({
+    id: "soe_story_snapshot_sandboxd_started",
+    message: "Starting sandbox daemon.",
+    operationId: StorySnapshotOperationId,
+    operationKind: "snapshot",
+    phase: "sandboxd",
+    sandboxInstanceId: StorySnapshotSandboxInstanceId,
+    sequence: 3,
+    source: "worker",
+    status: "started",
+  }),
+  sandboxOperationLifecycleEvent({
+    id: "soe_story_snapshot_runtime_plan_started",
+    message: "Applying runtime plan.",
+    operationId: StorySnapshotOperationId,
+    operationKind: "snapshot",
+    phase: "runtime_plan",
+    sandboxInstanceId: StorySnapshotSandboxInstanceId,
+    sequence: 4,
+    source: "sandboxd",
+    status: "started",
+  }),
+] satisfies readonly SandboxOperationEvent[];
+
+function sandboxOperationLifecycleEvent(input: {
   id: string;
   message: string;
+  operationId: string;
+  operationKind: SandboxOperationEvent["operationKind"];
   phase: NonNullable<SandboxOperationEvent["phase"]>;
+  sandboxInstanceId: string;
   sequence: number;
   source: SandboxOperationEvent["source"];
   status: NonNullable<SandboxOperationEvent["status"]>;
@@ -601,12 +670,12 @@ function setupAssistantStartupLifecycleEvent(input: {
     id: input.id,
     message: input.message,
     observedAt: "2026-05-13T10:00:00.000Z",
-    operationId: "owfr_story_setup_assistant",
-    operationKind: "start",
+    operationId: input.operationId,
+    operationKind: input.operationKind,
     payloadBase64: null,
     phase: input.phase,
     recordKind: "lifecycle",
-    sandboxInstanceId: "sbi_story_setup_assistant",
+    sandboxInstanceId: input.sandboxInstanceId,
     sequence: input.sequence,
     source: input.source,
     status: input.status,
@@ -644,6 +713,18 @@ function SandboxProfileEditorPageStoryView(
       queryClient: client,
       resources: StoryGithubResources,
     });
+    if (input.snapshotState === "creating-snapshot-with-events") {
+      client.setQueryData(
+        sandboxOperationEventsQueryKey({
+          afterSequence: null,
+          operationId: StorySnapshotOperationId,
+          sandboxInstanceId: StorySnapshotSandboxInstanceId,
+        }),
+        {
+          events: SnapshotCreationOperationEvents,
+        },
+      );
+    }
     return client;
   });
   const [profileName, setProfileName] = useState(input.displayName);
