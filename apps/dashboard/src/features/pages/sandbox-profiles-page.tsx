@@ -20,6 +20,7 @@ import {
   TableRow,
   textLinkVariants,
 } from "@mistle/ui";
+import { PlusIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SyntheticEvent } from "react";
 import { useState } from "react";
@@ -32,6 +33,7 @@ import {
   createSandboxProfile,
   listSandboxProfiles,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
+import { CollectionEmptyState } from "../shared/collection-empty-state.js";
 import { PageFrame } from "../shared/page-frame.js";
 import { readKeysetPaginationCursors } from "../shared/pagination-search-params.js";
 import { TableListingFooter } from "../shared/table-listing-footer.js";
@@ -196,6 +198,7 @@ export function SandboxProfilesPage(): React.JSX.Element {
 
   const items = listQuery.data?.items ?? [];
   const isCreateProfileInvalid = createProfileDisplayName.trim().length === 0;
+  const hasNoProfiles = listQuery.data?.totalResults === 0;
 
   return (
     <PageFrame
@@ -278,78 +281,91 @@ export function SandboxProfilesPage(): React.JSX.Element {
       ) : null}
 
       {!listQuery.isPending && !listQuery.isError ? (
-        <>
-          <Table className="min-w-[40rem]">
-            <TableHeader className="bg-muted/60">
-              <TableRow className="h-9 border-b">
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
-                  Name
-                </TableHead>
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
-                  Status
-                </TableHead>
-                <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
-                  Updated
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((profile) => (
-                <TableRow key={profile.id}>
-                  <TableCell className="whitespace-normal">
-                    <button
-                      className={textLinkVariants({
-                        variant: "listItem",
-                        className: "text-left break-words",
-                      })}
-                      onClick={() => {
-                        navigateToProfileDetail(profile.id);
-                      }}
-                      type="button"
-                    >
-                      {profile.displayName}
-                    </button>
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    <Badge
-                      className={
-                        profile.activeVersion === null
-                          ? undefined
-                          : "border-blue-200 bg-blue-50 text-blue-700"
-                      }
-                      variant={profile.activeVersion === null ? "outline" : "secondary"}
-                    >
-                      {formatSandboxProfilePublicationStatus(profile.activeVersion)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
-                    {formatSandboxProfileUpdatedAt(profile.updatedAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          <TableListingFooter
-            resultsCount={
-              <p className="text-muted-foreground text-sm">
-                Showing {items.length} of {listQuery.data.totalResults}
-              </p>
+        hasNoProfiles ? (
+          <CollectionEmptyState
+            action={
+              <Button onClick={openCreateDialog} type="button">
+                <PlusIcon aria-hidden className="size-4" />
+                Create profile
+              </Button>
             }
-            pagination={
-              listQuery.data.nextPage === null && listQuery.data.previousPage === null ? null : (
-                <TablePagination
-                  hasNextPage={listQuery.data.nextPage !== null}
-                  hasPreviousPage={listQuery.data.previousPage !== null}
-                  nextPageDisabled={listQuery.isFetching || listQuery.isPending}
-                  onNextPage={goToNextPage}
-                  onPreviousPage={goToPreviousPage}
-                  previousPageDisabled={listQuery.isFetching || listQuery.isPending}
-                />
-              )
-            }
+            description="Sandbox profiles define the environment agents use when starting sessions or running triggers."
+            title="Create your first sandbox profile"
           />
-        </>
+        ) : (
+          <>
+            <Table className="min-w-[40rem]">
+              <TableHeader className="bg-muted/60">
+                <TableRow className="h-9 border-b">
+                  <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase">
+                    Name
+                  </TableHead>
+                  <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
+                    Status
+                  </TableHead>
+                  <TableHead className="text-foreground py-2 text-xs font-semibold tracking-wide uppercase whitespace-nowrap">
+                    Updated
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((profile) => (
+                  <TableRow key={profile.id}>
+                    <TableCell className="whitespace-normal">
+                      <button
+                        className={textLinkVariants({
+                          variant: "listItem",
+                          className: "text-left break-words",
+                        })}
+                        onClick={() => {
+                          navigateToProfileDetail(profile.id);
+                        }}
+                        type="button"
+                      >
+                        {profile.displayName}
+                      </button>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <Badge
+                        className={
+                          profile.activeVersion === null
+                            ? undefined
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                        }
+                        variant={profile.activeVersion === null ? "outline" : "secondary"}
+                      >
+                        {formatSandboxProfilePublicationStatus(profile.activeVersion)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                      {formatSandboxProfileUpdatedAt(profile.updatedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            <TableListingFooter
+              resultsCount={
+                <p className="text-muted-foreground text-sm">
+                  Showing {items.length} of {listQuery.data.totalResults}
+                </p>
+              }
+              pagination={
+                listQuery.data.nextPage === null && listQuery.data.previousPage === null ? null : (
+                  <TablePagination
+                    hasNextPage={listQuery.data.nextPage !== null}
+                    hasPreviousPage={listQuery.data.previousPage !== null}
+                    nextPageDisabled={listQuery.isFetching || listQuery.isPending}
+                    onNextPage={goToNextPage}
+                    onPreviousPage={goToPreviousPage}
+                    previousPageDisabled={listQuery.isFetching || listQuery.isPending}
+                  />
+                )
+              }
+            />
+          </>
+        )
       ) : null}
     </PageFrame>
   );
