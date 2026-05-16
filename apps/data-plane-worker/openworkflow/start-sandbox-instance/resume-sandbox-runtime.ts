@@ -8,31 +8,23 @@ import { createSandboxStartupInput } from "./initialize-sandbox-runtime.js";
 import {
   SandboxStartupModes,
   type SandboxStartupInput,
-  type SandboxStartupMode,
   encodeSandboxStartupInput,
 } from "./sandbox-startup-input.js";
 import { createSandboxRuntimeEnv } from "./start-sandbox.js";
 
-function assertUnreachable(_value: never): never {
-  throw new Error("Unsupported sandbox provider for resume startup mode resolution.");
+export function isSandboxdAlreadyInitializedForResume(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("sandboxd has already completed initialization")
+  );
 }
 
-export function resolveResumeStartupMode(input: {
-  runtimeProvider: SandboxProvider;
-}): SandboxStartupMode {
-  if (input.runtimeProvider === SandboxProvider.DOCKER) {
-    return SandboxStartupModes.NEW;
-  }
-
-  if (input.runtimeProvider === SandboxProvider.E2B) {
-    return SandboxStartupModes.EXISTING;
-  }
-
-  if (input.runtimeProvider === SandboxProvider.TENSORLAKE) {
-    return SandboxStartupModes.EXISTING;
-  }
-
-  return assertUnreachable(input.runtimeProvider);
+export function isSandboxdInitializationAlreadyInProgressForResume(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.includes("sandboxd is already initializing") ||
+      error.message.includes("sandboxd init worker is already running"))
+  );
 }
 
 export async function resumeSandboxRuntime(
@@ -98,9 +90,7 @@ export async function resumeSandboxRuntime(
     operationId: input.operationId,
     operationKind: input.operationKind,
     sandboxInstanceId: input.sandboxInstanceId,
-    startupMode: resolveResumeStartupMode({
-      runtimeProvider: input.runtimeProvider,
-    }),
+    startupMode: SandboxStartupModes.EXISTING,
     runtimePlan: input.runtimePlan,
     ...(input.actingUserId === undefined ? {} : { actingUserId: input.actingUserId }),
     ...(input.gitIdentity === undefined ? {} : { gitIdentity: input.gitIdentity }),
@@ -108,9 +98,57 @@ export async function resumeSandboxRuntime(
     processEnv: ctx.processEnv,
   });
 
-  await ctx.sandboxRuntimeControl.resume({
+  const runtimeControlRequest = {
     id: input.providerSandboxId,
     payload: encodeSandboxStartupInput(startupInput),
     env: runtimeEnv,
-  });
+  };
+
+  try {
+    await ctx.sandboxRuntimeControl.beginInit(runtimeControlRequest);
+    ctx.logger.info(
+      {
+        providerSandboxId: input.providerSandboxId,
+        runtimeProvider: input.runtimeProvider,
+        sandboxInstanceId: input.sandboxInstanceId,
+      },
+      "Submitted sandboxd initialization for resumed provider runtime.",
+    );
+    await ctx.sandboxRuntimeControl.waitInit({
+      id: input.providerSandboxId,
+      env: runtimeEnv,
+    });
+    return;
+  } catch (error) {
+    if (isSandboxdInitializationAlreadyInProgressForResume(error)) {
+      ctx.logger.info(
+        {
+          providerSandboxId: input.providerSandboxId,
+          runtimeProvider: input.runtimeProvider,
+          sandboxInstanceId: input.sandboxInstanceId,
+        },
+        "Sandboxd initialization was already in progress before runtime resume.",
+      );
+      await ctx.sandboxRuntimeControl.waitInit({
+        id: input.providerSandboxId,
+        env: runtimeEnv,
+      });
+      return;
+    }
+
+    if (!isSandboxdAlreadyInitializedForResume(error)) {
+      throw error;
+    }
+
+    ctx.logger.info(
+      {
+        providerSandboxId: input.providerSandboxId,
+        runtimeProvider: input.runtimeProvider,
+        sandboxInstanceId: input.sandboxInstanceId,
+      },
+      "Sandboxd was already initialized before runtime resume.",
+    );
+  }
+
+  await ctx.sandboxRuntimeControl.resume(runtimeControlRequest);
 }
