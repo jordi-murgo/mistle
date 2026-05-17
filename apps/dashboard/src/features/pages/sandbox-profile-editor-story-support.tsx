@@ -1,5 +1,5 @@
 import { Button, Notice, ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@mistle/ui";
-import { PlayIcon, SidebarSimpleIcon, TerminalIcon } from "@phosphor-icons/react";
+import { SidebarSimpleIcon, TerminalIcon } from "@phosphor-icons/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
@@ -56,7 +56,6 @@ import {
   type SetupScriptTestStatus,
 } from "./sandbox-profile-setup-script-test.js";
 import {
-  SandboxProfileMaintenanceScriptSectionView,
   SandboxProfileSnapshotPanelView,
   SandboxProfileSnapshotRefreshScheduleForm,
   type SnapshotPanelState,
@@ -943,32 +942,6 @@ function SandboxProfileEditorPageStoryView(
             <SandboxProfileSnapshotPanelView
               canRunMaintenanceRefresh={canRunSnapshotMaintenance}
               isActionPending={false}
-              maintenanceScriptSection={
-                snapshotStatus === "draft-unavailable" ? null : (
-                  <SandboxProfileMaintenanceScriptSectionView
-                    disabled={false}
-                    draftValue={snapshotMaintenanceScript ?? ""}
-                    hasChanges={false}
-                    mutationError={null}
-                    onChange={() => {}}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                    }}
-                    testControl={
-                      <Button
-                        disabled={!canRunSnapshotMaintenance}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        <PlayIcon aria-hidden className="size-4" />
-                        Test snapshot maintenance script
-                      </Button>
-                    }
-                    testPanel={null}
-                  />
-                )
-              }
               onMaintenanceRefreshSnapshot={() => {}}
               onPublishSuccessMessageDismiss={() => {}}
               onRefreshSnapshot={() => {}}
@@ -980,20 +953,39 @@ function SandboxProfileEditorPageStoryView(
                   <SandboxProfileSnapshotRefreshScheduleForm
                     disabled={false}
                     existingSchedule={createSnapshotRefreshSchedule(snapshotRefreshScheduleState)}
-                    hasSavedSnapshotMaintenanceScript={hasSnapshotMaintenanceScript}
                     {...(snapshotRefreshScheduleInitialDraft === null
                       ? {}
                       : { initialDraft: snapshotRefreshScheduleInitialDraft })}
+                    maintenanceScriptDraft={snapshotMaintenanceScript ?? ""}
+                    maintenanceScriptHasChanges={false}
                     mutationError={
                       snapshotRefreshScheduleState === "save-failure"
                         ? "Could not save snapshot refresh schedule."
                         : null
                     }
+                    onChangeMaintenanceScript={() => {}}
                     onDeleteSchedule={() => {}}
                     onSaveSchedule={() => {}}
                     previewAfter={new Date("2026-04-29T00:00:00.000Z")}
+                    savedMaintenanceScript={snapshotMaintenanceScript ?? ""}
+                    setupAssistantControl={{
+                      disabled: false,
+                      isStarting: false,
+                      onToggle: () => {},
+                      title: "Open the right panel to write this snapshot maintenance script.",
+                    }}
+                    testButtonProps={{
+                      canRun: canRunSnapshotMaintenance,
+                      disabled: !canRunSnapshotMaintenance,
+                      status: hasSnapshotMaintenanceScript ? "idle" : "blank",
+                    }}
+                    testPanel={null}
                   />
                 )
+              }
+              showMaintenanceRefreshAction={
+                createSnapshotRefreshSchedule(snapshotRefreshScheduleState) !== null &&
+                hasSnapshotMaintenanceScript
               }
               state={snapshotPanelState}
               version={resolveSnapshotStoryVersion({

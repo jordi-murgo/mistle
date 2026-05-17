@@ -19767,175 +19767,6 @@
         }
       }
     },
-    "/v1/sandbox/profiles/{profileId}/versions/{version}/maintenance-script": {
-      "put": {
-        "tags": ["Sandbox Profiles"],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "pattern": "^sbp_[a-zA-Z0-9_-]+$"
-            },
-            "required": true,
-            "name": "profileId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "required": true,
-            "name": "version",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "maintenanceScript": {
-                    "type": ["string", "null"]
-                  }
-                },
-                "required": ["maintenanceScript"],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Update the maintenance script for the specified sandbox profile version.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "sandboxProfileId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "maintenanceScript": {
-                      "type": ["string", "null"]
-                    }
-                  },
-                  "required": ["sandboxProfileId", "version", "maintenanceScript"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string",
-                      "enum": ["VALIDATION_ERROR"]
-                    },
-                    "message": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "required": ["code", "message"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string",
-                      "enum": ["UNAUTHORIZED"]
-                    },
-                    "message": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "required": ["code", "message"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Active organization is required.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string",
-                      "enum": ["FORBIDDEN"]
-                    },
-                    "message": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "required": ["code", "message"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Sandbox profile or profile version was not found.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string",
-                      "enum": ["PROFILE_NOT_FOUND", "PROFILE_VERSION_NOT_FOUND"]
-                    },
-                    "message": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "required": ["code", "message"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error.",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/sandbox/profiles/{profileId}/versions/{version}/refresh-schedule": {
       "put": {
         "tags": ["Sandbox Profiles"],
@@ -19978,6 +19809,9 @@
                   "timezone": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "maintenanceScript": {
+                    "type": ["string", "null"]
                   }
                 },
                 "required": ["cronExpression", "timezone"],
@@ -19988,7 +19822,7 @@
         },
         "responses": {
           "200": {
-            "description": "Create or replace the refresh schedule for a sandbox profile version.",
+            "description": "Create or replace the refresh schedule and optionally save the maintenance script for a sandbox profile version.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22234,6 +22068,10 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 255
+                  },
+                  "scriptKind": {
+                    "type": "string",
+                    "enum": ["setup", "maintenance"]
                   }
                 },
                 "additionalProperties": false
@@ -22395,6 +22233,28 @@
                     "code": {
                       "type": "string",
                       "enum": ["PROFILE_NOT_FOUND", "PROFILE_VERSION_NOT_FOUND"]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["code", "message"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox profile version cannot start the requested Setup Assistant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": ["PROFILE_VERSION_NOT_USABLE"]
                     },
                     "message": {
                       "type": "string",

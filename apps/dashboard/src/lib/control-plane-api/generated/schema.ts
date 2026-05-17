@@ -10122,115 +10122,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/sandbox/profiles/{profileId}/versions/{version}/maintenance-script": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put: {
-      parameters: {
-        query?: never;
-        header?: never;
-        path: {
-          profileId: string;
-          version: number;
-        };
-        cookie?: never;
-      };
-      requestBody: {
-        content: {
-          "application/json": {
-            maintenanceScript: string | null;
-          };
-        };
-      };
-      responses: {
-        /** @description Update the maintenance script for the specified sandbox profile version. */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              maintenanceScript: string | null;
-              sandboxProfileId: string;
-              version: number;
-            };
-          };
-        };
-        /** @description Invalid request. */
-        400: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "VALIDATION_ERROR";
-              message: string;
-            };
-          };
-        };
-        /** @description Authentication is required. */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "UNAUTHORIZED";
-              message: string;
-            };
-          };
-        };
-        /** @description Active organization is required. */
-        403: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "FORBIDDEN";
-              message: string;
-            };
-          };
-        };
-        /** @description Sandbox profile or profile version was not found. */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "PROFILE_NOT_FOUND" | "PROFILE_VERSION_NOT_FOUND";
-              message: string;
-            };
-          };
-        };
-        /** @description Internal server error. */
-        500: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            "text/plain": string;
-          };
-        };
-      };
-    };
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/sandbox/profiles/{profileId}/versions/{version}/maintenance-script/test-runs": {
     parameters: {
       query?: never;
@@ -10878,13 +10769,14 @@ export interface paths {
         content: {
           "application/json": {
             cronExpression: string;
+            maintenanceScript?: string | null;
             name?: string;
             timezone: string;
           };
         };
       };
       responses: {
-        /** @description Create or replace the refresh schedule for a sandbox profile version. */
+        /** @description Create or replace the refresh schedule and optionally save the maintenance script for a sandbox profile version. */
         200: {
           headers: {
             [name: string]: unknown;
@@ -11359,6 +11251,8 @@ export interface paths {
         content: {
           "application/json": {
             idempotencyKey?: string;
+            /** @enum {string} */
+            scriptKind?: "setup" | "maintenance";
           };
         };
       };
@@ -11452,6 +11346,19 @@ export interface paths {
             "application/json": {
               /** @enum {string} */
               code: "PROFILE_NOT_FOUND" | "PROFILE_VERSION_NOT_FOUND";
+              message: string;
+            };
+          };
+        };
+        /** @description Sandbox profile version cannot start the requested Setup Assistant. */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              code: "PROFILE_VERSION_NOT_USABLE";
               message: string;
             };
           };
