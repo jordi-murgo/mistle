@@ -288,7 +288,7 @@ const IntegrationConnectionApiSchema = z
     displayName: z.string().min(1),
     status: z.enum(["active", "error", "revoked"]),
     bindingCount: z.number().int().min(0).optional(),
-    automationCount: z.number().int().min(0).optional(),
+    triggerCount: z.number().int().min(0).optional(),
     isIdentityLinked: z.boolean().optional(),
     externalSubjectId: z.string().min(1).optional(),
     config: z.record(z.string(), z.unknown()).optional(),
@@ -318,12 +318,7 @@ const IntegrationConnectionApiSchema = z
   })
   .strict();
 
-export const IntegrationConnectionSchema = IntegrationConnectionApiSchema.transform(
-  ({ automationCount, ...connection }) => ({
-    ...connection,
-    ...(automationCount === undefined ? {} : { triggerCount: automationCount }),
-  }),
-);
+export const IntegrationConnectionSchema = IntegrationConnectionApiSchema;
 
 export const ManagedWebhookSetupResultSchema = z.discriminatedUnion("status", [
   z
@@ -343,12 +338,7 @@ export type ManagedWebhookSetupResult = z.output<typeof ManagedWebhookSetupResul
 
 export const CreatedFormIntegrationConnectionSchema = IntegrationConnectionApiSchema.extend({
   managedWebhookSetup: ManagedWebhookSetupResultSchema.optional(),
-})
-  .strict()
-  .transform(({ automationCount, ...connection }) => ({
-    ...connection,
-    ...(automationCount === undefined ? {} : { triggerCount: automationCount }),
-  }));
+}).strict();
 
 export type CreatedFormIntegrationConnection = z.output<
   typeof CreatedFormIntegrationConnectionSchema

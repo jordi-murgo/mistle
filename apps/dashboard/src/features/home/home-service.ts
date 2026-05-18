@@ -34,13 +34,9 @@ export const HomeSummaryResponseSchema = z
         hasUsableProfiles: z.boolean(),
         hasStartedSession: z.boolean(),
         hasWebhookCapableIntegration: z.boolean(),
-        hasAutomations: z.boolean(),
+        hasTriggers: z.boolean(),
       })
-      .strict()
-      .transform(({ hasAutomations, ...onboarding }) => ({
-        ...onboarding,
-        hasTriggers: hasAutomations,
-      })),
+      .strict(),
     recentSessions: z.array(HomeSandboxInstanceListItemSchema),
   })
   .strict();
