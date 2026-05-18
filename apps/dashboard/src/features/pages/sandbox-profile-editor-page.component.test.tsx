@@ -841,6 +841,15 @@ function renderSandboxProfileEditor(input?: {
   };
 }
 
+function getAutomaticSnapshotRefreshSection(): HTMLElement {
+  const heading = screen.getByRole("heading", { name: "Automatic snapshot refresh" });
+  const section = heading.closest("section");
+  if (section === null) {
+    throw new Error("Automatic snapshot refresh section not found.");
+  }
+  return section;
+}
+
 function DeleteProfileDialogHarness(input: {
   triggerUsages?: readonly {
     id: string;
@@ -1397,10 +1406,9 @@ describe("SandboxProfileEditorPage", () => {
       screen.queryByText("This snapshot will be used for new sessions and triggers."),
     ).toBeNull();
     expect(screen.getByText("Latest snapshot: N/A")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Refresh from setup script" })).toBeDefined();
-    expect(
-      screen.queryByRole("button", { name: "Refresh from snapshot maintenance script" }),
-    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh snapshot (setup script)" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Refresh snapshot (maintenance)" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Snapshot refresh actions" })).toBeNull();
   });
 
   it("shows snapshot maintenance editing without manual maintenance refresh before the schedule is saved", () => {
@@ -1410,15 +1418,14 @@ describe("SandboxProfileEditorPage", () => {
       versionState: "published",
     });
 
-    expect(screen.getByRole("button", { name: "Refresh from setup script" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Refresh snapshot (setup script)" })).toBeDefined();
     expect(screen.queryByText("Snapshot maintenance script")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.click(screen.getByRole("switch", { name: "Refresh enabled" }));
 
-    expect(
-      screen.queryByRole("button", { name: "Refresh from snapshot maintenance script" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh snapshot (maintenance)" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Snapshot refresh actions" })).toBeNull();
     expect(screen.getByText("Snapshot maintenance script")).toBeDefined();
     expect(screen.getByRole("button", { name: "Test" }).getAttribute("disabled")).toBeNull();
     expect(screen.getByRole("button", { name: "Setup Assistant" }).hasAttribute("disabled")).toBe(
@@ -1474,9 +1481,18 @@ describe("SandboxProfileEditorPage", () => {
       versionState: "published",
     });
 
+    const refreshSection = getAutomaticSnapshotRefreshSection();
+    expect(refreshSection.textContent).toContain(
+      "Snapshot refresh will build from the base image with setup script.",
+    );
+    expect(refreshSection.textContent).toContain(
+      "Not configured. Automatic refresh uses setup script.",
+    );
     expect(
-      screen.getByText("Snapshot refresh will build from the base image with setup script."),
-    ).toBeDefined();
+      within(refreshSection)
+        .getAllByText("setup script")
+        .some((element) => element.tagName === "STRONG"),
+    ).toBe(true);
     expect(screen.queryByRole("switch", { name: "Refresh enabled" })).toBeNull();
     expect(screen.getByText("Refresh enabled")).toBeDefined();
     expect(screen.getByText("Yes")).toBeDefined();
@@ -1506,14 +1522,18 @@ describe("SandboxProfileEditorPage", () => {
       versionState: "published",
     });
 
+    const refreshSection = getAutomaticSnapshotRefreshSection();
+    expect(refreshSection.textContent).toContain(
+      "Snapshot refresh will build from the current snapshot with maintenance script.",
+    );
     expect(
-      screen.getByText(
-        "Snapshot refresh will build from the current snapshot with maintenance script.",
-      ),
-    ).toBeDefined();
-    expect(
-      screen.getByRole("button", { name: "Refresh from snapshot maintenance script" }),
-    ).toBeDefined();
+      within(refreshSection)
+        .getAllByText("maintenance script")
+        .some((element) => element.tagName === "STRONG"),
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Refresh snapshot (maintenance)" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Snapshot refresh actions" }));
+    expect(screen.getByRole("menuitem", { name: "Refresh snapshot (setup script)" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDefined();
     expect(screen.getByText("echo maintain")).toBeDefined();
   });
@@ -1538,9 +1558,9 @@ describe("SandboxProfileEditorPage", () => {
     expect(
       screen.getByText("Automatic snapshot refresh will stop after changes are saved."),
     ).toBeDefined();
-    expect(
-      screen.queryByText("Snapshot refresh will build from the base image with setup script."),
-    ).toBeNull();
+    expect(document.body.textContent).not.toContain(
+      "Snapshot refresh will build from the base image with setup script.",
+    );
     expect(screen.queryByLabelText("Cron expression")).toBeNull();
     expect(screen.queryByText("Snapshot maintenance script")).toBeNull();
     expect(screen.getByRole("button", { name: "Save" })).toBeDefined();
@@ -1548,9 +1568,9 @@ describe("SandboxProfileEditorPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(
-      screen.getByText("Snapshot refresh will build from the base image with setup script."),
-    ).toBeDefined();
+    expect(getAutomaticSnapshotRefreshSection().textContent).toContain(
+      "Snapshot refresh will build from the base image with setup script.",
+    );
     expect(screen.queryByRole("switch", { name: "Refresh enabled" })).toBeNull();
     expect(screen.getByText("Yes")).toBeDefined();
   });
@@ -1668,7 +1688,7 @@ describe("SandboxProfileEditorPage", () => {
 
     expect(
       screen.getByText(
-        "A snapshot is the prepared sandbox image created from this published profile version and its setup script. New sessions can only start after a snapshot is ready.",
+        "A snapshot is the prepared sandbox image for this published profile version. New sessions can only start after a snapshot is ready.",
       ),
     ).toBeDefined();
     expect(

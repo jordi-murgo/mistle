@@ -3,11 +3,13 @@ import {
   Button,
   ButtonGroup,
   DefinitionList,
+  DropdownMenuItem,
   Field,
   FieldContent,
   FieldHeader,
   FieldLabel,
   Input,
+  MoreActionsMenu,
   Notice,
   NoticeAutoHideDurationsMs,
   SectionBlock,
@@ -515,24 +517,37 @@ function SnapshotStatusAction(input: {
 
   return (
     <ButtonGroup>
-      <Button
-        className="w-fit shrink-0"
-        disabled={input.isActionPending}
-        onClick={input.onRefreshSnapshot}
-        type="button"
-      >
-        Refresh from setup script
-      </Button>
       {input.showMaintenanceRefreshAction ? (
+        <>
+          <Button
+            className="w-fit shrink-0"
+            disabled={input.isActionPending || !input.canRunMaintenanceRefresh}
+            onClick={input.onMaintenanceRefreshSnapshot}
+            type="button"
+          >
+            Refresh snapshot (maintenance)
+          </Button>
+          <MoreActionsMenu
+            disabled={input.isActionPending}
+            triggerIconVariant="chevron-down"
+            triggerLabel="Snapshot refresh actions"
+            triggerVariant="default"
+          >
+            <DropdownMenuItem onClick={input.onRefreshSnapshot}>
+              Refresh snapshot (setup script)
+            </DropdownMenuItem>
+          </MoreActionsMenu>
+        </>
+      ) : (
         <Button
-          disabled={input.isActionPending || !input.canRunMaintenanceRefresh}
-          onClick={input.onMaintenanceRefreshSnapshot}
+          className="w-fit shrink-0"
+          disabled={input.isActionPending}
+          onClick={input.onRefreshSnapshot}
           type="button"
-          variant="secondary"
         >
-          Refresh from snapshot maintenance script
+          Refresh snapshot (setup script)
         </Button>
-      ) : null}
+      )}
     </ButtonGroup>
   );
 }
@@ -540,8 +555,8 @@ function SnapshotStatusAction(input: {
 function SnapshotPanelDescription(): React.JSX.Element {
   return (
     <p className="text-sm text-muted-foreground">
-      A snapshot is the prepared sandbox image created from this published profile version and its
-      setup script. New sessions can only start after a snapshot is ready.
+      A snapshot is the prepared sandbox image for this published profile version. New sessions can
+      only start after a snapshot is ready.
     </p>
   );
 }
@@ -720,7 +735,12 @@ function SandboxProfileSnapshotRefreshScheduleSection(input: {
 
 function SnapshotMaintenanceScriptSummaryValue(input: { script: string }): React.JSX.Element {
   if (input.script.trim().length === 0) {
-    return <>None</>;
+    return (
+      <span className="text-muted-foreground">
+        Not configured. Automatic refresh uses <ScriptTermEmphasis>setup script</ScriptTermEmphasis>
+        .
+      </span>
+    );
   }
 
   return (
@@ -728,6 +748,10 @@ function SnapshotMaintenanceScriptSummaryValue(input: { script: string }): React
       {input.script}
     </pre>
   );
+}
+
+function ScriptTermEmphasis(input: { children: ReactNode }): React.JSX.Element {
+  return <strong className="font-medium text-foreground">{input.children}</strong>;
 }
 
 export function SandboxProfileSnapshotRefreshScheduleForm(input: {
@@ -771,15 +795,11 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
   const cronExpressionBreakdown = resolveCronExpressionBreakdown(cronExpression);
   const submitIsDisabled = input.disabled || (!scheduleEnabled && existingSchedule === null);
   const formId = "sandbox-profile-snapshot-refresh-schedule-form";
-  const scheduleStatusMessage = scheduleEnabled
-    ? existingSchedule === null
-      ? "Automatic snapshot refresh will start after a schedule is saved."
-      : savedMaintenanceScriptHasContent
-        ? "Snapshot refresh will build from the current snapshot with maintenance script."
-        : "Snapshot refresh will build from the base image with setup script."
-    : existingSchedule === null
-      ? "Snapshots will not refresh automatically."
-      : "Automatic snapshot refresh will stop after changes are saved.";
+  const scheduleStatusMessage = resolveScheduleStatusMessage({
+    existingSchedule,
+    savedMaintenanceScriptHasContent,
+    scheduleEnabled,
+  });
   useEffect(() => {
     setScheduleEnabled(existingSchedule !== null || hasInitialDraft);
     setIsEditingSchedule(hasInitialDraft);
@@ -1010,28 +1030,30 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
                       message={scheduleBehaviorDescription}
                     />
 
-                    <SandboxProfileScriptEditorField
-                      ariaLabelledBy="sandbox-profile-maintenance-script-label"
-                      description="Runs from the current usable snapshot when refreshing through the snapshot maintenance path."
-                      disabled={input.disabled}
-                      fieldLabel="Snapshot maintenance script"
-                      onChange={input.onChangeMaintenanceScript}
-                      placeholderText="#!/usr/bin/env bash"
-                      setupAssistant={{
-                        disabled: input.setupAssistantControl.disabled,
-                        isStarting: input.setupAssistantControl.isStarting,
-                        onClick: () => {
-                          input.setupAssistantControl.onToggle({
-                            script: input.maintenanceScriptDraft,
-                            scriptKind: "maintenance",
-                          });
-                        },
-                        title: input.setupAssistantControl.title,
-                      }}
-                      testButtonProps={input.testButtonProps}
-                      testPanel={input.testPanel}
-                      value={input.maintenanceScriptDraft}
-                    />
+                    <div className="pt-2">
+                      <SandboxProfileScriptEditorField
+                        ariaLabelledBy="sandbox-profile-maintenance-script-label"
+                        description="Runs from the current usable snapshot when refreshing through the snapshot maintenance path."
+                        disabled={input.disabled}
+                        fieldLabel="Snapshot maintenance script"
+                        onChange={input.onChangeMaintenanceScript}
+                        placeholderText="#!/usr/bin/env bash"
+                        setupAssistant={{
+                          disabled: input.setupAssistantControl.disabled,
+                          isStarting: input.setupAssistantControl.isStarting,
+                          onClick: () => {
+                            input.setupAssistantControl.onToggle({
+                              script: input.maintenanceScriptDraft,
+                              scriptKind: "maintenance",
+                            });
+                          },
+                          title: input.setupAssistantControl.title,
+                        }}
+                        testButtonProps={input.testButtonProps}
+                        testPanel={input.testPanel}
+                        value={input.maintenanceScriptDraft}
+                      />
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1040,6 +1062,38 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
         </div>
       </form>
     </SectionBlock>
+  );
+}
+
+function resolveScheduleStatusMessage(input: {
+  existingSchedule: SnapshotRefreshSchedule;
+  savedMaintenanceScriptHasContent: boolean;
+  scheduleEnabled: boolean;
+}): ReactNode {
+  if (!input.scheduleEnabled) {
+    return input.existingSchedule === null
+      ? "Snapshots will not refresh automatically."
+      : "Automatic snapshot refresh will stop after changes are saved.";
+  }
+
+  if (input.existingSchedule === null) {
+    return "Automatic snapshot refresh will start after a schedule is saved.";
+  }
+
+  if (input.savedMaintenanceScriptHasContent) {
+    return (
+      <>
+        Snapshot refresh will build from the current snapshot with{" "}
+        <ScriptTermEmphasis>maintenance script</ScriptTermEmphasis>.
+      </>
+    );
+  }
+
+  return (
+    <>
+      Snapshot refresh will build from the base image with{" "}
+      <ScriptTermEmphasis>setup script</ScriptTermEmphasis>.
+    </>
   );
 }
 
