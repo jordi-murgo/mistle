@@ -104,12 +104,33 @@ type SnapshotMaintenanceScriptAssistantControl = {
   title: string;
 };
 
+const DefaultSnapshotRefreshCronExpression = "0 9 * * *";
+
 export type SnapshotRefreshSchedule = SandboxProfileVersion["refreshSchedule"];
 export type SnapshotRefreshScheduleInput = {
   cronExpression: string;
   maintenanceScript: string | null;
   timezone: string;
 };
+
+type SnapshotRefreshScheduleDraft = {
+  cronExpression: string;
+  timezone: string;
+};
+
+function resolveSnapshotRefreshScheduleDraft(input: {
+  existingSchedule: SnapshotRefreshSchedule;
+  initialDraft: SnapshotRefreshScheduleDraft | undefined;
+}): SnapshotRefreshScheduleDraft {
+  return {
+    cronExpression:
+      input.initialDraft?.cronExpression ??
+      input.existingSchedule?.cronExpression ??
+      DefaultSnapshotRefreshCronExpression,
+    timezone:
+      input.initialDraft?.timezone ?? input.existingSchedule?.timezone ?? readBrowserTimeZone(),
+  };
+}
 
 function formatSnapshotRefreshNextScheduledAt(input: {
   nextScheduledAt: string;
@@ -712,10 +733,7 @@ function SnapshotMaintenanceScriptSummaryValue(input: { script: string }): React
 export function SandboxProfileSnapshotRefreshScheduleForm(input: {
   disabled: boolean;
   existingSchedule: SnapshotRefreshSchedule;
-  initialDraft?: {
-    cronExpression: string;
-    timezone: string;
-  };
+  initialDraft?: SnapshotRefreshScheduleDraft;
   maintenanceScriptDraft: string;
   maintenanceScriptHasChanges: boolean;
   mutationError: string | null;
@@ -731,18 +749,16 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
   const existingSchedule = input.existingSchedule;
   const savedMaintenanceScriptHasContent = input.savedMaintenanceScript.trim().length > 0;
   const hasInitialDraft = input.initialDraft !== undefined;
-  const initialDraftCronExpression = input.initialDraft?.cronExpression;
-  const initialDraftTimezone = input.initialDraft?.timezone;
+  const resolvedDraft = resolveSnapshotRefreshScheduleDraft({
+    existingSchedule,
+    initialDraft: input.initialDraft,
+  });
   const [scheduleEnabled, setScheduleEnabled] = useState(
     existingSchedule !== null || hasInitialDraft,
   );
   const [isEditingSchedule, setIsEditingSchedule] = useState(hasInitialDraft);
-  const [cronExpression, setCronExpression] = useState(
-    initialDraftCronExpression ?? existingSchedule?.cronExpression ?? "",
-  );
-  const [timezone, setTimezone] = useState(
-    initialDraftTimezone ?? existingSchedule?.timezone ?? readBrowserTimeZone(),
-  );
+  const [cronExpression, setCronExpression] = useState(resolvedDraft.cronExpression);
+  const [timezone, setTimezone] = useState(resolvedDraft.timezone);
   const timezoneOptions = useMemo(
     () => createTimezoneOptions(existingSchedule?.timezone ?? null),
     [existingSchedule?.timezone],
@@ -767,9 +783,9 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
   useEffect(() => {
     setScheduleEnabled(existingSchedule !== null || hasInitialDraft);
     setIsEditingSchedule(hasInitialDraft);
-    setCronExpression(initialDraftCronExpression ?? existingSchedule?.cronExpression ?? "");
-    setTimezone(initialDraftTimezone ?? existingSchedule?.timezone ?? readBrowserTimeZone());
-  }, [existingSchedule, hasInitialDraft, initialDraftCronExpression, initialDraftTimezone]);
+    setCronExpression(resolvedDraft.cronExpression);
+    setTimezone(resolvedDraft.timezone);
+  }, [existingSchedule, hasInitialDraft, resolvedDraft.cronExpression, resolvedDraft.timezone]);
 
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -807,10 +823,15 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
   }
 
   function handleCancelScheduleEdit(): void {
+    const persistedDraft = resolveSnapshotRefreshScheduleDraft({
+      existingSchedule,
+      initialDraft: undefined,
+    });
+
     setScheduleEnabled(existingSchedule !== null);
     setIsEditingSchedule(false);
-    setCronExpression(existingSchedule?.cronExpression ?? "");
-    setTimezone(existingSchedule?.timezone ?? readBrowserTimeZone());
+    setCronExpression(persistedDraft.cronExpression);
+    setTimezone(persistedDraft.timezone);
     input.onChangeMaintenanceScript(input.savedMaintenanceScript);
   }
 
@@ -914,12 +935,8 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
             </SandboxProfileSectionCard>
           ) : (
             <SandboxProfileSectionCard>
-              <div className="flex flex-col gap-4">
-                <div
-                  className={`flex min-h-10 items-center justify-between gap-3 ${
-                    scheduleEnabled ? "border-b border-border pb-4" : ""
-                  }`}
-                >
+              <div className="flex flex-col">
+                <div className="flex min-h-10 items-center justify-between gap-3">
                   <FieldLabel htmlFor="sandbox-profile-snapshot-refresh-enabled">
                     Refresh enabled
                   </FieldLabel>
@@ -937,7 +954,7 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
                 </div>
 
                 {scheduleEnabled ? (
-                  <>
+                  <div className="mt-4 flex flex-col gap-4 border-t border-border pt-4">
                     {input.maintenanceScriptHasChanges ? (
                       <p className="text-sm text-muted-foreground">
                         Save the maintenance script to use it for snapshot refresh.
@@ -958,7 +975,7 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
                             onChange={(event) => {
                               setCronExpression(event.target.value);
                             }}
-                            placeholder="0 9 * * 1"
+                            placeholder={DefaultSnapshotRefreshCronExpression}
                             required
                             value={cronExpression}
                           />
@@ -1015,7 +1032,7 @@ export function SandboxProfileSnapshotRefreshScheduleForm(input: {
                       testPanel={input.testPanel}
                       value={input.maintenanceScriptDraft}
                     />
-                  </>
+                  </div>
                 ) : null}
               </div>
             </SandboxProfileSectionCard>
