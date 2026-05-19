@@ -109,6 +109,18 @@ describe.concurrent("PTY transport integration", () => {
             },
           }),
         );
+        await sendWebSocketMessage(
+          clientSocket,
+          JSON.stringify({
+            type: "stream.signal",
+            streamId: 1,
+            signal: {
+              type: "pty.resize",
+              cols: 121,
+              rows: 41,
+            },
+          }),
+        );
 
         const bootstrapMessage = parsePtySessionControlMessage(
           await waitForTextMessage({
@@ -150,6 +162,14 @@ describe.concurrent("PTY transport integration", () => {
         ).toBe(bootstrapMessage.transportToken);
 
         sandboxSocket = await connectWebSocket(bootstrapMessage.transportUrl);
+        await sendWebSocketMessage(
+          bootstrapSocket,
+          JSON.stringify({
+            type: "pty.session.opened",
+            requestId: bootstrapMessage.requestId,
+            ptySessionId,
+          }),
+        );
         await sendWebSocketMessage(clientSocket, "from-client");
         await expect(
           withTimeout({

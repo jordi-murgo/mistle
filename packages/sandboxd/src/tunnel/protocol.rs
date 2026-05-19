@@ -615,6 +615,7 @@ pub struct EgressTokenResponse {
     pub request_id: String,
     pub token: String,
     pub expires_at: String,
+    pub ttl_ms: u64,
 }
 
 /// Failed `egress.token.error` payload sent by the gateway.
@@ -689,6 +690,26 @@ pub struct PtySessionError {
     pub pty_session_id: String,
     pub code: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PtySessionOpenedResponse<'a> {
+    #[serde(rename = "type")]
+    message_type: &'a str,
+    request_id: &'a str,
+    pty_session_id: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PtySessionErrorResponse<'a> {
+    #[serde(rename = "type")]
+    message_type: &'a str,
+    request_id: &'a str,
+    pty_session_id: &'a str,
+    code: &'a str,
+    message: String,
 }
 
 /// Direct PTY control messages exchanged over the bootstrap tunnel.
@@ -1405,6 +1426,31 @@ pub fn pty_exit_event(stream_id: u32, exit_code: i32) -> String {
             message_type: "pty.exit",
             exit_code,
         },
+    })
+}
+
+/// Builds one `pty.session.opened` response payload.
+pub fn pty_session_opened(request_id: &str, pty_session_id: &str) -> String {
+    serialize_json(&PtySessionOpenedResponse {
+        message_type: "pty.session.opened",
+        request_id,
+        pty_session_id,
+    })
+}
+
+/// Builds one `pty.session.error` response payload.
+pub fn pty_session_error(
+    request_id: &str,
+    pty_session_id: &str,
+    code: &'static str,
+    message: impl Into<String>,
+) -> String {
+    serialize_json(&PtySessionErrorResponse {
+        message_type: "pty.session.error",
+        request_id,
+        pty_session_id,
+        code,
+        message: message.into(),
     })
 }
 
@@ -2160,6 +2206,11 @@ fn validate_egress_token_response(
             "egress.token.response expiresAt is required",
         ));
     }
+    if message.ttl_ms == 0 {
+        return Err(TunnelProtocolError::new(
+            "egress.token.response ttlMs must be positive",
+        ));
+    }
     Ok(())
 }
 
@@ -2557,7 +2608,7 @@ mod tests {
         ));
 
         let response = parse_egress_token_control_message(
-            r#"{"type":"egress.token.response","requestId":"egress_token_req_123","token":"jwt-token","expiresAt":"2026-05-17T00:05:00Z"}"#,
+            r#"{"type":"egress.token.response","requestId":"egress_token_req_123","token":"jwt-token","expiresAt":"2026-05-17T00:05:00Z","ttlMs":300000}"#,
         )
         .expect("egress.token.response should parse");
         assert!(matches!(

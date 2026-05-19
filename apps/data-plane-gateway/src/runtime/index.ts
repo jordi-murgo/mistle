@@ -361,8 +361,10 @@ export function createDataPlaneGatewayRuntime(
   );
   const ptyTransportService = new PtyTransportService({
     config: config.app.sandbox,
+    clock: systemClock,
     relayCoordinator,
     sandboxOwnerResolver,
+    scheduler: systemScheduler,
     tokenConfig: {
       tokenSecret: config.app.sandbox.ptyTransport.tokenSecret,
       tokenIssuer: config.app.sandbox.ptyTransport.tokenIssuer,
@@ -505,6 +507,12 @@ export function createDataPlaneGatewayRuntime(
   registerPtyTransportRoutes({
     app,
     ptyTransportService,
+    ...(config.app.__dangerouslyEnableTestIsolation === undefined
+      ? {}
+      : {
+          testEnvironmentIdQueryParam:
+            config.app.__dangerouslyEnableTestIsolation.testEnvironmentIdHeader,
+        }),
     upgradeWebSocket: nodeWebSocket.upgradeWebSocket,
   });
   registerPortAccessRoutes({

@@ -36,8 +36,6 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use tokio::net::{TcpSocket, TcpStream, lookup_host};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
@@ -74,7 +72,8 @@ use crate::tunnel::protocol::{
     FILE_UPLOAD_RESET_CODE_BYTE_COUNT_MISMATCH, FILE_UPLOAD_RESET_CODE_INVALID_FILE_TYPE,
     FileUploadCompletedEventInput, PAYLOAD_KIND_RAW_BYTES, PAYLOAD_KIND_WEBSOCKET_BINARY,
     PAYLOAD_KIND_WEBSOCKET_TEXT, PORT_ACCESS_AUTHORIZE_REASON_PORT_UNREACHABLE,
-    PORT_ACCESS_AUTHORIZE_REASON_UNSUPPORTED_PROTOCOL, STREAM_RESET_CODE_EXEC_COMMAND_FAILED,
+    PORT_ACCESS_AUTHORIZE_REASON_UNSUPPORTED_PROTOCOL, PtyControlMessage, PtySessionControlMessage,
+    PtySessionLaunchMode, PtySessionOpen, STREAM_RESET_CODE_EXEC_COMMAND_FAILED,
     STREAM_RESET_CODE_INVALID_STREAM_CLOSE, STREAM_RESET_CODE_INVALID_STREAM_DATA,
     STREAM_RESET_CODE_INVALID_STREAM_SIGNAL, STREAM_RESET_CODE_INVALID_STREAM_WINDOW,
     STREAM_RESET_CODE_PROCESSES_SNAPSHOT_FAILED, STREAM_RESET_CODE_STREAM_CLOSE_FAILED,
@@ -82,10 +81,11 @@ use crate::tunnel::protocol::{
     SigningControlMessage, SigningRequest, StreamControlMessage, StreamSendWindow,
     decode_stream_data_frame, egress_token_request, encode_stream_data_frame, exec_result_event,
     file_upload_completed_event, parse_egress_token_control_message, parse_ports_control_message,
-    parse_ports_transport_message, parse_processes_stream_message, parse_signing_control_message,
-    parse_stream_control_message, ports_target_authorize_failure_result,
-    ports_target_authorize_success_result, pty_exit_event, signing_request, stream_complete,
-    stream_open_error, stream_open_ok, stream_reset, stream_window,
+    parse_ports_transport_message, parse_processes_stream_message, parse_pty_control_message,
+    parse_pty_session_control_message, parse_signing_control_message, parse_stream_control_message,
+    ports_target_authorize_failure_result, ports_target_authorize_success_result, pty_exit_event,
+    pty_session_error, pty_session_opened, signing_request, stream_complete, stream_open_error,
+    stream_open_ok, stream_reset, stream_window,
 };
 use crate::tunnel::runtime_processes::collect_processes_snapshot;
 use crate::tunnel::telemetry::{SandboxTelemetryLogLevel, TelemetryRelay, TelemetryRelayFrame};
@@ -144,6 +144,9 @@ const PTY_OUTCOME_CLOSED: &str = "closed";
 const PTY_OUTCOME_EXITED: &str = "exited";
 const PTY_OUTCOME_RESET: &str = "reset";
 const PTY_INPUT_LATENCY_WARNING_THRESHOLD_MS: u64 = 100;
+const DIRECT_PTY_STREAM_ID: u32 = 1;
+const PTY_SESSION_ERROR_CODE_CREATE_FAILED: &str = "pty_create_failed";
+const PTY_SESSION_ERROR_CODE_ATTACH_FAILED: &str = "pty_attach_failed";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelSigningRequest {
     pub request_id: String,
@@ -174,12 +177,14 @@ pub enum TunnelSigningResponse {
 pub struct TunnelEgressToken {
     pub token: String,
     pub expires_at: String,
+    pub ttl_ms: u64,
 }
 
 #[derive(Debug, Clone)]
 struct CachedEgressToken {
     token: TunnelEgressToken,
-    expires_at_ms: u64,
+    stored_at: Instant,
+    cache_ttl_ms: u64,
     source_request_id: String,
 }
 
@@ -195,17 +200,15 @@ pub struct GatewayEgressTokenProvider {
     request_sender: Arc<RwLock<Option<mpsc::UnboundedSender<TunnelSessionRequest>>>>,
     cached_token: Arc<Mutex<Option<CachedEgressToken>>>,
     next_request_id: Arc<AtomicU64>,
-    clock: Arc<dyn Clock>,
     sandbox_instance_id: String,
 }
 
 impl GatewayEgressTokenProvider {
-    pub fn new(clock: Arc<dyn Clock>, sandbox_instance_id: impl Into<String>) -> Self {
+    pub fn new(sandbox_instance_id: impl Into<String>) -> Self {
         Self {
             request_sender: Arc::new(RwLock::new(None)),
             cached_token: Arc::new(Mutex::new(None)),
             next_request_id: Arc::new(AtomicU64::new(1)),
-            clock,
             sandbox_instance_id: sandbox_instance_id.into(),
         }
     }
@@ -268,11 +271,13 @@ impl GatewayEgressTokenProvider {
         let Some(cached_token) = cached_token else {
             return Ok(None);
         };
-        let refresh_deadline_ms = self
-            .clock
-            .now_ms()
-            .saturating_add(EGRESS_TOKEN_REFRESH_SKEW_MS);
-        if cached_token.expires_at_ms <= refresh_deadline_ms {
+        let elapsed_ms = cached_token
+            .stored_at
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        if elapsed_ms >= cached_token.cache_ttl_ms {
             return Ok(None);
         }
         info!(
@@ -280,6 +285,9 @@ impl GatewayEgressTokenProvider {
             request_id = cached_token.source_request_id.as_str(),
             sandbox_instance_id = self.sandbox_instance_id.as_str(),
             expires_at = cached_token.token.expires_at.as_str(),
+            ttl_ms = cached_token.token.ttl_ms,
+            cache_ttl_ms = cached_token.cache_ttl_ms,
+            elapsed_ms = elapsed_ms,
             "using cached gateway egress token"
         );
         Ok(Some(cached_token.token))
@@ -290,14 +298,14 @@ impl GatewayEgressTokenProvider {
         token: TunnelEgressToken,
         request_id: &str,
     ) -> Result<(), TunnelSessionError> {
-        let expires_at_ms = parse_egress_token_expires_at_ms(&token.expires_at)?;
         let mut cached_token = self
             .cached_token
             .lock()
             .map_err(|error| TunnelSessionError::EgressToken(error.to_string()))?;
         *cached_token = Some(CachedEgressToken {
+            cache_ttl_ms: token.ttl_ms.saturating_sub(EGRESS_TOKEN_REFRESH_SKEW_MS),
             token,
-            expires_at_ms,
+            stored_at: Instant::now(),
             source_request_id: request_id.to_string(),
         });
         Ok(())
@@ -319,20 +327,6 @@ fn resolve_default_attachment_root() -> PathBuf {
 
     #[cfg(not(test))]
     PathBuf::from(DEFAULT_ATTACHMENT_ROOT)
-}
-
-fn parse_egress_token_expires_at_ms(expires_at: &str) -> Result<u64, TunnelSessionError> {
-    let expires_at = OffsetDateTime::parse(expires_at, &Rfc3339)
-        .map_err(|error| TunnelSessionError::EgressToken(error.to_string()))?;
-    expires_at
-        .unix_timestamp_nanos()
-        .checked_div(1_000_000)
-        .and_then(|expires_at_ms| u64::try_from(expires_at_ms).ok())
-        .ok_or_else(|| {
-            TunnelSessionError::EgressToken(
-                "egress token expiresAt must be a non-negative RFC3339 timestamp".to_string(),
-            )
-        })
 }
 
 fn prioritize_ipv4_socket_addresses(mut addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
@@ -3967,6 +3961,28 @@ async fn handle_tunnel_session_event(
                     return Ok(TunnelSessionControlFlow::Continue);
                 }
 
+                match parse_pty_session_control_message(&payload) {
+                    Ok(Some(message)) => {
+                        handle_pty_session_control_message(
+                            message,
+                            tunnel_writer_sender,
+                            context,
+                            session_state,
+                        )?;
+                        return Ok(TunnelSessionControlFlow::Continue);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        report_dropped_bootstrap_text_message(
+                            tunnel_writer_sender,
+                            &mut session_state.telemetry_relay,
+                            context.clock,
+                            error.to_string(),
+                        );
+                        return Ok(TunnelSessionControlFlow::Continue);
+                    }
+                }
+
                 let control_message = match parse_stream_control_message(&payload) {
                     Ok(message) => message,
                     Err(error) => {
@@ -4901,9 +4917,11 @@ fn handle_egress_token_control_message(
             {
                 let request_id = response.request_id;
                 let expires_at = response.expires_at;
+                let ttl_ms = response.ttl_ms;
                 let _ = response_sender.send(Ok(TunnelEgressToken {
                     token: response.token,
                     expires_at: expires_at.clone(),
+                    ttl_ms,
                 }));
                 record_egress_token_event(
                     tunnel_writer_sender,
@@ -4912,7 +4930,10 @@ fn handle_egress_token_control_message(
                     sandbox_instance_id,
                     "egress_token_request_completed",
                     &request_id,
-                    &[("expiresAt", Value::String(expires_at))],
+                    &[
+                        ("expiresAt", Value::String(expires_at)),
+                        ("ttlMs", Value::from(ttl_ms)),
+                    ],
                 );
             }
         }
@@ -5777,6 +5798,284 @@ fn handle_tunnel_binary_frame(
         ),
     )?;
     Ok(())
+}
+
+fn handle_pty_session_control_message(
+    message: PtySessionControlMessage,
+    tunnel_writer_sender: &mpsc::UnboundedSender<TunnelWriterMessage>,
+    context: &TunnelSessionLoopContext<'_>,
+    session_state: &TunnelSessionMutableState,
+) -> Result<(), TunnelSessionError> {
+    let PtySessionControlMessage::Open(message) = message else {
+        return Ok(());
+    };
+
+    let request = DirectPtyTransportRequest {
+        cgroup_root: context.cgroup_root.to_path_buf(),
+        runtime_env: session_state.runtime_env.clone(),
+        sandbox_instance_id: context.sandbox_instance_id.to_string(),
+        message,
+    };
+    let writer_sender = tunnel_writer_sender.clone();
+
+    thread::spawn(move || {
+        if let Err(error) = run_direct_pty_transport(request, writer_sender) {
+            eprintln!("sandboxd direct pty transport failed: {error}");
+        }
+    });
+
+    Ok(())
+}
+
+struct DirectPtyTransportRequest {
+    cgroup_root: PathBuf,
+    runtime_env: BTreeMap<String, String>,
+    sandbox_instance_id: String,
+    message: PtySessionOpen,
+}
+
+fn run_direct_pty_transport(
+    request: DirectPtyTransportRequest,
+    tunnel_writer_sender: mpsc::UnboundedSender<TunnelWriterMessage>,
+) -> Result<(), TunnelSessionError> {
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+
+    runtime.block_on(run_direct_pty_transport_async(
+        request,
+        tunnel_writer_sender,
+    ))
+}
+
+async fn run_direct_pty_transport_async(
+    request: DirectPtyTransportRequest,
+    tunnel_writer_sender: mpsc::UnboundedSender<TunnelWriterMessage>,
+) -> Result<(), TunnelSessionError> {
+    if request.message.launch.session != PtySessionLaunchMode::Create {
+        write_tunnel_text(
+            &tunnel_writer_sender,
+            pty_session_error(
+                &request.message.request_id,
+                &request.message.pty_session_id,
+                PTY_SESSION_ERROR_CODE_ATTACH_FAILED,
+                "direct PTY transport does not support attaching to an existing PTY session",
+            ),
+        )?;
+        return Ok(());
+    }
+
+    let session = match start_scoped_pty_session(
+        PtySpawnRequest {
+            cwd: request.message.launch.cwd.clone(),
+            cols: request.message.launch.cols,
+            rows: request.message.launch.rows,
+            command: request.message.launch.command.clone(),
+            args: request.message.launch.args.clone(),
+            env: request.runtime_env,
+        },
+        &request.cgroup_root,
+        &request.sandbox_instance_id,
+        &crate::time::SystemClock,
+        &crate::time::ThreadSleeper,
+    ) {
+        Ok(session) => session,
+        Err(error) => {
+            write_tunnel_text(
+                &tunnel_writer_sender,
+                pty_session_error(
+                    &request.message.request_id,
+                    &request.message.pty_session_id,
+                    PTY_SESSION_ERROR_CODE_CREATE_FAILED,
+                    error.to_string(),
+                ),
+            )?;
+            return Ok(());
+        }
+    };
+
+    let (socket, _) = match connect_async(request.message.transport_url.as_str())
+        .await
+        .map_err(|error| TunnelSessionError::Pty(error.to_string()))
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = session.terminate(
+                &crate::time::SystemClock,
+                &crate::time::ThreadSleeper,
+                DEFAULT_PTY_TERMINATE_POLL_INTERVAL,
+                DEFAULT_PTY_TERMINATE_TIMEOUT_MS,
+            );
+            write_tunnel_text(
+                &tunnel_writer_sender,
+                pty_session_error(
+                    &request.message.request_id,
+                    &request.message.pty_session_id,
+                    PTY_SESSION_ERROR_CODE_ATTACH_FAILED,
+                    error.to_string(),
+                ),
+            )?;
+            return Ok(());
+        }
+    };
+
+    write_tunnel_text(
+        &tunnel_writer_sender,
+        pty_session_opened(&request.message.request_id, &request.message.pty_session_id),
+    )?;
+
+    let (mut socket_writer, mut socket_reader) = socket.split();
+    let mut poll_interval = tokio::time::interval(DEFAULT_PTY_EVENT_POLL_INTERVAL);
+
+    loop {
+        tokio::select! {
+            maybe_message = socket_reader.next() => {
+                match maybe_message {
+                    Some(Ok(Message::Binary(payload))) => {
+                        session
+                            .write(payload.as_ref())
+                            .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                    }
+                    Some(Ok(Message::Text(payload))) => {
+                        match parse_pty_control_message(payload.as_ref()) {
+                            Ok(PtyControlMessage::Signal(message)) => {
+                                session
+                                    .resize(message.signal.cols, message.signal.rows)
+                                    .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                            }
+                            Ok(PtyControlMessage::Close(_)) => {
+                                let exit_code = session
+                                    .terminate(
+                                        &crate::time::SystemClock,
+                                        &crate::time::ThreadSleeper,
+                                        DEFAULT_PTY_TERMINATE_POLL_INTERVAL,
+                                        DEFAULT_PTY_TERMINATE_TIMEOUT_MS,
+                                    )
+                                    .or_else(|_| {
+                                        session.exit_code().ok_or_else(|| {
+                                            TunnelSessionError::Pty(
+                                                "PTY session did not report an exit code after close"
+                                                    .to_string(),
+                                            )
+                                        })
+                                    })?;
+                                socket_writer
+                                    .send(Message::Text(
+                                        pty_exit_event(DIRECT_PTY_STREAM_ID, exit_code).into(),
+                                    ))
+                                    .await
+                                    .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                                return Ok(());
+                            }
+                            Ok(PtyControlMessage::Window(_)) => {}
+                            Ok(PtyControlMessage::Open(_)) => {
+                                socket_writer
+                                    .send(Message::Text(
+                                        stream_reset(
+                                            DIRECT_PTY_STREAM_ID,
+                                            STREAM_RESET_CODE_INVALID_STREAM_SIGNAL,
+                                            "direct PTY transport does not accept stream.open",
+                                        )
+                                        .into(),
+                                    ))
+                                    .await
+                                    .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                            }
+                            Err(error) => {
+                                socket_writer
+                                    .send(Message::Text(
+                                        stream_reset(
+                                            DIRECT_PTY_STREAM_ID,
+                                            STREAM_RESET_CODE_INVALID_STREAM_SIGNAL,
+                                            error.to_string(),
+                                        )
+                                        .into(),
+                                    ))
+                                    .await
+                                    .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        socket_writer
+                            .send(Message::Pong(payload))
+                            .await
+                            .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        let _ = session.terminate(
+                            &crate::time::SystemClock,
+                            &crate::time::ThreadSleeper,
+                            DEFAULT_PTY_TERMINATE_POLL_INTERVAL,
+                            DEFAULT_PTY_TERMINATE_TIMEOUT_MS,
+                        );
+                        return Ok(());
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(_)) => {}
+                    Some(Err(error)) => {
+                        let _ = session.terminate(
+                            &crate::time::SystemClock,
+                            &crate::time::ThreadSleeper,
+                            DEFAULT_PTY_TERMINATE_POLL_INTERVAL,
+                            DEFAULT_PTY_TERMINATE_TIMEOUT_MS,
+                        );
+                        return Err(TunnelSessionError::Pty(error.to_string()));
+                    }
+                }
+            }
+            _ = poll_interval.tick() => {
+                while let Some(event) = session
+                    .next_event_timeout(Duration::from_millis(0))
+                    .map_err(|error| TunnelSessionError::Pty(error.to_string()))?
+                {
+                    match event {
+                        PtyEvent::Output(chunk) => {
+                            socket_writer
+                                .send(Message::Binary(chunk.into()))
+                                .await
+                                .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                        }
+                        PtyEvent::Exit(exit_code) => {
+                            socket_writer
+                                .send(Message::Text(
+                                    pty_exit_event(DIRECT_PTY_STREAM_ID, exit_code).into(),
+                                ))
+                                .await
+                                .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                            return Ok(());
+                        }
+                        PtyEvent::Closed => {
+                            if let Some(exit_code) = session.exit_code() {
+                                socket_writer
+                                    .send(Message::Text(
+                                        pty_exit_event(DIRECT_PTY_STREAM_ID, exit_code).into(),
+                                    ))
+                                    .await
+                                    .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                                return Ok(());
+                            }
+                        }
+                        PtyEvent::Error(message) => {
+                            socket_writer
+                                .send(Message::Text(
+                                    stream_reset(
+                                        DIRECT_PTY_STREAM_ID,
+                                        STREAM_RESET_CODE_TARGET_CLOSED,
+                                        message,
+                                    )
+                                    .into(),
+                                ))
+                                .await
+                                .map_err(|error| TunnelSessionError::Pty(error.to_string()))?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn handle_pty_open(
@@ -8734,7 +9033,8 @@ mod tests {
                         "type": "egress.token.response",
                         "requestId": "egress_token_req_1",
                         "token": "short-lived-egress-jwt",
-                        "expiresAt": "2100-01-01T00:00:00Z"
+                        "expiresAt": "2100-01-01T00:00:00Z",
+                        "ttlMs": 300000
                     })
                     .to_string()
                     .into(),
@@ -8790,7 +9090,7 @@ mod tests {
             Arc::new(ThreadSleeper),
         )
         .expect("tunnel session should start");
-        let token_provider = GatewayEgressTokenProvider::new(clock, "sbi_tunnel_session");
+        let token_provider = GatewayEgressTokenProvider::new("sbi_tunnel_session");
         tunnel_session.attach_gateway_egress_token_provider(&token_provider);
 
         let token = token_provider
@@ -8798,6 +9098,7 @@ mod tests {
             .expect("egress token request should complete through the tunnel");
         assert_eq!(token.token, "short-lived-egress-jwt");
         assert_eq!(token.expires_at, "2100-01-01T00:00:00Z");
+        assert_eq!(token.ttl_ms, 300_000);
         gateway_done_receiver
             .recv()
             .expect("gateway should complete the egress token interaction");
@@ -8809,6 +9110,118 @@ mod tests {
         gateway_close_sender
             .send(())
             .expect("gateway should close after the cached token is observed");
+
+        tunnel_session.close();
+        gateway_thread
+            .join()
+            .expect("gateway thread should exit cleanly");
+    }
+
+    #[test]
+    fn refreshes_egress_tokens_from_relative_ttl_not_expires_at_wall_time() {
+        let bootstrap_listener =
+            TcpListener::bind("127.0.0.1:0").expect("bootstrap listener should bind");
+        let bootstrap_url = format!(
+            "ws://127.0.0.1:{}/tunnel/sandbox/sbi_tunnel_session",
+            bootstrap_listener
+                .local_addr()
+                .expect("bootstrap listener should expose an address")
+                .port()
+        );
+        let (gateway_done_sender, gateway_done_receiver) = mpsc::channel();
+        let gateway_thread = thread::spawn(move || {
+            let (stream, _) = bootstrap_listener
+                .accept()
+                .expect("gateway should accept the bootstrap tunnel");
+            let mut websocket = accept(stream).expect("gateway websocket handshake should succeed");
+
+            expect_tunnel_connected_publications(&mut websocket);
+
+            for token_number in 1..=2 {
+                let token_request = read_json_text_message(&mut websocket);
+                assert_eq!(
+                    token_request,
+                    json!({
+                        "type": "egress.token.request",
+                        "requestId": format!("egress_token_req_{token_number}")
+                    })
+                );
+
+                websocket
+                    .send(Message::Text(
+                        json!({
+                            "type": "egress.token.response",
+                            "requestId": format!("egress_token_req_{token_number}"),
+                            "token": format!("short-lived-egress-jwt-{token_number}"),
+                            "expiresAt": "2100-01-01T00:00:00Z",
+                            "ttlMs": 1
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("gateway should return an egress token");
+            }
+
+            gateway_done_sender
+                .send(())
+                .expect("gateway should signal both token responses were sent");
+            websocket
+                .close(None)
+                .expect("gateway websocket should close cleanly");
+        });
+
+        let startup_input = StartupInput {
+            startup_mode: StartupMode::New,
+            operation_kind: crate::protocol::startup::StartupOperationKind::Start,
+            execution_mode: crate::protocol::startup::StartupExecutionMode::Session,
+            bootstrap_token: "bootstrap-token-value".to_string(),
+            tunnel_exchange_token: "tunnel-exchange-token-value".to_string(),
+            tunnel_gateway_ws_url: bootstrap_url,
+            acting_user_id: None,
+            runtime_plan: serde_json::json!({
+                "sandboxProfileId": "sbp_123",
+                "version": 1,
+                "image": {
+                    "source": "base",
+                    "imageRef": crate::test_support::local_prepared_runtime_sandbox_base_image_ref()
+                },
+                "egressRoutes": [],
+                "artifacts": [],
+                "workspaceSources": [],
+                "runtimeClients": [],
+                "agentRuntimes": []
+            }),
+            git_identity: None,
+            transparent_proxy: None,
+        };
+
+        let keepalive_manager = Arc::new(Mutex::new(KeepaliveManager::default()));
+        let runtime_readiness_manager = Arc::new(Mutex::new(RuntimeReadinessManager::default()));
+        let clock = Arc::new(SystemClock);
+        let tunnel_session = TunnelSession::start(
+            &startup_input,
+            keepalive_manager,
+            runtime_readiness_manager,
+            None,
+            BTreeMap::new(),
+            clock.clone(),
+            Arc::new(ThreadSleeper),
+        )
+        .expect("tunnel session should start");
+        let token_provider = GatewayEgressTokenProvider::new("sbi_tunnel_session");
+        tunnel_session.attach_gateway_egress_token_provider(&token_provider);
+
+        let first_token = token_provider
+            .token()
+            .expect("first egress token request should complete");
+        let second_token = token_provider
+            .token()
+            .expect("expired relative ttl should force a second token request");
+        assert_eq!(first_token.token, "short-lived-egress-jwt-1");
+        assert_eq!(second_token.token, "short-lived-egress-jwt-2");
+        gateway_done_receiver
+            .recv()
+            .expect("gateway should complete both egress token interactions");
 
         tunnel_session.close();
         gateway_thread
