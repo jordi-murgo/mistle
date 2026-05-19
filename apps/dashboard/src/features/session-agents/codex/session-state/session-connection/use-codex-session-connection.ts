@@ -31,6 +31,7 @@ type CodexThreadCollectionsRefreshResult = {
   availableThreads: readonly CodexThreadSummary[];
   archivedThreads: readonly CodexThreadSummary[];
   loadedThreadIds: readonly string[];
+  originalThreadId: string | null;
 };
 
 export type CodexConnectionThreadSelectionPolicy = "oldest" | "most_recently_updated";
@@ -117,7 +118,12 @@ export function useCodexSessionConnection(input: {
   refreshThreadCollections: (input?: {
     rpcClient?: CodexJsonRpcClient;
     generation?: number;
+    originalThreadId?: string;
   }) => Promise<CodexThreadCollectionsRefreshResult>;
+  recordStartedThreadAsOriginalAfterEmptyScan: (input: {
+    generation: number;
+    threadId: string;
+  }) => void;
   ensureTransportConnected: (input: { sandboxInstanceId: string }) => Promise<{
     sandboxInstanceId: string;
     transport: SandboxSessionTransport;
@@ -385,6 +391,9 @@ export function useCodexSessionConnection(input: {
 
       const threadCollections = await input.refreshThreadCollections({
         generation,
+        ...(connectInput.providerThreadId === undefined || connectInput.providerThreadId === null
+          ? {}
+          : { originalThreadId: connectInput.providerThreadId }),
         rpcClient,
       });
 
@@ -404,6 +413,15 @@ export function useCodexSessionConnection(input: {
         ensureCurrentGeneration: input.ensureCurrentGeneration,
       });
       reconnectTargetThreadIdRef.current = establishedThread.resolvedThreadId;
+      if (
+        threadCollections.originalThreadId === null &&
+        establishedThread.resolvedThreadId === null
+      ) {
+        input.recordStartedThreadAsOriginalAfterEmptyScan({
+          generation,
+          threadId: establishedThread.threadId,
+        });
+      }
 
       return {
         ...establishedThread,
@@ -486,6 +504,9 @@ export function useCodexSessionConnection(input: {
 
       const threadCollections = await input.refreshThreadCollections({
         generation,
+        ...(previousConnectedSession.providerThreadId === null
+          ? {}
+          : { originalThreadId: previousConnectedSession.providerThreadId }),
         rpcClient,
       });
       const recoveredThread = await establishCodexThread({
