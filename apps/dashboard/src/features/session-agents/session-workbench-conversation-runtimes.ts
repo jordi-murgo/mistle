@@ -33,6 +33,7 @@ export type SessionWorkbenchRuntimeAdapter = {
   cliTerminalContentInset: SessionTerminalContentInset;
   conversation: {
     activeConversationId: string | null;
+    attachmentTargetId: string | null;
     chatState: SessionConversationChatState;
     dismissUserMessageAction?: UseCodexSessionStateResult["chat"]["dismissUserMessageAction"];
   };
@@ -68,6 +69,20 @@ function mapPiChatStateForConversation(
   };
 }
 
+function hashStableUploadTargetId(value: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+export function resolvePiAttachmentTargetId(sessionFile: string): string {
+  return `pi_${hashStableUploadTargetId(sessionFile)}_${String(sessionFile.length)}`;
+}
+
 export function buildCodexConversationRuntime(input: {
   activeConversationId: string | null;
   bootstrap: UseCodexSessionStateResult["bootstrap"];
@@ -86,6 +101,7 @@ export function buildCodexConversationRuntime(input: {
     cliTerminalContentInset: capabilities.cliTerminalContentInset,
     conversation: {
       activeConversationId: input.activeConversationId,
+      attachmentTargetId: input.activeConversationId,
       chatState: input.chat.chatState,
       dismissUserMessageAction: input.chat.dismissUserMessageAction,
     },
@@ -174,6 +190,7 @@ export function buildOpenCodeConversationRuntime(input: {
     cliTerminalContentInset: capabilities.cliTerminalContentInset,
     conversation: {
       activeConversationId: input.sessionSnapshot?.activeSessionId ?? null,
+      attachmentTargetId: input.sessionSnapshot?.activeSessionId ?? null,
       chatState: mapOpenCodeChatStateForConversation(input.chat.chatState),
     },
     composerRuntimeInput: {
@@ -216,7 +233,9 @@ export function buildPiConversationRuntime(input: {
   configControl: SessionComposerRuntimeInput["configControl"];
   sessionMessage: UsePiSessionStateResult["sessionMessage"];
   sessionSnapshot: UsePiSessionStateResult["lifecycle"]["sessionSnapshot"];
+  queueTurn: NonNullable<SessionTurnControl["queueTurn"]>;
   startTurn: SessionTurnControl["startTurn"];
+  steerTurn: SessionTurnControl["steerTurn"];
 }): SessionWorkbenchRuntimeAdapter {
   const capabilities = SessionRuntimeWorkbenchCapabilities.PI;
   const isTurnRunning = input.chat.chatState.status === "busy";
@@ -226,6 +245,10 @@ export function buildPiConversationRuntime(input: {
     cliTerminalContentInset: capabilities.cliTerminalContentInset,
     conversation: {
       activeConversationId: input.sessionSnapshot?.activeSessionFile ?? null,
+      attachmentTargetId:
+        input.sessionSnapshot === null
+          ? null
+          : resolvePiAttachmentTargetId(input.sessionSnapshot.activeSessionFile),
       chatState: mapPiChatStateForConversation(input.chat.chatState),
     },
     composerRuntimeInput: {
@@ -242,12 +265,9 @@ export function buildPiConversationRuntime(input: {
         isInterrupting: input.chat.isInterruptingTurn,
         isStarting: input.chat.isStartingTurn,
         isSteering: input.chat.isSteeringTurn,
+        queueTurn: input.queueTurn,
         startTurn: input.startTurn,
-        steerTurn: async (turnInput): Promise<void> => {
-          await input.chat.steerTurn({
-            submittedPrompt: turnInput.transcriptPrompt ?? turnInput.submittedPrompt,
-          });
-        },
+        steerTurn: input.steerTurn,
       },
       sessionErrorMessage: input.sessionMessage.sessionErrorMessage,
       clearSessionErrorMessage: input.sessionMessage.clearSessionErrorMessage,

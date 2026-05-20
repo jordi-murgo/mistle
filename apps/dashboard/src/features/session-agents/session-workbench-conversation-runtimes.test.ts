@@ -5,6 +5,7 @@ import {
   buildCodexConversationRuntime,
   buildOpenCodeConversationRuntime,
   buildPiConversationRuntime,
+  resolvePiAttachmentTargetId,
 } from "./session-workbench-conversation-runtimes.js";
 
 type CodexRuntimeInput = Parameters<typeof buildCodexConversationRuntime>[0];
@@ -176,6 +177,7 @@ function createOpenCodeRuntimeInput(reportedMessages: string[]): OpenCodeRuntime
 }
 
 function createPiRuntimeInput(input: {
+  queuedPrompts?: string[];
   reportedMessages: string[];
   steeredPrompts: string[];
 }): PiRuntimeInput {
@@ -214,6 +216,9 @@ function createPiRuntimeInput(input: {
       sendPrompt: async () => {
         return;
       },
+      followUpTurn: async (turnInput) => {
+        input.queuedPrompts?.push(turnInput.submittedPrompt);
+      },
       steerTurn: async (turnInput) => {
         input.steeredPrompts.push(turnInput.submittedPrompt);
       },
@@ -228,6 +233,9 @@ function createPiRuntimeInput(input: {
       },
       sessionErrorMessage: null,
     },
+    queueTurn: async (turnInput) => {
+      input.queuedPrompts?.push(turnInput.transcriptPrompt ?? turnInput.submittedPrompt);
+    },
     sessionSnapshot: {
       activeDirectory: null,
       activeSessionFile: "pi-session.json",
@@ -236,6 +244,9 @@ function createPiRuntimeInput(input: {
     },
     startTurn: async () => {
       return;
+    },
+    steerTurn: async (turnInput) => {
+      input.steeredPrompts.push(turnInput.transcriptPrompt ?? turnInput.submittedPrompt);
     },
   };
 }
@@ -315,6 +326,10 @@ describe("buildPiConversationRuntime", () => {
 
     expect(runtime.displayName).toBe("Pi");
     expect(runtime.conversation.activeConversationId).toBe("pi-session.json");
+    expect(runtime.conversation.attachmentTargetId).toBe(
+      resolvePiAttachmentTargetId("pi-session.json"),
+    );
+    expect(runtime.conversation.attachmentTargetId).toMatch(/^pi_[a-z0-9]+_\d+$/);
     expect(runtime.conversation.chatState.activeTurnId).toBe("pi:user:1");
     expect(runtime.conversation.chatState.pendingTurnId).toBe("pi:user:1");
     expect(runtime.conversation.chatState.status).toBe("inProgress");
@@ -324,6 +339,12 @@ describe("buildPiConversationRuntime", () => {
       required: false,
       showControls: false,
     });
+  });
+
+  it("uses a safe Pi attachment target for session file paths", () => {
+    expect(resolvePiAttachmentTargetId("/root/.pi/agent/sessions/session.jsonl")).toMatch(
+      /^pi_[a-z0-9]+_\d+$/,
+    );
   });
 
   it("steers Pi with the submitted transcript prompt", async () => {
@@ -342,5 +363,24 @@ describe("buildPiConversationRuntime", () => {
     });
 
     expect(steeredPrompts).toEqual(["prompt with attachments"]);
+  });
+
+  it("exposes Pi follow-up as a runtime-native queue turn", async () => {
+    const queuedPrompts: string[] = [];
+    const runtime = buildPiConversationRuntime(
+      createPiRuntimeInput({
+        queuedPrompts,
+        reportedMessages: [],
+        steeredPrompts: [],
+      }),
+    );
+
+    await runtime.composerRuntimeInput.turnControl.queueTurn?.({
+      submittedPrompt: "queued prompt",
+      transcriptPrompt: "queued transcript",
+      uploadedAttachments: [],
+    });
+
+    expect(queuedPrompts).toEqual(["queued transcript"]);
   });
 });

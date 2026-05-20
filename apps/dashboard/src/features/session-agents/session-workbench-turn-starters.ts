@@ -18,6 +18,7 @@ import {
   type UseOpenCodeSessionStateResult,
 } from "./opencode/session-state/index.js";
 import type { UsePiSessionStateResult } from "./pi/session-state/index.js";
+import { buildPiSourceReferencePrompt } from "./pi/session-state/pi-attachment-presentation.js";
 
 type EnsureSessionTransportConnected = Parameters<
   typeof generateSessionTitleWithSandboxCodexExec
@@ -127,13 +128,41 @@ export function buildOpenCodeTurnStarter(input: {
 }
 
 export function buildPiTurnStarter(input: {
-  chat: UsePiSessionStateResult["chat"];
+  chat: Pick<UsePiSessionStateResult["chat"], "sendPrompt">;
 }): SessionTurnControl["startTurn"] {
   return async (turnInput): Promise<void> => {
     await input.chat.sendPrompt({
-      submittedPrompt: turnInput.transcriptPrompt ?? turnInput.submittedPrompt,
+      submittedPrompt: buildPiSubmittedPrompt(turnInput),
     });
   };
+}
+
+export function buildPiTurnSteerer(input: {
+  chat: Pick<UsePiSessionStateResult["chat"], "steerTurn">;
+}): SessionTurnControl["steerTurn"] {
+  return async (turnInput): Promise<void> => {
+    await input.chat.steerTurn({
+      submittedPrompt: buildPiSubmittedPrompt(turnInput),
+    });
+  };
+}
+
+export function buildPiTurnQueuer(input: {
+  chat: Pick<UsePiSessionStateResult["chat"], "followUpTurn">;
+}): NonNullable<SessionTurnControl["queueTurn"]> {
+  return async (turnInput): Promise<void> => {
+    await input.chat.followUpTurn({
+      submittedPrompt: buildPiSubmittedPrompt(turnInput),
+    });
+  };
+}
+
+function buildPiSubmittedPrompt(turnInput: Parameters<SessionTurnControl["startTurn"]>[0]): string {
+  const messagePayload = turnInput.transcriptPrompt ?? turnInput.submittedPrompt;
+  return buildPiSourceReferencePrompt({
+    prompt: messagePayload,
+    uploadedAttachments: turnInput.uploadedAttachments ?? [],
+  });
 }
 
 function applyGeneratedSessionTitlePatch(input: {

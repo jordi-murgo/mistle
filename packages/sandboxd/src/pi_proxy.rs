@@ -137,6 +137,7 @@ struct PiProxyState {
     event_subscribers: Mutex<Vec<Sender<String>>>,
     keepalive_manager: Arc<Mutex<KeepaliveManager>>,
     active: AtomicBool,
+    activity_monitor_running: AtomicBool,
     next_id: AtomicU64,
 }
 
@@ -483,7 +484,15 @@ impl PiProxyState {
         }
     }
 
-    fn start_activity_monitor(state: Arc<Self>) {
+    fn start_activity_monitor(state: Arc<Self>) -> bool {
+        if state
+            .activity_monitor_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+
         thread::spawn(move || {
             while state.active.load(Ordering::Relaxed) {
                 if state
@@ -495,7 +504,19 @@ impl PiProxyState {
                 }
                 thread::sleep(Duration::from_secs(1));
             }
+            state
+                .activity_monitor_running
+                .store(false, Ordering::Release);
+            if state.active.load(Ordering::Relaxed) {
+                Self::start_activity_monitor(state);
+            }
         });
+        true
+    }
+
+    fn mark_active_and_start_activity_monitor(state: &Arc<Self>) {
+        state.set_active(true);
+        Self::start_activity_monitor(state.clone());
     }
 }
 
@@ -533,6 +554,7 @@ pub fn start_pi_proxy_with_supervisor(
         event_subscribers: Mutex::new(Vec::new()),
         keepalive_manager,
         active: AtomicBool::new(false),
+        activity_monitor_running: AtomicBool::new(false),
         next_id: AtomicU64::new(1),
     });
     let runtime_shutdown = shutdown_requested.clone();
@@ -834,8 +856,7 @@ fn handle_pi_method(
             let session_file = require_param_string(&request.params, "sessionFile")?;
             state.ensure_child(None)?;
             state.switch_session(&session_file, captured_events)?;
-            state.set_active(true);
-            PiProxyState::start_activity_monitor(state.clone());
+            PiProxyState::mark_active_and_start_activity_monitor(state);
             Ok(Value::Null)
         }
         "pi/setSessionName" => {
@@ -853,39 +874,33 @@ fn handle_pi_method(
             let message = require_param_string(&request.params, "message")?;
             state.ensure_child(None)?;
             state.switch_session(&session_file, captured_events)?;
-            state.set_active(true);
-            let result = state.send_pi_command_with_captured_events(
+            PiProxyState::mark_active_and_start_activity_monitor(state);
+            state.send_pi_command_with_captured_events(
                 json!({ "type": "prompt", "message": message }),
                 captured_events,
-            );
-            PiProxyState::start_activity_monitor(state.clone());
-            result
+            )
         }
         "pi/steer" => {
             let session_file = require_param_string(&request.params, "sessionFile")?;
             let message = require_param_string(&request.params, "message")?;
             state.ensure_child(None)?;
             state.switch_session(&session_file, captured_events)?;
-            state.set_active(true);
-            let result = state.send_pi_command_with_captured_events(
+            PiProxyState::mark_active_and_start_activity_monitor(state);
+            state.send_pi_command_with_captured_events(
                 json!({ "type": "steer", "message": message }),
                 captured_events,
-            );
-            PiProxyState::start_activity_monitor(state.clone());
-            result
+            )
         }
         "pi/followUp" => {
             let session_file = require_param_string(&request.params, "sessionFile")?;
             let message = require_param_string(&request.params, "message")?;
             state.ensure_child(None)?;
             state.switch_session(&session_file, captured_events)?;
-            state.set_active(true);
-            let result = state.send_pi_command_with_captured_events(
+            PiProxyState::mark_active_and_start_activity_monitor(state);
+            state.send_pi_command_with_captured_events(
                 json!({ "type": "follow_up", "message": message }),
                 captured_events,
-            );
-            PiProxyState::start_activity_monitor(state.clone());
-            result
+            )
         }
         "pi/abort" => {
             let session_file = require_param_string(&request.params, "sessionFile")?;
@@ -930,7 +945,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -955,6 +970,7 @@ mod tests {
             event_subscribers: Mutex::new(Vec::new()),
             keepalive_manager: keepalive_manager.clone(),
             active: std::sync::atomic::AtomicBool::new(false),
+            activity_monitor_running: std::sync::atomic::AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         });
 
@@ -1050,6 +1066,7 @@ mod tests {
             event_subscribers: Mutex::new(Vec::new()),
             keepalive_manager: keepalive_manager.clone(),
             active: std::sync::atomic::AtomicBool::new(false),
+            activity_monitor_running: std::sync::atomic::AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         });
 
@@ -1102,6 +1119,36 @@ mod tests {
     }
 
     #[test]
+    fn activity_monitor_has_single_owner() {
+        let keepalive_manager = Arc::new(Mutex::new(KeepaliveManager::default()));
+        let state = Arc::new(PiProxyState {
+            config: PiProxyConfig {
+                pi_cli_path: "/bin/false".to_string(),
+                env: BTreeMap::new(),
+            },
+            child: Mutex::new(None),
+            command_lock: Mutex::new(()),
+            event_subscribers: Mutex::new(Vec::new()),
+            keepalive_manager,
+            active: std::sync::atomic::AtomicBool::new(false),
+            activity_monitor_running: std::sync::atomic::AtomicBool::new(true),
+            next_id: AtomicU64::new(1),
+        });
+
+        state.set_active(true);
+
+        assert!(
+            !PiProxyState::start_activity_monitor(state.clone()),
+            "a running activity monitor should own Pi activity polling"
+        );
+
+        state.set_active(false);
+        state
+            .activity_monitor_running
+            .store(false, Ordering::Release);
+    }
+
+    #[test]
     fn resume_pi_conversation_switches_without_initial_state() {
         let simulated_pi = SimulatedPiRpcProcess::start_without_initial_session();
         let keepalive_manager = Arc::new(Mutex::new(KeepaliveManager::default()));
@@ -1115,6 +1162,7 @@ mod tests {
             event_subscribers: Mutex::new(Vec::new()),
             keepalive_manager,
             active: std::sync::atomic::AtomicBool::new(false),
+            activity_monitor_running: std::sync::atomic::AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         });
 
@@ -1175,6 +1223,7 @@ mod tests {
             event_subscribers: Mutex::new(Vec::new()),
             keepalive_manager,
             active: std::sync::atomic::AtomicBool::new(false),
+            activity_monitor_running: std::sync::atomic::AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         });
 
@@ -1234,7 +1283,7 @@ mod tests {
 
     impl SimulatedPiRpcProcess {
         fn start() -> Self {
-            Self::start_with_active_session(false)
+            Self::start_with_session_state(false, true)
         }
 
         fn start_active_session() -> Self {
@@ -1243,10 +1292,6 @@ mod tests {
 
         fn start_without_initial_session() -> Self {
             Self::start_with_session_state(false, false)
-        }
-
-        fn start_with_active_session(active_session: bool) -> Self {
-            Self::start_with_session_state(active_session, true)
         }
 
         fn start_with_session_state(active_session: bool, has_initial_session: bool) -> Self {
