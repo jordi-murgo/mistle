@@ -2,6 +2,7 @@ import {
   CodexComposerCommandIds,
   CodexRuntimeCommandIds,
 } from "@mistle/integrations-definitions/agent-runtimes/codex/client";
+import { isOpenCodePromptCommandId } from "@mistle/integrations-definitions/agent-runtimes/opencode/composer-capabilities";
 
 import type { ChatState } from "../chat/chat-state.js";
 import type { ChatComposerCommandPanel } from "../chat/components/chat-composer.js";
@@ -255,6 +256,7 @@ export function buildOpenCodeConversationRuntime(input: {
   bootstrap: SessionComposerRuntimeInput["bootstrap"];
   chat: UseOpenCodeSessionStateResult["chat"];
   configControl: SessionComposerRuntimeInput["configControl"];
+  executePromptCommand: (input: { text: string }) => Promise<void>;
   sessionMessage: UseOpenCodeSessionStateResult["sessionMessage"];
   sessionSnapshot: UseOpenCodeSessionStateResult["lifecycle"]["sessionSnapshot"];
   startTurn: SessionTurnControl["startTurn"];
@@ -314,6 +316,25 @@ export function buildOpenCodeConversationRuntime(input: {
       sessionErrorMessage: input.sessionMessage.sessionErrorMessage,
       clearSessionErrorMessage: input.sessionMessage.clearSessionErrorMessage,
       contextUsage: null,
+      executeTypedRuntimeCommand: (commandInput) => {
+        if (!isOpenCodePromptCommandId(commandInput.commandId)) {
+          input.sessionMessage.reportSessionErrorMessage(
+            `Unsupported OpenCode runtime command '${commandInput.commandId}'.`,
+          );
+          return false;
+        }
+
+        void input
+          .executePromptCommand({
+            text: commandInput.text,
+          })
+          .catch((error: unknown) => {
+            input.sessionMessage.reportSessionErrorMessage(
+              error instanceof Error ? error.message : "Could not send OpenCode prompt command.",
+            );
+          });
+        return true;
+      },
       modelSelection: capabilities.composerModelSelection,
     },
     serverRequestsState: {
