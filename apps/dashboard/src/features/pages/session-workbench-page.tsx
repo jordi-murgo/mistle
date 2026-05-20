@@ -434,6 +434,8 @@ function SessionWorkbenchPageContent(input: {
   }, [workbench.connectionReadiness.canConnect, workbench.primaryPanelState.transitionState]);
   const initialEntryStartupState =
     !hasEnteredReadyWorkbench && alert === null ? workbench.initialEntryStartupState : null;
+  const isConversationTurnRunning =
+    conversationPane.composerStateInput.turnControl.activeTurnState === "running";
   if (input.sandboxInstanceId === null) {
     return (
       <ConversationWorkspaceFrame
@@ -521,7 +523,7 @@ function SessionWorkbenchPageContent(input: {
         mainContent={renderPrimaryPanelMainContent({
           conversation: {
             activeTurnId: conversationPane.chatState.activeTurnId,
-            isTurnInProgress: conversationPane.chatState.status === "inProgress",
+            isTurnInProgress: isConversationTurnRunning,
             pendingTurnId: conversationPane.chatState.pendingTurnId,
             autoScrollToBottomOnInitialLoad: true,
             initialBottomScrollResetKey: [
@@ -568,10 +570,7 @@ function SessionWorkbenchPageContent(input: {
               onRespondToServerRequest={conversationPane.serverRequestsState.respondToServerRequest}
               key={input.sandboxInstanceId ?? "missing-session"}
               serverRequestPanelEntries={unmatchedServerRequests}
-              showWorkingIndicator={
-                conversationPane.chatState.activeTurnId !== null &&
-                conversationPane.chatState.status === "inProgress"
-              }
+              showWorkingIndicator={isConversationTurnRunning}
             />
           ) : null
         }

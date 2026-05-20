@@ -13,6 +13,7 @@ import {
   resolveOpenCodePermissionResponse,
   type UseOpenCodeSessionStateResult,
 } from "./opencode/session-state/index.js";
+import type { UsePiSessionStateResult } from "./pi/session-state/index.js";
 import type { ServerRequestEntry } from "./server-requests/index.js";
 import { SessionRuntimeWorkbenchCapabilities } from "./session-runtime-workbench-capabilities.js";
 
@@ -38,6 +39,34 @@ export type SessionWorkbenchRuntimeAdapter = {
   composerRuntimeInput: SessionComposerRuntimeInput;
   serverRequestsState: SessionWorkbenchServerRequestsState;
 };
+
+function resolvePiActiveTurnIdForConversation(
+  chatState: UsePiSessionStateResult["chat"]["chatState"],
+): string | null {
+  if (chatState.status !== "busy") {
+    return null;
+  }
+
+  if (
+    chatState.pendingTurnId !== null &&
+    chatState.entries.some((entry) => entry.turnId === chatState.pendingTurnId)
+  ) {
+    return chatState.pendingTurnId;
+  }
+
+  return chatState.entries.at(-1)?.turnId ?? null;
+}
+
+function mapPiChatStateForConversation(
+  chatState: UsePiSessionStateResult["chat"]["chatState"],
+): SessionConversationChatState {
+  return {
+    activeTurnId: resolvePiActiveTurnIdForConversation(chatState),
+    entries: chatState.entries,
+    pendingTurnId: chatState.pendingTurnId,
+    status: chatState.status === "busy" ? "inProgress" : chatState.status,
+  };
+}
 
 export function buildCodexConversationRuntime(input: {
   activeConversationId: string | null;
@@ -177,6 +206,60 @@ export function buildOpenCodeConversationRuntime(input: {
         input.chat.chatState.pendingPermissions,
       ),
       respondToServerRequest,
+    },
+  };
+}
+
+export function buildPiConversationRuntime(input: {
+  bootstrap: SessionComposerRuntimeInput["bootstrap"];
+  chat: UsePiSessionStateResult["chat"];
+  configControl: SessionComposerRuntimeInput["configControl"];
+  sessionMessage: UsePiSessionStateResult["sessionMessage"];
+  sessionSnapshot: UsePiSessionStateResult["lifecycle"]["sessionSnapshot"];
+  startTurn: SessionTurnControl["startTurn"];
+}): SessionWorkbenchRuntimeAdapter {
+  const capabilities = SessionRuntimeWorkbenchCapabilities.PI;
+  const isTurnRunning = input.chat.chatState.status === "busy";
+
+  return {
+    displayName: capabilities.displayName,
+    cliTerminalContentInset: capabilities.cliTerminalContentInset,
+    conversation: {
+      activeConversationId: input.sessionSnapshot?.activeSessionFile ?? null,
+      chatState: mapPiChatStateForConversation(input.chat.chatState),
+    },
+    composerRuntimeInput: {
+      bootstrap: input.bootstrap,
+      configControl: input.configControl,
+      turnControl: {
+        activeTurnState: isTurnRunning ? "running" : "idle",
+        canInterrupt: input.chat.canInterruptTurn,
+        canSteer: capabilities.supportsSteering && input.chat.canSteerTurn,
+        completedTurnErrorMessage: input.chat.chatState.completedErrorMessage,
+        interruptTurn: (): void => {
+          void input.chat.abortConversation();
+        },
+        isInterrupting: input.chat.isInterruptingTurn,
+        isStarting: input.chat.isStartingTurn,
+        isSteering: input.chat.isSteeringTurn,
+        startTurn: input.startTurn,
+        steerTurn: async (turnInput): Promise<void> => {
+          await input.chat.steerTurn({
+            submittedPrompt: turnInput.transcriptPrompt ?? turnInput.submittedPrompt,
+          });
+        },
+      },
+      sessionErrorMessage: input.sessionMessage.sessionErrorMessage,
+      clearSessionErrorMessage: input.sessionMessage.clearSessionErrorMessage,
+      contextUsage: null,
+      modelSelection: capabilities.composerModelSelection,
+    },
+    serverRequestsState: {
+      isRespondingToServerRequest: false,
+      pendingServerRequests: [],
+      respondToServerRequest: () => {
+        input.sessionMessage.reportSessionErrorMessage("Pi has no pending server request.");
+      },
     },
   };
 }
