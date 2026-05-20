@@ -191,6 +191,45 @@ describe("useSessionWorkbenchRuntimeConversationNavigation", () => {
     await expect.poll(() => resumedConversationIds).toEqual(["conversation_requested"]);
   });
 
+  it("keeps URL conversation navigation available from the provider original", async () => {
+    const resumedConversationIds: string[] = [];
+    renderConversationNavigation({
+      requestedRuntimeConversationId: "conversation_requested",
+      sandboxInstanceId: "sbi_conversation_navigation_provider_original_restore",
+      runtimeConversationNavigator: createRuntimeConversationNavigator({
+        activeConversationId: "conversation_provider",
+        availableConversations: [
+          createConversation({ id: "conversation_provider" }),
+          createConversation({ id: "conversation_requested" }),
+        ],
+        originalConversationId: "conversation_provider",
+        providerConversationId: "conversation_provider",
+        resumedConversationIds,
+      }),
+    });
+
+    await expect.poll(() => resumedConversationIds).toEqual(["conversation_requested"]);
+  });
+
+  it("waits for the runtime to establish an active conversation before URL conversation navigation", async () => {
+    const resumedConversationIds: string[] = [];
+    renderConversationNavigation({
+      requestedRuntimeConversationId: "conversation_requested",
+      sandboxInstanceId: "sbi_conversation_navigation_wait_for_active",
+      runtimeConversationNavigator: createRuntimeConversationNavigator({
+        activeConversationId: null,
+        availableConversations: [],
+        resumedConversationIds,
+      }),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(resumedConversationIds).toEqual([]);
+  });
+
   it("does not refresh again only because the navigator adapter callback identity changed", async () => {
     const refreshedConversationCwds: Array<string | null> = [];
     const createNavigator = () =>

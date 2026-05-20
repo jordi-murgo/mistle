@@ -71,10 +71,14 @@ function toPiConnectSessionInput(
 ): PiConnectSessionInput {
   return {
     ...(connectInput.initialCwd === undefined ? {} : { initialCwd: connectInput.initialCwd }),
+    ...(connectInput.providerConversationId === undefined ||
+    connectInput.providerConversationId === null
+      ? {}
+      : { providerConversationId: connectInput.providerConversationId }),
     sandboxInstanceId: connectInput.sandboxInstanceId,
     ...(connectInput.targetRuntimeConversationId === null
       ? {}
-      : { targetSessionFile: connectInput.targetRuntimeConversationId }),
+      : { targetConversationId: connectInput.targetRuntimeConversationId }),
   };
 }
 
@@ -206,7 +210,7 @@ export function buildPiLifecycleForHandoff(
       lifecycle.sessionSnapshot === null
         ? null
         : {
-            activeConversationId: lifecycle.sessionSnapshot.activeSessionFile,
+            activeConversationId: lifecycle.sessionSnapshot.activeConversationId,
           },
   };
 }
@@ -226,7 +230,7 @@ export function buildPiLifecycleForWorkbench(
     recoverSession: (recoverInput): void => {
       lifecycle.recoverSession({
         sandboxInstanceId: recoverInput.sandboxInstanceId,
-        targetSessionFile: recoverInput.targetRuntimeConversationId,
+        targetConversationId: recoverInput.targetRuntimeConversationId,
       });
     },
     recoverableDisconnect: lifecycle.recoverableDisconnect,
@@ -235,8 +239,9 @@ export function buildPiLifecycleForWorkbench(
       lifecycle.sessionSnapshot === null
         ? null
         : {
-            activeRuntimeConversationId: lifecycle.sessionSnapshot.activeSessionFile,
+            activeRuntimeConversationId: lifecycle.sessionSnapshot.activeConversationId,
             connectedAtIso: lifecycle.sessionSnapshot.connectedAtIso,
+            providerConversationId: lifecycle.sessionSnapshot.providerConversationId,
             sandboxInstanceId: lifecycle.sessionSnapshot.sandboxInstanceId,
           },
   };
@@ -325,8 +330,8 @@ export function buildPiHandoffRuntime(input: {
     lifecycle: input.lifecycle,
     preserveCliLaunchForRestore: SessionRuntimeWorkbenchCapabilities.PI.preservesCliLaunchContext,
     resetServerRequests: () => {},
-    restoreConversationId: input.sessionSnapshot?.activeSessionFile ?? null,
-    restoreProviderConversationId: null,
+    restoreConversationId: input.sessionSnapshot?.activeConversationId ?? null,
+    restoreProviderConversationId: input.sessionSnapshot?.providerConversationId ?? null,
     resolveCliLaunchTarget: async () => {
       const activeSessionFile = input.sessionSnapshot?.activeSessionFile ?? null;
 

@@ -36,30 +36,46 @@ type PiDeliveryContextNotificationParams = z.output<
   typeof PiDeliveryContextNotificationParamsSchema
 >;
 
-const PiConnections = new WeakMap<
-  AgentConversationConnection,
-  {
-    client: PiSessionClient;
-    deliveryContextNotificationParams?: PiDeliveryContextNotificationParams;
-    transport: SandboxSessionTransport;
-  }
->();
+type PiConnection = {
+  client: PiSessionClient;
+  deliveryContextNotificationParams?: PiDeliveryContextNotificationParams;
+  sessionFilesByConversationId: Map<string, string>;
+};
+
+const PiConnections = new WeakMap<AgentConversationConnection, PiConnection>();
 
 function createUnsupportedPiProviderRequestError(method: string): Error {
   return new Error(`Pi conversation provider does not support generic request method '${method}'.`);
 }
 
-function getPiConnection(connection: AgentConversationConnection): {
-  client: PiSessionClient;
-  deliveryContextNotificationParams?: PiDeliveryContextNotificationParams;
-  transport: SandboxSessionTransport;
-} {
+function getPiConnection(connection: AgentConversationConnection): PiConnection {
   const piConnection = PiConnections.get(connection);
   if (piConnection === undefined) {
     throw new Error("Pi conversation provider received an unknown connection.");
   }
 
   return piConnection;
+}
+
+async function resolvePiSessionFile(input: {
+  piConnection: PiConnection;
+  providerConversationId: string;
+}): Promise<string> {
+  const cachedSessionFile = input.piConnection.sessionFilesByConversationId.get(
+    input.providerConversationId,
+  );
+  if (cachedSessionFile !== undefined) {
+    return cachedSessionFile;
+  }
+
+  const resolvedConversation = await input.piConnection.client.resolveConversation({
+    providerConversationId: input.providerConversationId,
+  });
+  input.piConnection.sessionFilesByConversationId.set(
+    input.providerConversationId,
+    resolvedConversation.sessionFile,
+  );
+  return resolvedConversation.sessionFile;
 }
 
 function createPiProviderExecutionId(providerConversationId: string): string {
@@ -136,7 +152,7 @@ async function connectPiConversationProvider(input: {
 
   PiConnections.set(connection, {
     client,
-    transport,
+    sessionFilesByConversationId: new Map(),
   });
 
   return connection;
@@ -146,14 +162,18 @@ export function createPiConversationProvider(): AgentConversationProvider {
   return {
     connect: connectPiConversationProvider,
     inspectConversation: async (input) => {
-      const { client } = getPiConnection(input.connection);
-      const state = await client.getState({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const sessionFile = await resolvePiSessionFile({
+        piConnection,
+        providerConversationId: input.providerConversationId,
+      });
+      const state = await piConnection.client.getState({
+        sessionFile,
       });
       const status = resolvePiConversationStatus(state);
 
       return {
-        exists: state.sessionFile === input.providerConversationId,
+        exists: state.sessionFile === sessionFile,
         status,
         activeExecutionId:
           status === AgentConversationStatuses.ACTIVE
@@ -162,31 +182,48 @@ export function createPiConversationProvider(): AgentConversationProvider {
       };
     },
     readConversationMetadata: async (input) => {
-      const { client } = getPiConnection(input.connection);
-      return client.readMetadata({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const sessionFile = await resolvePiSessionFile({
+        piConnection,
+        providerConversationId: input.providerConversationId,
+      });
+      return piConnection.client.readMetadata({
+        sessionFile,
       });
     },
     generateConversationTitle: generatePiConversationTitle,
     createConversation: async (input) => {
-      const { client } = getPiConnection(input.connection);
-      return input.cwd === undefined
-        ? client.createConversation({})
-        : client.createConversation({ cwd: input.cwd });
+      const piConnection = getPiConnection(input.connection);
+      const createdConversation = await (input.cwd === undefined
+        ? piConnection.client.createConversation({})
+        : piConnection.client.createConversation({ cwd: input.cwd }));
+      piConnection.sessionFilesByConversationId.set(
+        createdConversation.providerConversationId,
+        createdConversation.sessionFile,
+      );
+      return createdConversation;
     },
     resumeConversation: async (input) => {
-      const { client } = getPiConnection(input.connection);
-      await client.resumeConversation({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const resumedConversation = await piConnection.client.resumeConversation({
+        providerConversationId: input.providerConversationId,
       });
+      piConnection.sessionFilesByConversationId.set(
+        input.providerConversationId,
+        resumedConversation.sessionFile,
+      );
     },
     startExecution: async (input) => {
-      const { client, deliveryContextNotificationParams } = getPiConnection(input.connection);
-      await client.prompt({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const sessionFile = await resolvePiSessionFile({
+        piConnection,
+        providerConversationId: input.providerConversationId,
+      });
+      await piConnection.client.prompt({
+        sessionFile,
         message: renderPiPromptInput({
           collaborationModeSettings: input.collaborationModeSettings,
-          deliveryContextNotificationParams,
+          deliveryContextNotificationParams: piConnection.deliveryContextNotificationParams,
           inputText: input.inputText,
         }),
       });
@@ -196,11 +233,15 @@ export function createPiConversationProvider(): AgentConversationProvider {
       };
     },
     steerExecution: async (input) => {
-      const { client, deliveryContextNotificationParams } = getPiConnection(input.connection);
-      await client.steer({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const sessionFile = await resolvePiSessionFile({
+        piConnection,
+        providerConversationId: input.providerConversationId,
+      });
+      await piConnection.client.steer({
+        sessionFile,
         message: renderPiPromptInput({
-          deliveryContextNotificationParams,
+          deliveryContextNotificationParams: piConnection.deliveryContextNotificationParams,
           inputText: input.inputText,
         }),
       });
@@ -210,18 +251,22 @@ export function createPiConversationProvider(): AgentConversationProvider {
       };
     },
     recoverLateSteer: async (input) => {
-      const { client, deliveryContextNotificationParams } = getPiConnection(input.connection);
-      const state = await client.getState({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const sessionFile = await resolvePiSessionFile({
+        piConnection,
+        providerConversationId: input.providerConversationId,
+      });
+      const state = await piConnection.client.getState({
+        sessionFile,
       });
       const message = renderPiPromptInput({
-        deliveryContextNotificationParams,
+        deliveryContextNotificationParams: piConnection.deliveryContextNotificationParams,
         inputText: input.inputText,
       });
 
       if (resolvePiConversationStatus(state) === AgentConversationStatuses.ACTIVE) {
-        await client.steer({
-          sessionFile: input.providerConversationId,
+        await piConnection.client.steer({
+          sessionFile,
           message,
         });
 
@@ -230,8 +275,8 @@ export function createPiConversationProvider(): AgentConversationProvider {
         };
       }
 
-      await client.followUp({
-        sessionFile: input.providerConversationId,
+      await piConnection.client.followUp({
+        sessionFile,
         message,
       });
 
@@ -240,9 +285,13 @@ export function createPiConversationProvider(): AgentConversationProvider {
       };
     },
     interruptExecution: async (input) => {
-      const { client } = getPiConnection(input.connection);
-      await client.abort({
-        sessionFile: input.providerConversationId,
+      const piConnection = getPiConnection(input.connection);
+      const sessionFile = await resolvePiSessionFile({
+        piConnection,
+        providerConversationId: input.providerConversationId,
+      });
+      await piConnection.client.abort({
+        sessionFile,
       });
     },
   };

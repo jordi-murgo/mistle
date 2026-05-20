@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -149,8 +149,20 @@ struct PiRpcChild {
 }
 
 struct PiRecentSessionCandidate {
+    created_at: Option<String>,
+    cwd: Option<String>,
+    id: String,
     modified: std::time::SystemTime,
+    title: Option<String>,
     path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct PiSessionFileHeader {
+    created_at: Option<String>,
+    cwd: Option<String>,
+    id: String,
+    title: Option<String>,
 }
 
 #[derive(Debug)]
@@ -378,7 +390,10 @@ impl PiProxyState {
             .ok_or(PiProxyError::MissingSessionDir)
     }
 
-    fn find_recent_conversation(&self, cwd: Option<&str>) -> Result<Option<String>, PiProxyError> {
+    fn collect_session_candidates(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<Vec<PiRecentSessionCandidate>, PiProxyError> {
         let session_dir = self.session_dir()?;
         let mut candidates = Vec::new();
         let mut pending_directories = vec![PathBuf::from(session_dir)];
@@ -388,7 +403,7 @@ impl PiProxyState {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     if directory == Path::new(session_dir) {
-                        return Ok(None);
+                        return Ok(Vec::new());
                     }
                     continue;
                 }
@@ -413,7 +428,11 @@ impl PiProxyState {
                 if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
                     continue;
                 }
-                if !is_matching_pi_session_file(&path, cwd) {
+                let header = match read_pi_session_file_header(&path) {
+                    Some(header) => header,
+                    None => continue,
+                };
+                if !is_matching_pi_session_file_header(&header, cwd) {
                     continue;
                 }
                 let metadata = entry
@@ -422,14 +441,78 @@ impl PiProxyState {
                 let modified = metadata
                     .modified()
                     .map_err(|error| PiProxyError::InvalidRequest(error.to_string()))?;
-                candidates.push(PiRecentSessionCandidate { modified, path });
+                candidates.push(PiRecentSessionCandidate {
+                    created_at: header.created_at,
+                    cwd: header.cwd,
+                    id: header.id,
+                    modified,
+                    title: header.title,
+                    path,
+                });
             }
         }
 
         candidates.sort_by(|left, right| right.modified.cmp(&left.modified));
-        Ok(candidates
-            .first()
-            .map(|candidate| candidate.path.to_string_lossy().to_string()))
+        Ok(candidates)
+    }
+
+    fn find_recent_conversation(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<Option<PiRecentSessionCandidate>, PiProxyError> {
+        let candidates = self.collect_session_candidates(cwd)?;
+        Ok(candidates.into_iter().next())
+    }
+
+    fn find_conversation_by_id(
+        &self,
+        provider_conversation_id: &str,
+    ) -> Result<PiRecentSessionCandidate, PiProxyError> {
+        self.collect_session_candidates(None)?
+            .into_iter()
+            .find(|candidate| candidate.id == provider_conversation_id)
+            .ok_or_else(|| {
+                PiProxyError::InvalidRequest(format!(
+                    "Pi conversation '{provider_conversation_id}' was not found"
+                ))
+            })
+    }
+
+    fn list_conversations(&self, cwd: Option<&str>, limit: usize) -> Result<Value, PiProxyError> {
+        if limit == 0 {
+            return Err(PiProxyError::InvalidRequest(
+                "limit must be greater than zero".to_string(),
+            ));
+        }
+
+        let candidates = self
+            .collect_session_candidates(cwd)?
+            .into_iter()
+            .filter_map(|candidate| {
+                let candidate_cwd = candidate.cwd.clone()?;
+                Some((candidate, candidate_cwd))
+            })
+            .collect::<Vec<_>>();
+        let has_more = candidates.len() > limit;
+        let conversations = candidates
+            .into_iter()
+            .take(limit)
+            .map(|(candidate, candidate_cwd)| {
+                json!({
+                    "id": candidate.id,
+                    "sessionFile": candidate.path.to_string_lossy().to_string(),
+                    "cwd": candidate_cwd,
+                    "title": candidate.title,
+                    "createdAt": candidate.created_at,
+                    "updatedAt": system_time_to_unix_millis(candidate.modified),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "conversations": conversations,
+            "hasMore": has_more,
+        }))
     }
 
     fn shutdown_child(&self) {
@@ -757,18 +840,31 @@ fn read_param_string(params: &Option<Value>, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn is_matching_pi_session_file(path: &Path, cwd: Option<&str>) -> bool {
+fn read_param_usize(params: &Option<Value>, key: &str) -> Option<usize> {
+    params
+        .as_ref()
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+}
+
+fn require_param_usize(params: &Option<Value>, key: &str) -> Result<usize, PiProxyError> {
+    read_param_usize(params, key)
+        .ok_or_else(|| PiProxyError::InvalidRequest(format!("missing required parameter '{key}'")))
+}
+
+fn read_pi_session_file_header(path: &Path) -> Option<PiSessionFileHeader> {
     let mut file = match File::open(path) {
         Ok(file) => file,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let mut buffer = [0_u8; 8192];
     let bytes_read = match file.read(&mut buffer) {
         Ok(bytes_read) => bytes_read,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     if bytes_read == 0 {
-        return false;
+        return None;
     }
     let first_line = String::from_utf8_lossy(&buffer[..bytes_read])
         .lines()
@@ -777,15 +873,35 @@ fn is_matching_pi_session_file(path: &Path, cwd: Option<&str>) -> bool {
         .to_string();
     let header = match serde_json::from_str::<Value>(&first_line) {
         Ok(header) => header,
-        Err(_) => return false,
+        Err(_) => return None,
     };
-    if header["type"].as_str() != Some("session") || header["id"].as_str().is_none() {
-        return false;
+    let id = header["id"].as_str()?;
+    if header["type"].as_str() != Some("session") {
+        return None;
     }
+
+    Some(PiSessionFileHeader {
+        created_at: header["timestamp"].as_str().map(ToString::to_string),
+        cwd: header["cwd"].as_str().map(ToString::to_string),
+        id: id.to_string(),
+        title: header["sessionName"]
+            .as_str()
+            .or_else(|| header["title"].as_str())
+            .map(ToString::to_string),
+    })
+}
+
+fn is_matching_pi_session_file_header(header: &PiSessionFileHeader, cwd: Option<&str>) -> bool {
     match cwd {
-        Some(expected_cwd) => header["cwd"].as_str() == Some(expected_cwd),
+        Some(expected_cwd) => header.cwd.as_deref() == Some(expected_cwd),
         None => true,
     }
+}
+
+fn system_time_to_unix_millis(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
 }
 
 fn require_param_string(params: &Option<Value>, key: &str) -> Result<String, PiProxyError> {
@@ -811,12 +927,36 @@ fn handle_pi_method(
                 captured_events,
             )?;
             let session_file = PiProxyState::read_session_file(&state_value)?;
-            Ok(json!({ "providerConversationId": session_file }))
+            let provider_conversation_id = state_value["sessionId"].as_str().ok_or_else(|| {
+                PiProxyError::InvalidRequest("Pi did not report sessionId".to_string())
+            })?;
+            Ok(json!({
+                "providerConversationId": provider_conversation_id,
+                "sessionFile": session_file,
+            }))
         }
         "pi/findRecentConversation" => {
             let cwd = read_param_string(&request.params, "cwd");
-            let provider_conversation_id = state.find_recent_conversation(cwd.as_deref())?;
-            Ok(json!({ "providerConversationId": provider_conversation_id }))
+            let conversation = state.find_recent_conversation(cwd.as_deref())?;
+            Ok(match conversation {
+                Some(conversation) => json!({
+                    "providerConversationId": conversation.id,
+                }),
+                None => json!({
+                    "providerConversationId": Value::Null,
+                }),
+            })
+        }
+        "pi/listConversations" => {
+            let cwd = read_param_string(&request.params, "cwd");
+            let limit = require_param_usize(&request.params, "limit")?;
+            state.list_conversations(cwd.as_deref(), limit)
+        }
+        "pi/resolveConversation" => {
+            let provider_conversation_id =
+                require_param_string(&request.params, "providerConversationId")?;
+            let conversation = state.find_conversation_by_id(&provider_conversation_id)?;
+            Ok(json!({ "sessionFile": conversation.path.to_string_lossy().to_string() }))
         }
         "pi/getState" => {
             let session_file = read_param_string(&request.params, "sessionFile");
@@ -862,11 +1002,14 @@ fn handle_pi_method(
             Ok(messages_value)
         }
         "pi/resumeConversation" => {
-            let session_file = require_param_string(&request.params, "sessionFile")?;
+            let provider_conversation_id =
+                require_param_string(&request.params, "providerConversationId")?;
+            let conversation = state.find_conversation_by_id(&provider_conversation_id)?;
+            let session_file = conversation.path.to_string_lossy().to_string();
             state.ensure_child(None)?;
             state.switch_session(&session_file, captured_events)?;
             PiProxyState::mark_active_and_start_activity_monitor(state);
-            Ok(Value::Null)
+            Ok(json!({ "sessionFile": session_file }))
         }
         "pi/setModel" => {
             let session_file = require_param_string(&request.params, "sessionFile")?;
@@ -1011,6 +1154,10 @@ mod tests {
         );
         assert_eq!(
             create_response["result"]["providerConversationId"],
+            json!(simulated_pi.session_id())
+        );
+        assert_eq!(
+            create_response["result"]["sessionFile"],
             json!(simulated_pi.session_file())
         );
 
@@ -1079,7 +1226,7 @@ mod tests {
         let state = Arc::new(PiProxyState {
             config: PiProxyConfig {
                 pi_cli_path: simulated_pi.path(),
-                env: BTreeMap::new(),
+                env: simulated_pi.session_env(),
             },
             child: Mutex::new(None),
             command_lock: Mutex::new(()),
@@ -1098,7 +1245,7 @@ mod tests {
                 "id": "resume",
                 "method": "pi/resumeConversation",
                 "params": {
-                    "sessionFile": simulated_pi.session_file()
+                    "providerConversationId": simulated_pi.session_id()
                 }
             })
             .to_string(),
@@ -1110,7 +1257,10 @@ mod tests {
                 .expect("resume conversation should produce a response"),
         );
         assert_eq!(resume_response["id"], json!("resume"));
-        assert_eq!(resume_response["result"], Value::Null);
+        assert_eq!(
+            resume_response["result"]["sessionFile"],
+            json!(simulated_pi.session_file())
+        );
         assert!(
             keepalive_manager
                 .lock()
@@ -1175,7 +1325,7 @@ mod tests {
         let state = Arc::new(PiProxyState {
             config: PiProxyConfig {
                 pi_cli_path: simulated_pi.path(),
-                env: BTreeMap::new(),
+                env: simulated_pi.session_env(),
             },
             child: Mutex::new(None),
             command_lock: Mutex::new(()),
@@ -1193,7 +1343,7 @@ mod tests {
                 "id": "resume",
                 "method": "pi/resumeConversation",
                 "params": {
-                    "sessionFile": simulated_pi.session_file()
+                    "providerConversationId": simulated_pi.session_id()
                 }
             })
             .to_string(),
@@ -1205,7 +1355,10 @@ mod tests {
                 .expect("resume conversation should produce a response"),
         );
         assert_eq!(resume_response["id"], json!("resume"));
-        assert_eq!(resume_response["result"], Value::Null);
+        assert_eq!(
+            resume_response["result"]["sessionFile"],
+            json!(simulated_pi.session_file())
+        );
 
         state.shutdown_child();
     }
@@ -1330,11 +1483,101 @@ mod tests {
         );
         assert_eq!(
             response["result"]["providerConversationId"],
+            json!("recent")
+        );
+    }
+
+    #[test]
+    fn lists_pi_conversations_from_configured_session_dir() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let session_dir = directory.path().join("sessions");
+        let project_session_dir = session_dir.join("--workspace-project--");
+        let other_session_dir = session_dir.join("--workspace-other--");
+        fs::create_dir_all(&project_session_dir).expect("project session directory should exist");
+        fs::create_dir_all(&other_session_dir).expect("other session directory should exist");
+        let older_session = project_session_dir.join("older.jsonl");
+        let newer_session = project_session_dir.join("newer.jsonl");
+        let other_session = other_session_dir.join("other.jsonl");
+        write_session_file_with_timestamp(
+            &older_session,
+            "older",
+            "/workspace/project",
+            "2026-05-18T00:00:00.000Z",
+        );
+        thread::sleep(Duration::from_millis(10));
+        write_session_file_with_timestamp(
+            &newer_session,
+            "newer",
+            "/workspace/project",
+            "2026-05-19T00:00:00.000Z",
+        );
+        thread::sleep(Duration::from_millis(10));
+        write_session_file_with_timestamp(
+            &other_session,
+            "other",
+            "/workspace/other",
+            "2026-05-20T00:00:00.000Z",
+        );
+        let keepalive_manager = Arc::new(Mutex::new(KeepaliveManager::default()));
+        let state = Arc::new(PiProxyState {
+            config: PiProxyConfig {
+                pi_cli_path: "/bin/false".to_string(),
+                env: BTreeMap::from([(
+                    "PI_CODING_AGENT_SESSION_DIR".to_string(),
+                    session_dir
+                        .to_str()
+                        .expect("session dir should be UTF-8")
+                        .to_string(),
+                )]),
+            },
+            child: Mutex::new(None),
+            command_lock: Mutex::new(()),
+            event_subscribers: Mutex::new(Vec::new()),
+            keepalive_manager,
+            active: std::sync::atomic::AtomicBool::new(false),
+            activity_monitor_running: std::sync::atomic::AtomicBool::new(false),
+            next_id: AtomicU64::new(1),
+        });
+
+        let responses = handle_json_rpc_request(
+            &state,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": "list",
+                "method": "pi/listConversations",
+                "params": { "cwd": "/workspace/project", "limit": 1 }
+            })
+            .to_string(),
+        );
+
+        let response = parse_json_rpc_message(
+            responses
+                .last()
+                .expect("conversation list lookup should produce a response"),
+        );
+        assert_eq!(response["result"]["hasMore"], json!(true));
+        assert_eq!(response["result"]["conversations"][0]["id"], json!("newer"));
+        assert_eq!(
+            response["result"]["conversations"][0]["sessionFile"],
             json!(
-                recent_session
+                newer_session
                     .to_str()
-                    .expect("recent session path should be UTF-8")
+                    .expect("newer session path should be UTF-8")
             )
+        );
+        assert_eq!(
+            response["result"]["conversations"][0]["cwd"],
+            json!("/workspace/project")
+        );
+        assert_eq!(
+            response["result"]["conversations"][0]["createdAt"],
+            json!("2026-05-19T00:00:00.000Z")
+        );
+        assert!(
+            response["result"]["conversations"][0]["updatedAt"]
+                .as_u64()
+                .is_some(),
+            "listed Pi conversation should include file modified time"
         );
     }
 
@@ -1343,6 +1586,15 @@ mod tests {
     }
 
     fn write_session_file(path: &std::path::Path, id: &str, cwd: &str) {
+        write_session_file_with_timestamp(path, id, cwd, "2026-05-19T00:00:00.000Z");
+    }
+
+    fn write_session_file_with_timestamp(
+        path: &std::path::Path,
+        id: &str,
+        cwd: &str,
+        timestamp: &str,
+    ) {
         fs::write(
             path,
             format!(
@@ -1351,7 +1603,7 @@ mod tests {
                     "type": "session",
                     "version": 1,
                     "id": id,
-                    "timestamp": "2026-05-19T00:00:00.000Z",
+                    "timestamp": timestamp,
                     "cwd": cwd
                 })
             ),
@@ -1363,7 +1615,9 @@ mod tests {
         _directory: tempfile::TempDir,
         script_path: String,
         cwd: String,
+        session_dir: String,
         session_file: String,
+        session_id: String,
     }
 
     impl SimulatedPiRpcProcess {
@@ -1384,7 +1638,15 @@ mod tests {
             let script_path = directory.path().join("simulated-pi-rpc");
             let cwd = directory.path().join("workspace");
             fs::create_dir(&cwd).expect("workspace directory should be created");
-            let session_file = directory.path().join("session.json");
+            let session_dir = directory.path().join("sessions");
+            fs::create_dir(&session_dir).expect("session directory should be created");
+            let session_file = session_dir.join("session.jsonl");
+            let session_id = "simulated-session";
+            write_session_file(
+                &session_file,
+                session_id,
+                cwd.to_str().expect("cwd should be UTF-8"),
+            );
             let active_marker = directory.path().join("active");
             let no_initial_session_marker = directory.path().join("no-initial-session");
             if active_session {
@@ -1409,11 +1671,11 @@ while IFS= read -r line; do
         printf '{{"type":"response","command":"get_state","id":"%s","success":false,"error":"no active session"}}\n' "$id"
       elif [ -f "$active_marker" ]; then
         rm "$active_marker"
-        printf '{{"type":"response","command":"get_state","id":"%s","success":true,"data":{{"sessionFile":"{}","sessionName":"Simulated session","isStreaming":true,"isCompacting":false,"pendingMessageCount":0}}}}\n' "$id"
+        printf '{{"type":"response","command":"get_state","id":"%s","success":true,"data":{{"sessionFile":"{}","sessionId":"{}","sessionName":"Simulated session","isStreaming":true,"isCompacting":false,"pendingMessageCount":0}}}}\n' "$id"
         sleep 0.1
         printf '{{"type":"agent_end"}}\n'
       else
-        printf '{{"type":"response","command":"get_state","id":"%s","success":true,"data":{{"sessionFile":"{}","sessionName":"Simulated session","isStreaming":false,"isCompacting":false,"pendingMessageCount":0}}}}\n' "$id"
+        printf '{{"type":"response","command":"get_state","id":"%s","success":true,"data":{{"sessionFile":"{}","sessionId":"{}","sessionName":"Simulated session","isStreaming":false,"isCompacting":false,"pendingMessageCount":0}}}}\n' "$id"
       fi
       ;;
     *'"type":"switch_session"'*)
@@ -1455,7 +1717,9 @@ done
                 active_marker.display(),
                 no_initial_session_marker.display(),
                 session_file.display(),
-                session_file.display()
+                session_id,
+                session_file.display(),
+                session_id
             );
             fs::write(&script_path, script).expect("simulated Pi RPC script should be written");
             let mut permissions = fs::metadata(&script_path)
@@ -1472,10 +1736,15 @@ done
                     .expect("script path should be UTF-8")
                     .to_string(),
                 cwd: cwd.to_str().expect("cwd path should be UTF-8").to_string(),
+                session_dir: session_dir
+                    .to_str()
+                    .expect("session dir should be UTF-8")
+                    .to_string(),
                 session_file: session_file
                     .to_str()
                     .expect("session path should be UTF-8")
                     .to_string(),
+                session_id: session_id.to_string(),
             }
         }
 
@@ -1489,6 +1758,17 @@ done
 
         fn session_file(&self) -> &str {
             &self.session_file
+        }
+
+        fn session_id(&self) -> &str {
+            &self.session_id
+        }
+
+        fn session_env(&self) -> BTreeMap<String, String> {
+            BTreeMap::from([(
+                "PI_CODING_AGENT_SESSION_DIR".to_string(),
+                self.session_dir.clone(),
+            )])
         }
     }
 }
