@@ -412,6 +412,12 @@ export interface paths {
                         apiKeyId: string;
                         /** @enum {string} */
                         kind: "mistle_mcp_token";
+                      }
+                    | {
+                        /** @enum {string} */
+                        kind: "mistle_mcp_setup_assistant_token";
+                        sandboxProfileId: string;
+                        sandboxProfileVersion: number;
                       };
                   header: string;
                 }[];
@@ -470,6 +476,12 @@ export interface paths {
                       apiKeyId: string;
                       /** @enum {string} */
                       kind: "mistle_mcp_token";
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "mistle_mcp_setup_assistant_token";
+                      sandboxProfileId: string;
+                      sandboxProfileVersion: number;
                     };
                 egressRuleId: string;
                 familyId: string;
@@ -871,6 +883,12 @@ export interface paths {
                           apiKeyId: string;
                           /** @enum {string} */
                           kind: "mistle_mcp_token";
+                        }
+                      | {
+                          /** @enum {string} */
+                          kind: "mistle_mcp_setup_assistant_token";
+                          sandboxProfileId: string;
+                          sandboxProfileVersion: number;
                         };
                     header: string;
                   }[];
@@ -929,6 +947,12 @@ export interface paths {
                         apiKeyId: string;
                         /** @enum {string} */
                         kind: "mistle_mcp_token";
+                      }
+                    | {
+                        /** @enum {string} */
+                        kind: "mistle_mcp_setup_assistant_token";
+                        sandboxProfileId: string;
+                        sandboxProfileVersion: number;
                       };
                   egressRuleId: string;
                   familyId: string;
