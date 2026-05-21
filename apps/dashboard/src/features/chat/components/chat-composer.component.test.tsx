@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { describe, expect, it } from "vitest";
 
 import { ChatComposer } from "./chat-composer.js";
@@ -53,6 +53,16 @@ const ComposerCommandCapabilityFixture: React.ComponentProps<
       submitAs: "runtimeCommand",
     },
   ],
+};
+
+const ContextMentionCapabilityFixture: React.ComponentProps<
+  typeof ChatComposer
+>["composerCapabilities"][number] = {
+  kind: "contextMention",
+  trigger: "@",
+  source: "workspacePath",
+  insertAs: "relativePathText",
+  submitAs: "inlineText",
 };
 
 function createBaseComposerProps(): React.ComponentProps<typeof ChatComposer> {
@@ -594,6 +604,198 @@ describe("ChatComposer", () => {
     fireEvent.mouseDown(screen.getByRole("option", { name: "/rewrite Rewrite with constraints" }));
 
     expect(getComposerTextarea().value).toBe("/rewrite ");
+  });
+
+  it("shows context mention file search results for inline @ queries", () => {
+    const observedQueries: string[] = [];
+
+    render(
+      <ControlledChatComposer
+        composerCapabilities={[ContextMentionCapabilityFixture]}
+        composerText="review @src"
+        contextMentionControl={{
+          status: "ready",
+          results: [
+            { kind: "directory", path: "src/features" },
+            { kind: "file", path: "src/index.ts" },
+          ],
+          onQueryChange: (query) => {
+            observedQueries.push(query);
+          },
+          onSelect: () => {},
+          onDismiss: () => {},
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("listbox", { name: "Search files" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "src/features" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "src/index.ts" })).toBeTruthy();
+    expect(observedQueries).toEqual(["src"]);
+  });
+
+  it("does not repeat context mention queries when result state changes", () => {
+    const observedQueries: string[] = [];
+
+    function ResultChangingComposer(): React.JSX.Element {
+      const [results, setResults] = useState([{ kind: "file" as const, path: "src/alpha.ts" }]);
+      const recordQuery = useCallback((query: string): void => {
+        observedQueries.push(query);
+      }, []);
+      const ignoreContextMentionEvent = useCallback((): void => {
+        return;
+      }, []);
+
+      return (
+        <>
+          <ControlledChatComposer
+            composerCapabilities={[ContextMentionCapabilityFixture]}
+            composerText="@src"
+            contextMentionControl={{
+              status: "ready",
+              results,
+              onQueryChange: recordQuery,
+              onSelect: ignoreContextMentionEvent,
+              onDismiss: ignoreContextMentionEvent,
+            }}
+          />
+          <button
+            onClick={() => {
+              setResults([{ kind: "file", path: "src/beta.ts" }]);
+            }}
+            type="button"
+          >
+            Replace results
+          </button>
+        </>
+      );
+    }
+
+    render(<ResultChangingComposer />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Replace results" }));
+
+    expect(observedQueries).toEqual(["src"]);
+  });
+
+  it("inserts selected context mention results as editable prompt text", () => {
+    const selectedPaths: string[] = [];
+
+    render(
+      <ControlledChatComposer
+        composerCapabilities={[ContextMentionCapabilityFixture]}
+        composerText="/review @src"
+        contextMentionControl={{
+          status: "ready",
+          results: [
+            { kind: "file", path: "src/index.ts" },
+            { kind: "file", path: "src/file with space.ts" },
+          ],
+          onQueryChange: () => {},
+          onSelect: (input) => {
+            selectedPaths.push(input.path);
+          },
+          onDismiss: () => {},
+        }}
+      />,
+    );
+
+    const composer = getComposerTextarea();
+    fireEvent.keyDown(composer, { key: "ArrowDown" });
+    fireEvent.keyDown(composer, { key: "Enter" });
+
+    expect(composer.value).toBe('/review "src/file with space.ts" ');
+    expect(selectedPaths).toEqual(["src/file with space.ts"]);
+  });
+
+  it("keeps keyboard-selected context mention results scrolled into view", () => {
+    const scrolledElementIds: string[] = [];
+    const originalScrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "scrollIntoView",
+    );
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value(this: Element): void {
+        if (this.id.length > 0) {
+          scrolledElementIds.push(this.id);
+        }
+      },
+    });
+
+    try {
+      render(
+        <ControlledChatComposer
+          composerCapabilities={[ContextMentionCapabilityFixture]}
+          composerText="@src"
+          contextMentionControl={{
+            status: "ready",
+            results: [
+              { kind: "file", path: "src/alpha.ts" },
+              { kind: "file", path: "src/beta.ts" },
+              { kind: "file", path: "src/gamma.ts" },
+            ],
+            onQueryChange: () => {},
+            onSelect: () => {},
+            onDismiss: () => {},
+          }}
+        />,
+      );
+
+      fireEvent.keyDown(getComposerTextarea(), { key: "ArrowDown" });
+
+      expect(scrolledElementIds.some((elementId) => elementId.endsWith("-1"))).toBe(true);
+    } finally {
+      if (originalScrollIntoViewDescriptor === undefined) {
+        Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+      } else {
+        Object.defineProperty(
+          Element.prototype,
+          "scrollIntoView",
+          originalScrollIntoViewDescriptor,
+        );
+      }
+    }
+  });
+
+  it("surfaces unavailable context mention file search", () => {
+    render(
+      <ControlledChatComposer
+        composerCapabilities={[ContextMentionCapabilityFixture]}
+        composerText="@src"
+        contextMentionControl={{
+          status: "unavailable",
+          results: [],
+          onQueryChange: () => {},
+          onSelect: () => {},
+          onDismiss: () => {},
+        }}
+      />,
+    );
+
+    expect(screen.getByText("File search is unavailable")).toBeTruthy();
+  });
+
+  it("hides the active context mention menu when Escape is pressed", () => {
+    render(
+      <ControlledChatComposer
+        composerCapabilities={[ContextMentionCapabilityFixture]}
+        composerText="@src"
+        contextMentionControl={{
+          status: "ready",
+          results: [{ kind: "file", path: "src/index.ts" }],
+          onQueryChange: () => {},
+          onSelect: () => {},
+          onDismiss: () => {},
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("listbox", { name: "Search files" })).toBeTruthy();
+
+    fireEvent.keyDown(getComposerTextarea(), { key: "Escape" });
+
+    expect(screen.queryByRole("listbox", { name: "Search files" })).toBeNull();
   });
 
   it("executes a runtime slash command with keyboard selection", () => {

@@ -37,6 +37,11 @@ import {
   listComposerCommands,
 } from "../../pages/session-composer/session-composer-trigger-detection.js";
 import { resolveSelectableValue } from "../../shared/select-value.js";
+import {
+  ContextMentionSearchMenu,
+  type ContextMentionSearchMenuStatus,
+  type ContextMentionSearchResult,
+} from "./context-mention-search-menu.js";
 
 function formatSlashCommandOptionLabel(command: ComposerCommandDescriptor): string {
   if (command.description === undefined) {
@@ -44,6 +49,14 @@ function formatSlashCommandOptionLabel(command: ComposerCommandDescriptor): stri
   }
 
   return `/${command.name} ${command.description}`;
+}
+
+function formatContextMentionInsertion(path: string): string {
+  if (!/\s/.test(path)) {
+    return `${path} `;
+  }
+
+  return `"${path.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}" `;
 }
 
 function isApplePlatform(): boolean {
@@ -118,6 +131,14 @@ export type ChatComposerCommandPanel =
       }[];
     };
 
+export type ChatComposerContextMentionControl = {
+  status: ContextMentionSearchMenuStatus;
+  results: readonly ContextMentionSearchResult[];
+  onQueryChange: (query: string) => void;
+  onSelect: (input: { path: string; query: string }) => void;
+  onDismiss: () => void;
+};
+
 export type ChatComposerViewModel = {
   composerCapabilities: readonly ComposerCapability[];
   composerText: string;
@@ -143,6 +164,7 @@ export type ChatComposerViewModel = {
     onSwitchToDefault?: () => void;
   } | null;
   commandPanel?: ChatComposerCommandPanel | null;
+  contextMentionControl?: ChatComposerContextMentionControl | null;
   pendingDiffCommentSummary: {
     count: number;
     label: string;
@@ -251,6 +273,7 @@ export function ChatComposer({
   goalStatus = null,
   collaborationModeStatus = null,
   commandPanel = null,
+  contextMentionControl = null,
   pendingDiffCommentSummary,
   pendingAttachments,
   modelOptions,
@@ -282,12 +305,15 @@ export function ChatComposer({
   const commandPanelSearchInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const commandListId = useId();
+  const contextMentionListId = useId();
   const commandPanelListId = useId();
   const [composerSelection, setComposerSelection] = useState({
     start: composerText.length,
     end: composerText.length,
   });
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
+  const [activeContextMentionIndex, setActiveContextMentionIndex] = useState(0);
+  const [dismissedContextMentionKey, setDismissedContextMentionKey] = useState<string | null>(null);
   const [activeCommandPanelOptionIndex, setActiveCommandPanelOptionIndex] = useState(0);
   const [commandPanelSearchText, setCommandPanelSearchText] = useState(
     commandPanel?.kind === "picker" ? (commandPanel.initialSearch ?? "") : "",
@@ -326,12 +352,13 @@ export function ChatComposer({
     [composerCapabilities],
   );
   const filteredSlashCommandOptions =
-    activeComposerTrigger === null
+    activeComposerTrigger === null || activeComposerTrigger.capabilityKind !== "composerCommand"
       ? []
       : slashCommandOptions.filter((command) =>
           command.name.startsWith(activeComposerTrigger.query),
         );
-  const showSlashCommandMenu = activeComposerTrigger !== null;
+  const showSlashCommandMenu =
+    activeComposerTrigger !== null && activeComposerTrigger.capabilityKind === "composerCommand";
   const activeSlashCommandIndexWithinBounds =
     filteredSlashCommandOptions.length === 0
       ? null
@@ -340,6 +367,34 @@ export function ChatComposer({
     activeSlashCommandIndexWithinBounds === null
       ? null
       : (filteredSlashCommandOptions[activeSlashCommandIndexWithinBounds] ?? null);
+  const contextMentionResults = contextMentionControl?.results ?? [];
+  const activeContextMentionKey =
+    activeComposerTrigger?.capabilityKind === "contextMention"
+      ? [
+          String(activeComposerTrigger.range.start),
+          String(activeComposerTrigger.range.end),
+          activeComposerTrigger.query,
+        ].join(":")
+      : null;
+  const isContextMentionDismissed =
+    activeContextMentionKey !== null && activeContextMentionKey === dismissedContextMentionKey;
+  const showContextMentionMenu =
+    activeComposerTrigger !== null &&
+    activeComposerTrigger.capabilityKind === "contextMention" &&
+    contextMentionControl !== null &&
+    !isContextMentionDismissed;
+  const activeContextMentionIndexWithinBounds =
+    contextMentionResults.length === 0
+      ? null
+      : Math.min(activeContextMentionIndex, contextMentionResults.length - 1);
+  const activeContextMention =
+    activeContextMentionIndexWithinBounds === null
+      ? null
+      : (contextMentionResults[activeContextMentionIndexWithinBounds] ?? null);
+  const activeContextMentionQuery =
+    activeComposerTrigger?.capabilityKind === "contextMention" ? activeComposerTrigger.query : null;
+  const contextMentionOnDismiss = contextMentionControl?.onDismiss;
+  const contextMentionOnQueryChange = contextMentionControl?.onQueryChange;
   const filteredCommandPanelOptions = useMemo(() => {
     if (commandPanel?.kind !== "picker") {
       return [];
@@ -388,6 +443,37 @@ export function ChatComposer({
     (option) => option.value === selectedReasoningEffortValue,
   )?.label;
 
+  useEffect(() => {
+    if (activeContextMentionQuery === null) {
+      setDismissedContextMentionKey(null);
+      contextMentionOnDismiss?.();
+      return;
+    }
+
+    if (isContextMentionDismissed) {
+      return;
+    }
+
+    contextMentionOnQueryChange?.(activeContextMentionQuery);
+  }, [
+    activeContextMentionQuery,
+    contextMentionOnDismiss,
+    contextMentionOnQueryChange,
+    isContextMentionDismissed,
+  ]);
+
+  useEffect(() => {
+    if (!showContextMentionMenu || activeContextMentionIndexWithinBounds === null) {
+      return;
+    }
+
+    document
+      .getElementById(`${contextMentionListId}-${String(activeContextMentionIndexWithinBounds)}`)
+      ?.scrollIntoView?.({
+        block: "nearest",
+      });
+  }, [activeContextMentionIndexWithinBounds, contextMentionListId, showContextMentionMenu]);
+
   function addPendingFiles(files: readonly File[]): void {
     if (files.length === 0) {
       return;
@@ -404,7 +490,10 @@ export function ChatComposer({
   }
 
   function insertSlashCommand(command: ComposerCommandDescriptor): void {
-    if (activeComposerTrigger === null) {
+    if (
+      activeComposerTrigger === null ||
+      activeComposerTrigger.capabilityKind !== "composerCommand"
+    ) {
       return;
     }
 
@@ -421,6 +510,35 @@ export function ChatComposer({
       start: nextCursorIndex,
       end: nextCursorIndex,
     });
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCursorIndex, nextCursorIndex);
+    });
+  }
+
+  function insertContextMentionPath(path: string, query: string): void {
+    if (
+      activeComposerTrigger === null ||
+      activeComposerTrigger.capabilityKind !== "contextMention"
+    ) {
+      return;
+    }
+
+    const insertedText = formatContextMentionInsertion(path);
+    const nextComposerText = [
+      composerText.slice(0, activeComposerTrigger.range.start),
+      insertedText,
+      composerText.slice(activeComposerTrigger.range.end),
+    ].join("");
+    const nextCursorIndex = activeComposerTrigger.range.start + insertedText.length;
+
+    contextMentionControl?.onSelect({ path, query });
+    onComposerTextChange(nextComposerText);
+    setComposerSelection({
+      start: nextCursorIndex,
+      end: nextCursorIndex,
+    });
+    setActiveContextMentionIndex(0);
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(nextCursorIndex, nextCursorIndex);
@@ -456,6 +574,17 @@ export function ChatComposer({
       (currentIndex) =>
         (currentIndex + delta + filteredSlashCommandOptions.length) %
         filteredSlashCommandOptions.length,
+    );
+  }
+
+  function moveActiveContextMention(delta: number): void {
+    if (contextMentionResults.length === 0) {
+      return;
+    }
+
+    setActiveContextMentionIndex(
+      (currentIndex) =>
+        (currentIndex + delta + contextMentionResults.length) % contextMentionResults.length,
     );
   }
 
@@ -704,6 +833,19 @@ export function ChatComposer({
           </div>
         )}
         <div className="relative">
+          {showContextMentionMenu ? (
+            <ContextMentionSearchMenu
+              activePath={activeContextMention?.path ?? null}
+              id={contextMentionListId}
+              onResultMouseEnter={setActiveContextMentionIndex}
+              onResultSelect={(result) => {
+                insertContextMentionPath(result.path, activeContextMentionQuery ?? "");
+              }}
+              query={activeContextMentionQuery ?? ""}
+              results={contextMentionResults}
+              status={contextMentionControl?.status ?? "idle"}
+            />
+          ) : null}
           {showSlashCommandMenu ? (
             <div
               aria-label="Slash commands"
@@ -756,10 +898,20 @@ export function ChatComposer({
           ) : null}
           <Textarea
             aria-activedescendant={
-              activeSlashCommand === null ? undefined : `${commandListId}-${activeSlashCommand.id}`
+              showContextMentionMenu && activeContextMentionIndexWithinBounds !== null
+                ? `${contextMentionListId}-${String(activeContextMentionIndexWithinBounds)}`
+                : activeSlashCommand === null
+                  ? undefined
+                  : `${commandListId}-${activeSlashCommand.id}`
             }
-            aria-controls={showSlashCommandMenu ? commandListId : undefined}
-            aria-expanded={showSlashCommandMenu}
+            aria-controls={
+              showContextMentionMenu
+                ? contextMentionListId
+                : showSlashCommandMenu
+                  ? commandListId
+                  : undefined
+            }
+            aria-expanded={showSlashCommandMenu || showContextMentionMenu}
             aria-haspopup="listbox"
             className="max-h-48 min-h-12 resize-none overflow-y-auto border-0 bg-transparent p-1.5 shadow-none placeholder:text-muted-foreground/60 focus-visible:border-transparent focus-visible:ring-0"
             id="session-composer"
@@ -767,11 +919,47 @@ export function ChatComposer({
               onComposerTextChange(event.target.value);
               updateComposerSelection(event.currentTarget);
               setActiveSlashCommandIndex(0);
+              setActiveContextMentionIndex(0);
+              setDismissedContextMentionKey(null);
             }}
             onClick={(event) => {
               updateComposerSelection(event.currentTarget);
             }}
             onKeyDown={(event) => {
+              if (showContextMentionMenu) {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setDismissedContextMentionKey(activeContextMentionKey);
+                  contextMentionControl?.onDismiss();
+                  return;
+                }
+
+                if (contextMentionResults.length > 0) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    moveActiveContextMention(1);
+                    return;
+                  }
+
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    moveActiveContextMention(-1);
+                    return;
+                  }
+
+                  if (event.key === "Tab" || event.key === "Enter") {
+                    event.preventDefault();
+                    if (activeContextMention !== null) {
+                      insertContextMentionPath(
+                        activeContextMention.path,
+                        activeContextMentionQuery ?? "",
+                      );
+                    }
+                    return;
+                  }
+                }
+              }
+
               if (showSlashCommandMenu && filteredSlashCommandOptions.length > 0) {
                 if (event.key === "ArrowDown") {
                   event.preventDefault();

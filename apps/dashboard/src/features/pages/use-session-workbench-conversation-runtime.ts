@@ -33,11 +33,14 @@ import {
 } from "../session-agents/session-workbench-turn-starters.js";
 import type { SandboxInstanceStatusResult } from "../sessions/sessions-service.js";
 import {
+  mergeWorkbenchComposerCapabilities,
   useSessionComposerAttachmentControl,
+  useSessionComposerContextMentionControl,
   type SessionComposerSharedInput,
   type SessionComposerStateInput,
   type SessionTurnControl,
 } from "./session-composer/index.js";
+import { resolvePrimaryRepositoryTurnStartCwd } from "./session-primary-repository-policy.js";
 import type { SessionTerminalContentInset } from "./session-terminal-surface.js";
 import type { useSessionWorkbenchLifecycleState } from "./use-session-workbench-lifecycle-state.js";
 import type { SessionWorkbenchTransportManager } from "./use-session-workbench-transport.js";
@@ -526,6 +529,25 @@ export function useSessionWorkbenchConversationRuntime(input: {
         : null,
     ensureTransportConnected: input.ensureTransportConnected,
   });
+  const activeContextMentionCwd =
+    runtimeConversationNavigator.activeConversationCwd ??
+    resolvePrimaryRepositoryTurnStartCwd(input.selectedRepositoryPath);
+  const contextMentionControl = useSessionComposerContextMentionControl({
+    cwd: activeContextMentionCwd,
+    enabled: input.sandboxInstanceId !== null,
+    ensureTransportConnected: input.ensureTransportConnected,
+    sandboxInstanceId: input.sandboxInstanceId,
+  });
+  const composerBootstrap = useMemo(
+    () => ({
+      ...activeRuntime.composerRuntimeInput.bootstrap,
+      composerCapabilities: mergeWorkbenchComposerCapabilities({
+        composerCapabilities: activeRuntime.composerRuntimeInput.bootstrap.composerCapabilities,
+        enableSandboxWorkspacePathContextMention: input.sandboxInstanceId !== null,
+      }),
+    }),
+    [activeRuntime.composerRuntimeInput.bootstrap, input.sandboxInstanceId],
+  );
 
   return {
     cliRuntimeDisplayName: activeRuntime.displayName,
@@ -539,7 +561,9 @@ export function useSessionWorkbenchConversationRuntime(input: {
         : { dismissUserMessageAction: activeRuntime.conversation.dismissUserMessageAction }),
       composerStateInput: {
         ...activeRuntime.composerRuntimeInput,
+        bootstrap: composerBootstrap,
         attachmentControl,
+        contextMentionControl,
         repositoryStatus: input.repositoryStatus,
       },
       runtimeConversationNavigator,
