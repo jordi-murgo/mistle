@@ -5,20 +5,22 @@
 //! client processes, runtime-specific adapters, and the live bootstrap tunnel
 //! session that publishes keepalive and serves tunnel streams.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 
 use crate::codex_proxy::CodexProxyControlHandle;
-use crate::command::{CommandFailure, CommandOutputSink, CommandOutputStream};
+use crate::command::{CommandOutputSink, CommandOutputStream};
 use crate::egress_proxy::EgressProxy;
 use crate::keepalive::KeepaliveManager;
 use crate::process;
-use crate::process::{CodexAppServerControlHandle, CodexAppServerObservationHandle};
+use crate::process::{
+    CodexAppServerControlHandle, CodexAppServerObservationHandle, OpenCodeServerControlHandle,
+};
 use crate::protocol::startup::{
     StartupExecutionMode, StartupInput, StartupMode, StartupOperationKind,
 };
@@ -26,8 +28,20 @@ use crate::runtime;
 use crate::runtime::CompiledRuntimePlanImageSource;
 use crate::runtime::RuntimePlanApplyError;
 use crate::runtime::adapters::{RuntimeAdapterRegistry, RuntimeAdapters};
-use crate::runtime::readiness::{
-    RuntimeReadinessManager, RuntimeReadinessMode, derive_runtime_ready,
+use crate::runtime::readiness::RuntimeReadinessManager;
+use crate::sandboxd_state::components::{
+    collect_tracked_components, determine_runtime_readiness_mode,
+};
+use crate::sandboxd_state::diagnostics::{
+    record_operation_phase_completed, record_operation_phase_completed_with_attributes,
+    record_operation_phase_failure, record_operation_phase_started,
+    record_runtime_plan_apply_failure, record_runtime_process_failure, record_setup_script_failure,
+};
+use crate::sandboxd_state::readiness::{
+    spawn_runtime_readiness_projection_thread, sync_runtime_readiness_from_snapshot,
+};
+use crate::sandboxd_state::runtime_coordination::{
+    RuntimeCoordinationHandles, spawn_runtime_coordination_thread,
 };
 use crate::sandboxd_state::runtime_environment::{
     collect_mistle_context_runtime_environment, collect_runtime_environment,
@@ -43,7 +57,7 @@ use crate::startup_diagnostics::{
     StartupDiagnosticsLogger, StartupTranscriptStream, startup_diagnostics_string,
     startup_diagnostics_u64,
 };
-use crate::supervision::{SandboxdHealthSnapshot, SandboxdSupervisorHandle, SupervisedComponent};
+use crate::supervision::{SandboxdHealthSnapshot, SandboxdSupervisorHandle};
 use crate::time::{Clock, Sleeper};
 use crate::tunnel::session::{
     GatewayEgressTokenProvider, TunnelSession, TunnelSessionError, TunnelSigningRequest,
@@ -132,9 +146,10 @@ pub struct SandboxdState {
     runtime_adapters: RuntimeAdapters,
     codex_app_server_observation_handle: Option<CodexAppServerObservationHandle>,
     codex_app_server_control_handle: Option<CodexAppServerControlHandle>,
+    opencode_server_control_handle: Option<OpenCodeServerControlHandle>,
     codex_proxy_control_handle: Option<CodexProxyControlHandle>,
-    codex_coordination_shutdown_requested: Arc<AtomicBool>,
-    codex_coordination_thread: Option<JoinHandle<()>>,
+    runtime_coordination_shutdown_requested: Arc<AtomicBool>,
+    runtime_coordination_thread: Option<JoinHandle<()>>,
     runtime_readiness_shutdown_requested: Arc<AtomicBool>,
     runtime_readiness_thread: Option<JoinHandle<()>>,
     supervisor_handle: SandboxdSupervisorHandle,
@@ -446,9 +461,10 @@ impl SandboxdState {
                 runtime_adapters: RuntimeAdapters::default(),
                 codex_app_server_observation_handle: None,
                 codex_app_server_control_handle: None,
+                opencode_server_control_handle: None,
                 codex_proxy_control_handle: None,
-                codex_coordination_shutdown_requested: Arc::new(AtomicBool::new(false)),
-                codex_coordination_thread: None,
+                runtime_coordination_shutdown_requested: Arc::new(AtomicBool::new(false)),
+                runtime_coordination_thread: None,
                 runtime_readiness_shutdown_requested: Arc::new(AtomicBool::new(false)),
                 runtime_readiness_thread: None,
                 supervisor_handle,
@@ -501,6 +517,10 @@ impl SandboxdState {
         let codex_app_server_control_handle = process_manager
             .as_ref()
             .and_then(process::RuntimeClientProcessManager::codex_app_server_control_handle)
+            .cloned();
+        let opencode_server_control_handle = process_manager
+            .as_ref()
+            .and_then(process::RuntimeClientProcessManager::opencode_server_control_handle)
             .cloned();
 
         record_operation_phase_started(&diagnostics_logger, "start_runtime_adapters");
@@ -619,21 +639,21 @@ impl SandboxdState {
         record_operation_phase_started(&diagnostics_logger, "ready");
         close_operation_stream(&diagnostics_logger);
         let tunnel_session = Some(tunnel_session);
-        let codex_coordination_shutdown_requested = Arc::new(AtomicBool::new(false));
-        let codex_coordination_thread = match (
-            codex_app_server_control_handle.clone(),
-            codex_proxy_control_handle.clone(),
-        ) {
-            (Some(codex_app_server_control_handle), Some(codex_proxy_control_handle)) => {
-                Some(spawn_codex_coordination_thread(
-                    codex_app_server_control_handle,
-                    codex_proxy_control_handle,
-                    supervisor_handle.clone(),
-                    codex_coordination_shutdown_requested.clone(),
-                ))
-            }
-            _ => None,
+        let runtime_coordination_shutdown_requested = Arc::new(AtomicBool::new(false));
+        let runtime_coordination_handles = RuntimeCoordinationHandles {
+            codex_app_server_control_handle: codex_app_server_control_handle.clone(),
+            codex_proxy_control_handle: codex_proxy_control_handle.clone(),
+            opencode_server_control_handle: opencode_server_control_handle.clone(),
         };
+        let runtime_coordination_thread = runtime_coordination_handles
+            .has_runtime_process_control()
+            .then(|| {
+                spawn_runtime_coordination_thread(
+                    runtime_coordination_handles,
+                    supervisor_handle.clone(),
+                    runtime_coordination_shutdown_requested.clone(),
+                )
+            });
 
         Ok(Self {
             execution_mode,
@@ -642,9 +662,10 @@ impl SandboxdState {
             runtime_adapters,
             codex_app_server_observation_handle,
             codex_app_server_control_handle,
+            opencode_server_control_handle,
             codex_proxy_control_handle,
-            codex_coordination_shutdown_requested,
-            codex_coordination_thread,
+            runtime_coordination_shutdown_requested,
+            runtime_coordination_thread,
             runtime_readiness_shutdown_requested,
             runtime_readiness_thread,
             supervisor_handle,
@@ -676,7 +697,11 @@ impl SandboxdState {
         }
         self.runtime_readiness_manager
             .lock()
-            .expect("runtime readiness manager lock should not be poisoned")
+            .map_err(|error| {
+                SandboxdStateError::StartTunnelSession(format!(
+                    "failed to mark runtime not ready before resume: {error}"
+                ))
+            })?
             .set_ready(false);
 
         let agent_endpoint_url =
@@ -788,10 +813,10 @@ impl SandboxdState {
         if let Some(tunnel_session) = self.tunnel_session.take() {
             tunnel_session.close();
         }
-        self.codex_coordination_shutdown_requested
+        self.runtime_coordination_shutdown_requested
             .store(true, Ordering::Relaxed);
-        if let Some(codex_coordination_thread) = self.codex_coordination_thread.take() {
-            let _ = codex_coordination_thread.join();
+        if let Some(runtime_coordination_thread) = self.runtime_coordination_thread.take() {
+            let _ = runtime_coordination_thread.join();
         }
         self.runtime_readiness_shutdown_requested
             .store(true, Ordering::Relaxed);
@@ -836,6 +861,10 @@ impl SandboxdState {
 
     pub fn codex_app_server_control_handle(&self) -> Option<&CodexAppServerControlHandle> {
         self.codex_app_server_control_handle.as_ref()
+    }
+
+    pub fn opencode_server_control_handle(&self) -> Option<&OpenCodeServerControlHandle> {
+        self.opencode_server_control_handle.as_ref()
     }
 
     #[cfg(any(test, debug_assertions))]
@@ -924,562 +953,6 @@ fn should_apply_runtime_plan_for_startup(
     startup_input.startup_mode == StartupMode::New
         && (!uses_pre_materialized_snapshot
             || is_snapshot_preparation_operation(startup_input.operation_kind))
-}
-
-fn record_operation_phase_failure(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    phase: &str,
-    attributes: BTreeMap<String, serde_json::Value>,
-) {
-    if let Some(logger) = diagnostics_logger {
-        let transcript_message = attributes
-            .get("error")
-            .and_then(serde_json::Value::as_str)
-            .map_or_else(
-                || format!("{phase} failed"),
-                |error| format!("{phase} failed: {error}"),
-            );
-        if let Err(error) = logger.record_phase_failed(phase, attributes) {
-            eprintln!("sandboxd failed to record startup diagnostics phase failure: {error}");
-        }
-        if let Err(error) = logger.record_transcript(
-            Some(phase),
-            StartupTranscriptStream::System,
-            transcript_message.as_bytes(),
-        ) {
-            eprintln!("sandboxd failed to record startup diagnostics transcript: {error}");
-        }
-    }
-}
-
-fn record_operation_phase_started(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    phase: &str,
-) {
-    if let Some(logger) = diagnostics_logger {
-        if let Err(error) = logger.record_phase_started(phase) {
-            eprintln!("sandboxd failed to record startup diagnostics phase start: {error}");
-        }
-        if let Err(error) = logger.record_transcript(
-            Some(phase),
-            StartupTranscriptStream::System,
-            format!("{phase} started").as_bytes(),
-        ) {
-            eprintln!("sandboxd failed to record startup diagnostics transcript: {error}");
-        }
-    }
-}
-
-fn record_operation_phase_completed(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    phase: &str,
-) {
-    record_operation_phase_completed_with_attributes(diagnostics_logger, phase, BTreeMap::new());
-}
-
-fn record_operation_phase_completed_with_attributes(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    phase: &str,
-    attributes: BTreeMap<String, serde_json::Value>,
-) {
-    if let Some(logger) = diagnostics_logger {
-        if let Err(error) = logger.record_phase_completed_with_attributes(phase, attributes) {
-            eprintln!("sandboxd failed to record startup diagnostics phase completion: {error}");
-        }
-        if let Err(error) = logger.record_transcript(
-            Some(phase),
-            StartupTranscriptStream::System,
-            format!("{phase} completed").as_bytes(),
-        ) {
-            eprintln!("sandboxd failed to record startup diagnostics transcript: {error}");
-        }
-    }
-}
-
-fn record_runtime_plan_apply_failure(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    error: &RuntimePlanApplyError,
-) {
-    let attributes = match error {
-        RuntimePlanApplyError::InvalidRuntimePlan(error) => BTreeMap::from([
-            (
-                "failureKind".to_string(),
-                startup_diagnostics_string("invalid_runtime_plan"),
-            ),
-            (
-                "error".to_string(),
-                startup_diagnostics_string(error.to_string()),
-            ),
-        ]),
-        RuntimePlanApplyError::ArtifactInstall {
-            artifact_key,
-            install_index,
-            op,
-            error,
-            ..
-        } => BTreeMap::from([
-            (
-                "failureKind".to_string(),
-                startup_diagnostics_string("artifact_install_failed"),
-            ),
-            (
-                "artifactKey".to_string(),
-                startup_diagnostics_string(artifact_key.clone()),
-            ),
-            (
-                "installIndex".to_string(),
-                startup_diagnostics_u64(*install_index as u64),
-            ),
-            ("installOp".to_string(), startup_diagnostics_string(*op)),
-            (
-                "error".to_string(),
-                startup_diagnostics_string(error.clone()),
-            ),
-        ]),
-        RuntimePlanApplyError::WorkspaceSource {
-            source_kind,
-            path,
-            origin_url,
-            clone_url,
-            error,
-            ..
-        } => {
-            let mut map = BTreeMap::from([
-                (
-                    "failureKind".to_string(),
-                    startup_diagnostics_string("workspace_source_failed"),
-                ),
-                (
-                    "sourceKind".to_string(),
-                    startup_diagnostics_string(*source_kind),
-                ),
-                ("path".to_string(), startup_diagnostics_string(path.clone())),
-                (
-                    "originUrl".to_string(),
-                    startup_diagnostics_string(origin_url.clone()),
-                ),
-                (
-                    "error".to_string(),
-                    startup_diagnostics_string(error.clone()),
-                ),
-            ]);
-            if let Some(clone_url) = clone_url {
-                map.insert(
-                    "cloneUrl".to_string(),
-                    startup_diagnostics_string(clone_url.clone()),
-                );
-            }
-            map
-        }
-        RuntimePlanApplyError::RuntimeFile {
-            client_id,
-            file_id,
-            path,
-            error,
-            ..
-        } => BTreeMap::from([
-            (
-                "failureKind".to_string(),
-                startup_diagnostics_string("runtime_file_failed"),
-            ),
-            (
-                "clientId".to_string(),
-                startup_diagnostics_string(client_id.clone()),
-            ),
-            (
-                "fileId".to_string(),
-                startup_diagnostics_string(file_id.clone()),
-            ),
-            ("path".to_string(), startup_diagnostics_string(path.clone())),
-            (
-                "error".to_string(),
-                startup_diagnostics_string(error.clone()),
-            ),
-        ]),
-    };
-
-    record_operation_phase_failure(diagnostics_logger, "apply_runtime_plan", attributes);
-}
-
-fn record_runtime_process_failure(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    error: &process::ProcessManagerError,
-) {
-    let attributes = match error {
-        process::ProcessManagerError::StartProcess {
-            process_key,
-            process_index,
-            error,
-            output_tails,
-        } => {
-            let mut map = BTreeMap::from([
-                (
-                    "failureKind".to_string(),
-                    startup_diagnostics_string("runtime_process_spawn_failed"),
-                ),
-                (
-                    "processKey".to_string(),
-                    startup_diagnostics_string(process_key.clone()),
-                ),
-                (
-                    "processIndex".to_string(),
-                    startup_diagnostics_u64(*process_index as u64),
-                ),
-                (
-                    "error".to_string(),
-                    startup_diagnostics_string(error.clone()),
-                ),
-                (
-                    "stdoutCaptured".to_string(),
-                    serde_json::Value::Bool(output_tails.stdout_captured),
-                ),
-                (
-                    "stderrCaptured".to_string(),
-                    serde_json::Value::Bool(output_tails.stderr_captured),
-                ),
-            ]);
-            if let Some(stdout_tail) = &output_tails.stdout_tail {
-                map.insert(
-                    "stdoutTail".to_string(),
-                    startup_diagnostics_string(stdout_tail.clone()),
-                );
-            }
-            if let Some(stderr_tail) = &output_tails.stderr_tail {
-                map.insert(
-                    "stderrTail".to_string(),
-                    startup_diagnostics_string(stderr_tail.clone()),
-                );
-            }
-            map
-        }
-        process::ProcessManagerError::ReadinessCheck {
-            process_key,
-            process_index,
-            error,
-            details,
-        } => {
-            let mut map = BTreeMap::from([
-                (
-                    "failureKind".to_string(),
-                    startup_diagnostics_string("runtime_process_readiness_failed"),
-                ),
-                (
-                    "processKey".to_string(),
-                    startup_diagnostics_string(process_key.clone()),
-                ),
-                (
-                    "processIndex".to_string(),
-                    startup_diagnostics_u64(*process_index as u64),
-                ),
-                (
-                    "readinessType".to_string(),
-                    startup_diagnostics_string(details.readiness_type.clone()),
-                ),
-                (
-                    "readinessTarget".to_string(),
-                    startup_diagnostics_string(details.readiness_target.clone()),
-                ),
-                (
-                    "timeoutMs".to_string(),
-                    startup_diagnostics_u64(details.timeout_ms),
-                ),
-                (
-                    "error".to_string(),
-                    startup_diagnostics_string(error.clone()),
-                ),
-                (
-                    "stdoutCaptured".to_string(),
-                    serde_json::Value::Bool(details.output_tails.stdout_captured),
-                ),
-                (
-                    "stderrCaptured".to_string(),
-                    serde_json::Value::Bool(details.output_tails.stderr_captured),
-                ),
-            ]);
-            if let Some(stdout_tail) = &details.output_tails.stdout_tail {
-                map.insert(
-                    "stdoutTail".to_string(),
-                    startup_diagnostics_string(stdout_tail.clone()),
-                );
-            }
-            if let Some(stderr_tail) = &details.output_tails.stderr_tail {
-                map.insert(
-                    "stderrTail".to_string(),
-                    startup_diagnostics_string(stderr_tail.clone()),
-                );
-            }
-            map
-        }
-        process::ProcessManagerError::StopProcesses(error) => BTreeMap::from([(
-            "error".to_string(),
-            startup_diagnostics_string(error.clone()),
-        )]),
-    };
-
-    record_operation_phase_failure(diagnostics_logger, "start_runtime_processes", attributes);
-}
-
-fn record_setup_script_failure(
-    diagnostics_logger: &Option<StartupDiagnosticsLogger>,
-    error: &CommandFailure,
-) {
-    let mut attributes = BTreeMap::from([
-        (
-            "failureKind".to_string(),
-            startup_diagnostics_string("setup_script_failed"),
-        ),
-        (
-            "error".to_string(),
-            startup_diagnostics_string(error.message.clone()),
-        ),
-        (
-            "stdoutCaptured".to_string(),
-            serde_json::Value::Bool(error.output_tails.stdout_captured),
-        ),
-        (
-            "stderrCaptured".to_string(),
-            serde_json::Value::Bool(error.output_tails.stderr_captured),
-        ),
-    ]);
-    if let Some(exit_code) = error.exit_code {
-        attributes.insert(
-            "exitCode".to_string(),
-            startup_diagnostics_u64(exit_code as u64),
-        );
-    }
-    if let Some(stdout_tail) = &error.output_tails.stdout_tail {
-        attributes.insert(
-            "stdoutTail".to_string(),
-            startup_diagnostics_string(stdout_tail.clone()),
-        );
-    }
-    if let Some(stderr_tail) = &error.output_tails.stderr_tail {
-        attributes.insert(
-            "stderrTail".to_string(),
-            startup_diagnostics_string(stderr_tail.clone()),
-        );
-    }
-    if error.timed_out {
-        attributes.insert("timedOut".to_string(), serde_json::Value::Bool(true));
-    }
-
-    record_operation_phase_failure(diagnostics_logger, "run_setup_script", attributes);
-}
-
-const CODEX_COORDINATION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
-const CODEX_PROXY_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const RUNTIME_READINESS_PROJECTION_POLL_INTERVAL: std::time::Duration =
-    std::time::Duration::from_millis(100);
-
-fn determine_runtime_readiness_mode(
-    supervisor_handle: &SandboxdSupervisorHandle,
-) -> RuntimeReadinessMode {
-    if supervisor_handle.tracks_component(SupervisedComponent::CodexAppServer) {
-        RuntimeReadinessMode::Codex
-    } else if supervisor_handle.tracks_component(SupervisedComponent::CodexProxy) {
-        RuntimeReadinessMode::CodexProxyOnly
-    } else if supervisor_handle.tracks_component(SupervisedComponent::OpenCodeServer) {
-        RuntimeReadinessMode::OpenCode
-    } else if supervisor_handle.tracks_component(SupervisedComponent::OpenCodeProxy) {
-        RuntimeReadinessMode::OpenCodeProxyOnly
-    } else if supervisor_handle.tracks_component(SupervisedComponent::PiRpcProcess) {
-        RuntimeReadinessMode::Pi
-    } else if supervisor_handle.tracks_component(SupervisedComponent::PiProxy) {
-        RuntimeReadinessMode::PiProxyOnly
-    } else {
-        RuntimeReadinessMode::NoAgentRuntime
-    }
-}
-
-fn sync_runtime_readiness_from_snapshot(
-    supervisor_handle: &SandboxdSupervisorHandle,
-    runtime_readiness_manager: &Arc<Mutex<RuntimeReadinessManager>>,
-    runtime_readiness_mode: RuntimeReadinessMode,
-) {
-    let ready = derive_runtime_ready(&supervisor_handle.snapshot(), runtime_readiness_mode);
-    runtime_readiness_manager
-        .lock()
-        .expect("runtime readiness manager lock should not be poisoned")
-        .set_ready(ready);
-}
-
-fn spawn_runtime_readiness_projection_thread(
-    supervisor_handle: SandboxdSupervisorHandle,
-    runtime_readiness_manager: Arc<Mutex<RuntimeReadinessManager>>,
-    runtime_readiness_mode: RuntimeReadinessMode,
-    shutdown_requested: Arc<AtomicBool>,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
-        run_runtime_readiness_projection_loop(
-            supervisor_handle,
-            runtime_readiness_manager,
-            runtime_readiness_mode,
-            shutdown_requested,
-        );
-    })
-}
-
-fn run_runtime_readiness_projection_loop(
-    supervisor_handle: SandboxdSupervisorHandle,
-    runtime_readiness_manager: Arc<Mutex<RuntimeReadinessManager>>,
-    runtime_readiness_mode: RuntimeReadinessMode,
-    shutdown_requested: Arc<AtomicBool>,
-) {
-    let mut last_projected_ready = None;
-
-    while !shutdown_requested.load(Ordering::Relaxed) {
-        let projected_ready =
-            derive_runtime_ready(&supervisor_handle.snapshot(), runtime_readiness_mode);
-        if last_projected_ready != Some(projected_ready) {
-            runtime_readiness_manager
-                .lock()
-                .expect("runtime readiness manager lock should not be poisoned")
-                .set_ready(projected_ready);
-            last_projected_ready = Some(projected_ready);
-        }
-        thread::sleep(RUNTIME_READINESS_PROJECTION_POLL_INTERVAL);
-    }
-}
-
-fn spawn_codex_coordination_thread(
-    codex_app_server_control_handle: CodexAppServerControlHandle,
-    codex_proxy_control_handle: CodexProxyControlHandle,
-    supervisor_handle: SandboxdSupervisorHandle,
-    shutdown_requested: Arc<AtomicBool>,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
-        run_codex_coordination_loop(
-            codex_app_server_control_handle,
-            codex_proxy_control_handle,
-            supervisor_handle,
-            shutdown_requested,
-        );
-    })
-}
-
-fn run_codex_coordination_loop(
-    codex_app_server_control_handle: CodexAppServerControlHandle,
-    codex_proxy_control_handle: CodexProxyControlHandle,
-    supervisor_handle: SandboxdSupervisorHandle,
-    shutdown_requested: Arc<AtomicBool>,
-) {
-    while !shutdown_requested.load(Ordering::Relaxed) {
-        let codex_app_server_snapshot =
-            supervisor_handle.component_snapshot(SupervisedComponent::CodexAppServer);
-        let Some(codex_app_server_snapshot) = codex_app_server_snapshot else {
-            break;
-        };
-        if codex_app_server_snapshot.state != crate::supervision::ComponentHealthState::Restarting {
-            thread::sleep(CODEX_COORDINATION_POLL_INTERVAL);
-            continue;
-        }
-
-        let restart_reason = if codex_app_server_snapshot
-            .details
-            .get("livenessState")
-            .is_some_and(|liveness_state| liveness_state == "Exited")
-        {
-            "coordinated_restart_after_exit"
-        } else {
-            "coordinated_restart_after_readiness_failure"
-        };
-        supervisor_handle.emit_component_restart_scheduled(
-            SupervisedComponent::CodexAppServer,
-            restart_reason,
-            0,
-            &[],
-        );
-
-        if codex_app_server_control_handle
-            .restart(&crate::time::SystemClock, &crate::time::ThreadSleeper)
-            .is_ok()
-            && !wait_for_codex_proxy_recovery(
-                &codex_proxy_control_handle,
-                CODEX_PROXY_RECOVERY_TIMEOUT,
-                shutdown_requested.as_ref(),
-            )
-        {
-            let _ = codex_proxy_control_handle.request_restart();
-            let _ = wait_for_codex_proxy_recovery(
-                &codex_proxy_control_handle,
-                CODEX_PROXY_RECOVERY_TIMEOUT,
-                shutdown_requested.as_ref(),
-            );
-        }
-        thread::sleep(CODEX_COORDINATION_POLL_INTERVAL);
-    }
-}
-
-fn wait_for_codex_proxy_recovery(
-    codex_proxy_control_handle: &CodexProxyControlHandle,
-    timeout: std::time::Duration,
-    shutdown_requested: &AtomicBool,
-) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if shutdown_requested.load(Ordering::Relaxed) {
-            return false;
-        }
-        if let Some(snapshot) = codex_proxy_control_handle.snapshot() {
-            let raw_connectivity_connected = snapshot
-                .details
-                .get("rawConnectivityState")
-                .is_some_and(|state| state == "Connected");
-            let session_manager_connected = snapshot
-                .details
-                .get("sessionManagerState")
-                .is_some_and(|state| state == "Connected");
-            if snapshot.state == crate::supervision::ComponentHealthState::Healthy
-                && raw_connectivity_connected
-                && session_manager_connected
-            {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        thread::sleep(CODEX_COORDINATION_POLL_INTERVAL);
-    }
-}
-
-fn collect_tracked_components(
-    runtime_plan: &runtime::CompiledRuntimePlan,
-) -> BTreeSet<SupervisedComponent> {
-    let mut tracked_components = BTreeSet::from([SupervisedComponent::TunnelSession]);
-
-    if !runtime_plan.egress_routes.is_empty() {
-        tracked_components.insert(SupervisedComponent::EgressProxy);
-    }
-
-    if runtime_plan
-        .agent_runtimes
-        .iter()
-        .any(|agent_runtime| agent_runtime.runtime_id == "codex")
-    {
-        tracked_components.insert(SupervisedComponent::CodexProxy);
-        tracked_components.insert(SupervisedComponent::CodexAppServer);
-    }
-
-    if runtime_plan
-        .agent_runtimes
-        .iter()
-        .any(|agent_runtime| agent_runtime.runtime_id == "opencode")
-    {
-        tracked_components.insert(SupervisedComponent::OpenCodeProxy);
-        tracked_components.insert(SupervisedComponent::OpenCodeServer);
-    }
-
-    if runtime_plan
-        .agent_runtimes
-        .iter()
-        .any(|agent_runtime| agent_runtime.runtime_id == "pi")
-    {
-        tracked_components.insert(SupervisedComponent::PiProxy);
-        tracked_components.insert(SupervisedComponent::PiRpcProcess);
-    }
-
-    tracked_components
 }
 
 struct StartMinimalTunnelSessionInput<'a> {
@@ -1630,6 +1103,10 @@ fn scrub_snapshot_runtime_artifacts_at_paths(
     Ok(())
 }
 
+mod components;
+mod diagnostics;
+mod readiness;
+mod runtime_coordination;
 mod runtime_environment;
 mod setup_script;
 
@@ -1656,11 +1133,12 @@ mod tests {
     use crate::sandboxd_state::{
         DEFAULT_GLOBAL_GIT_CONFIG_PATH, GLOBAL_GIT_CONFIG_ENV_NAME,
         MISTLE_SANDBOX_INSTANCE_ID_ENV_NAME, MISTLE_SANDBOX_PROFILE_ID_ENV_NAME,
-        MISTLE_SANDBOX_PROFILE_VERSION_ENV_NAME, SETUP_SCRIPT_WORKING_DIRECTORY, SandboxdState,
-        build_setup_script_environment, collect_mistle_context_runtime_environment,
-        collect_runtime_environment, merge_managed_runtime_environment, run_setup_script,
-        run_setup_script_in_directory, scrub_snapshot_runtime_artifacts_at_paths,
-        spawn_codex_coordination_thread, spawn_runtime_readiness_projection_thread,
+        MISTLE_SANDBOX_PROFILE_VERSION_ENV_NAME, RuntimeCoordinationHandles,
+        SETUP_SCRIPT_WORKING_DIRECTORY, SandboxdState, build_setup_script_environment,
+        collect_mistle_context_runtime_environment, collect_runtime_environment,
+        merge_managed_runtime_environment, run_setup_script, run_setup_script_in_directory,
+        scrub_snapshot_runtime_artifacts_at_paths, spawn_runtime_coordination_thread,
+        spawn_runtime_readiness_projection_thread,
     };
     use crate::startup_diagnostics::{StartupDiagnosticsLogger, StartupOperation};
     use crate::supervision::{ComponentHealthState, SandboxdSupervisorHandle, SupervisedComponent};
@@ -3075,9 +2553,12 @@ mod tests {
         )
         .expect("Codex proxy should start");
         let shutdown_requested = Arc::new(AtomicBool::new(false));
-        let coordination_thread = spawn_codex_coordination_thread(
-            codex_app_server_control_handle,
-            codex_proxy.control_handle(),
+        let coordination_thread = spawn_runtime_coordination_thread(
+            RuntimeCoordinationHandles {
+                codex_app_server_control_handle: Some(codex_app_server_control_handle),
+                codex_proxy_control_handle: Some(codex_proxy.control_handle()),
+                opencode_server_control_handle: None,
+            },
             supervisor_handle.clone(),
             shutdown_requested.clone(),
         );
