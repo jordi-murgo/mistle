@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, userEvent, within } from "storybook/test";
 
 import { withDashboardPageStory } from "../../storybook/decorators.js";
 import {
@@ -28,6 +29,91 @@ export const Default: Story = {};
 export const Published: Story = {
   args: {
     lifecycleState: "published",
+  },
+};
+
+export const DuplicateProfileWithoutTriggers: Story = {
+  args: {
+    duplicateProfileDialogState: "open",
+    duplicateProfileTriggerState: "none",
+    lifecycleState: "published",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const DuplicateProfileWithTriggers: Story = {
+  args: {
+    duplicateProfileDialogState: "open",
+    duplicateProfileTriggerState: "with-triggers",
+    lifecycleState: "published",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const DuplicateProfileCheckingTriggers: Story = {
+  args: {
+    duplicateProfileDialogState: "closed",
+    duplicateProfileTriggerState: "loading",
+    lifecycleState: "published",
+    snapshotState: "snapshot-ready",
+  },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+
+    await userEvent.click(canvas.getByRole("button", { name: "More actions" }));
+
+    await expect(body.getByText("Checking triggers...")).toBeVisible();
+  },
+};
+
+export const DuplicateProfileUnavailable: Story = {
+  args: {
+    duplicateProfileAvailability: "unavailable",
+    lifecycleState: "published",
+    snapshotState: "snapshot-unavailable-no-previous",
+  },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+
+    await userEvent.click(canvas.getByRole("button", { name: "More actions" }));
+
+    await expect(
+      body.getByText("Requires the active published version to have a usable snapshot."),
+    ).toBeVisible();
+  },
+};
+
+export const DuplicateProfileError: Story = {
+  args: {
+    duplicateProfileDialogState: "error",
+    duplicateProfileTriggerState: "with-triggers",
+    lifecycleState: "published",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const DuplicateProfileTriggerCheckError: Story = {
+  args: {
+    duplicateProfileDialogState: "closed",
+    duplicateProfileTriggerState: "error",
+    lifecycleState: "published",
+    snapshotState: "snapshot-ready",
+  },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+
+    await userEvent.click(canvas.getByRole("button", { name: "More actions" }));
+    await userEvent.click(body.getByRole("menuitem", { name: "Duplicate" }));
+
+    await expect(body.getByRole("heading", { name: "Duplicate sandbox profile" })).toBeVisible();
+    await expect(
+      body.getByText(
+        "Could not check triggers for this profile. Duplicate will continue without triggers.",
+      ),
+    ).toBeVisible();
   },
 };
 

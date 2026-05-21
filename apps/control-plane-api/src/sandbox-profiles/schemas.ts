@@ -143,6 +143,7 @@ export const sandboxProfileVersionSchema = createSelectSchema(sandboxProfileVers
     sandboxProfileId: true,
     version: true,
     state: true,
+    publishedAt: true,
     defaultPersistenceMode: true,
     agentRuntimeId: true,
     gitCommitSigningIntegrationConnectionId: true,
@@ -413,6 +414,22 @@ export const deleteSandboxProfileVersionRefreshScheduleResponseSchema = z
 export const createSandboxProfileBodySchema = z
   .object({
     displayName: z.string().min(1),
+  })
+  .strict();
+
+export const duplicateSandboxProfileBodySchema = z
+  .object({
+    displayName: z.string().min(1),
+    includeTriggers: z.boolean().optional(),
+  })
+  .strict();
+
+export const duplicateSandboxProfileResponseSchema = z
+  .object({
+    profile: sandboxProfileSchema,
+    activeVersion: z.number().int().min(1),
+    draftVersion: z.number().int().min(1).nullable(),
+    duplicatedTriggerCount: z.number().int().min(0),
   })
   .strict();
 

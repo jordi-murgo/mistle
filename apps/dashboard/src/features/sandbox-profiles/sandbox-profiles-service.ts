@@ -8,6 +8,8 @@ import type {
   CreateSandboxProfileInput,
   DeleteSandboxProfileResult,
   DeleteSandboxProfileVersionRefreshScheduleResult,
+  DuplicateSandboxProfileInput,
+  DuplicateSandboxProfileResult,
   LaunchableSandboxProfilesResult,
   PutSandboxProfileVersionDraftInput,
   PutSandboxProfileVersionDraftResult,
@@ -279,6 +281,48 @@ export async function createSandboxProfile(input: {
   }
 }
 
+export async function duplicateSandboxProfile(input: {
+  payload: DuplicateSandboxProfileInput;
+}): Promise<DuplicateSandboxProfileResult> {
+  try {
+    const client = getControlPlaneApiClient();
+    const { data } = await client.POST("/v1/sandbox/profiles/{profileId}/duplicate", {
+      credentials: "include",
+      params: {
+        path: {
+          profileId: input.payload.profileId,
+        },
+      },
+      body: {
+        displayName: input.payload.displayName,
+        ...(input.payload.includeTriggers === undefined
+          ? {}
+          : { includeTriggers: input.payload.includeTriggers }),
+      },
+    });
+
+    if (data === undefined) {
+      throw new SandboxProfilesApiError({
+        operation: "duplicateSandboxProfile",
+        status: 500,
+        body: null,
+        message: "Duplicate sandbox profile response was empty.",
+        code: null,
+      });
+    }
+
+    return data;
+  } catch (error) {
+    throw new SandboxProfilesApiError(
+      normalizeHttpApiError({
+        operation: "duplicateSandboxProfile",
+        error,
+        fallbackMessage: "Could not duplicate sandbox profile.",
+      }),
+    );
+  }
+}
+
 export async function updateSandboxProfile(input: {
   payload: UpdateSandboxProfileInput;
 }): Promise<SandboxProfile> {
@@ -459,6 +503,7 @@ const SandboxProfileVersionSchema = z
     sandboxProvider: z.string().min(1).nullable(),
     sandboxResources: SandboxProfileVersionResourcesSchema.nullable(),
     state: z.enum(["draft", "published"]),
+    publishedAt: z.string().min(1).nullable(),
     usable: z.boolean(),
     version: z.number().int().min(1),
   })

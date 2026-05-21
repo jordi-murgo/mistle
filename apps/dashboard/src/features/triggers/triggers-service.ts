@@ -108,16 +108,61 @@ export async function getTrigger(input: {
   }
 }
 
-export type WebhookTriggerSandboxProfileUsage = {
+export type TriggerSandboxProfileUsage = {
   id: string;
+  kind: TriggerListItem["kind"];
   name: string;
+  sandboxProfileVersion: number;
 };
 
-export async function listWebhookTriggersForSandboxProfile(input: {
+export async function listTriggersForSandboxProfile(input: {
   sandboxProfileId: string;
   signal?: AbortSignal;
-}): Promise<WebhookTriggerSandboxProfileUsage[]> {
-  const matchingTriggers: WebhookTriggerSandboxProfileUsage[] = [];
+}): Promise<TriggerSandboxProfileUsage[]> {
+  return await listReusableTriggerUsagesForSandboxProfile(input);
+}
+
+export async function listCopyableTriggersForSandboxProfile(input: {
+  sandboxProfileId: string;
+  sandboxProfileVersion: number;
+  signal?: AbortSignal;
+}): Promise<TriggerSandboxProfileUsage[]> {
+  const triggerUsages = await listReusableTriggerUsagesForSandboxProfile({
+    sandboxProfileId: input.sandboxProfileId,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+
+  return triggerUsages.filter(
+    (triggerUsage) => triggerUsage.sandboxProfileVersion === input.sandboxProfileVersion,
+  );
+}
+
+async function listReusableTriggerUsagesForSandboxProfile(input: {
+  sandboxProfileId: string;
+  signal?: AbortSignal;
+}): Promise<TriggerSandboxProfileUsage[]> {
+  const [webhookTriggers, recurringScheduleTriggers] = await Promise.all([
+    listTriggerUsagesForSandboxProfile({
+      kind: "webhook",
+      sandboxProfileId: input.sandboxProfileId,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
+    listTriggerUsagesForSandboxProfile({
+      kind: "schedule",
+      sandboxProfileId: input.sandboxProfileId,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
+  ]);
+
+  return [...webhookTriggers, ...recurringScheduleTriggers];
+}
+
+async function listTriggerUsagesForSandboxProfile(input: {
+  kind: "webhook" | "schedule";
+  sandboxProfileId: string;
+  signal?: AbortSignal;
+}): Promise<TriggerSandboxProfileUsage[]> {
+  const matchingTriggers: TriggerSandboxProfileUsage[] = [];
   let after: string | null = null;
 
   do {
@@ -125,7 +170,7 @@ export async function listWebhookTriggersForSandboxProfile(input: {
       limit: 100,
       after,
       before: null,
-      kind: "webhook",
+      kind: input.kind,
       sandboxProfileId: input.sandboxProfileId,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -133,7 +178,9 @@ export async function listWebhookTriggersForSandboxProfile(input: {
     for (const trigger of page.items) {
       matchingTriggers.push({
         id: trigger.id,
+        kind: trigger.kind,
         name: trigger.name,
+        sandboxProfileVersion: trigger.target.sandboxProfileVersion,
       });
     }
 
