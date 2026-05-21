@@ -157,13 +157,146 @@ fn lifecycle_operation_record_waits_for_operation_channel_capacity() {
 }
 
 #[test]
+fn publishes_lifecycle_records_buffered_before_operation_sender_attachment() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "sandboxd-startup-diagnostics-buffered-records-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be creatable");
+    let _log_dir_guard =
+        TestEnvVarGuard::set(super::TEST_LOG_DIR_ENV, temp_dir.to_string_lossy().as_ref());
+
+    let logger = StartupDiagnosticsLogger::initialize(
+        StartupOperation::Init,
+        "ws://127.0.0.1:4000/tunnel/sandbox/sbi_test",
+    )
+    .expect("logger should initialize");
+    logger
+        .record_phase_started("start_tunnel_session")
+        .expect("phase start record should append before sender attachment");
+
+    let (sender, mut receiver) = mpsc::channel(8);
+    logger.attach_operation_sender(sender);
+    logger
+        .record_phase_completed("start_tunnel_session")
+        .expect("phase completion record should append after sender attachment");
+
+    let started_record = receiver
+        .blocking_recv()
+        .expect("buffered phase start should publish after sender attachment");
+    let OperationStreamMessage::Record(started_record) = started_record else {
+        panic!("expected buffered lifecycle start record");
+    };
+    let started_record =
+        serde_json::from_str::<Value>(&started_record).expect("start record should be json");
+    assert_eq!(started_record["kind"], "lifecycle");
+    assert_eq!(started_record["phase"], "operation_stream");
+    assert_eq!(started_record["status"], "started");
+    assert_eq!(
+        started_record["attributes"]["phase"],
+        "start_tunnel_session"
+    );
+
+    let completed_record = receiver
+        .blocking_recv()
+        .expect("phase completion should publish after sender attachment");
+    let OperationStreamMessage::Record(completed_record) = completed_record else {
+        panic!("expected lifecycle completion record");
+    };
+    let completed_record =
+        serde_json::from_str::<Value>(&completed_record).expect("completion record should be json");
+    assert_eq!(completed_record["kind"], "lifecycle");
+    assert_eq!(completed_record["phase"], "operation_stream");
+    assert_eq!(completed_record["status"], "completed");
+    assert_eq!(
+        completed_record["attributes"]["phase"],
+        "start_tunnel_session"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn maps_egress_start_and_stop_to_distinct_lifecycle_phases() {
     assert_eq!(
         super::operation_lifecycle_phase("start_egress_proxy"),
-        "egress"
+        Some("egress")
     );
     assert_eq!(
         super::operation_lifecycle_phase("stop_egress_proxy"),
-        "teardown"
+        Some("teardown")
     );
+}
+
+#[test]
+fn maps_cleanup_phases_to_the_resource_being_cleaned_up() {
+    assert_eq!(
+        super::operation_lifecycle_phase("stop_tunnel_session_after_runtime_plan_failure"),
+        Some("operation_stream")
+    );
+    assert_eq!(
+        super::operation_lifecycle_phase("stop_egress_proxy_after_setup_failure"),
+        Some("teardown")
+    );
+}
+
+#[test]
+fn does_not_publish_top_level_sandboxd_lifecycle_operation_records() {
+    let started_record = super::operation_record_line(
+        StartupOperation::Init,
+        "2026-05-21T00:00:00Z".to_string(),
+        "sandbox_init_started",
+        &serde_json::json!({
+            "timestamp": "2026-05-21T00:00:00Z",
+            "level": "info",
+            "event": "sandbox_init_started",
+            "sandboxInstanceId": "sbi_test",
+            "operation": "init"
+        }),
+    )
+    .expect("started event should be processed");
+    assert_eq!(started_record, None);
+
+    let failed_record = super::operation_record_line(
+        StartupOperation::Init,
+        "2026-05-21T00:00:01Z".to_string(),
+        "sandbox_init_failed",
+        &serde_json::json!({
+            "timestamp": "2026-05-21T00:00:01Z",
+            "level": "error",
+            "event": "sandbox_init_failed",
+            "sandboxInstanceId": "sbi_test",
+            "operation": "init",
+            "error": "runtime plan failed"
+        }),
+    )
+    .expect("failed event should be processed");
+    assert_eq!(failed_record, None);
+}
+
+#[test]
+fn does_not_attribute_unknown_lifecycle_phases_to_sandboxd() {
+    assert_eq!(
+        super::operation_lifecycle_phase("unexpected_internal_phase"),
+        None
+    );
+
+    let operation_record = super::operation_record_line(
+        StartupOperation::Init,
+        "2026-05-21T00:00:00Z".to_string(),
+        "sandbox_init_phase_failed",
+        &serde_json::json!({
+            "timestamp": "2026-05-21T00:00:00Z",
+            "level": "error",
+            "event": "sandbox_init_phase_failed",
+            "sandboxInstanceId": "sbi_test",
+            "operation": "init",
+            "phase": "unexpected_internal_phase",
+            "error": "failed"
+        }),
+    )
+    .expect("unknown phase event should be processed");
+    assert_eq!(operation_record, None);
 }
