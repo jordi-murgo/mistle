@@ -28,7 +28,7 @@ import { OrganizationGeneralSettingsPage } from "./features/pages/organization-g
 import { OrganizationIdentityLinkingSettingsPage } from "./features/pages/organization-identity-linking-settings-page.js";
 import { OrganizationIntegrationsSettingsPage } from "./features/pages/organization-integrations-settings-page.js";
 import { OrganizationMembersSettingsPage } from "./features/pages/organization-members-settings-page.js";
-import { OrganizationSandboxStorageSettingsPage } from "./features/pages/organization-sandbox-storage-settings-page.js";
+// import { OrganizationSandboxStorageSettingsPage } from "./features/pages/organization-sandbox-storage-settings-page.js";
 import { ProfileSettingsPage } from "./features/pages/profile-settings-page.js";
 import {
   SandboxProfileDefaultRedirect,
@@ -47,7 +47,7 @@ import { RequireAuth } from "./features/shell/require-auth.js";
 import { RouteErrorBoundary } from "./features/shell/route-error-boundary.js";
 
 export function App(): React.JSX.Element {
-  return <RouterProvider router={appRouter} />;
+  return <RouterProvider router={getAppRouter()} />;
 }
 
 export const APP_ROUTES = createRoutesFromElements(
@@ -178,11 +178,11 @@ export const APP_ROUTES = createRoutesFromElements(
               handle={ROUTE_HANDLES.settingsOrganizationIdentityLinking}
               path="identity-linking"
             />
-            <Route
-              element={<OrganizationSandboxStorageSettingsPage />}
-              handle={ROUTE_HANDLES.settingsOrganizationSandboxes}
-              path="sandboxes"
-            />
+            {/* <Route
+                element={<OrganizationSandboxStorageSettingsPage />}
+                handle={ROUTE_HANDLES.settingsOrganizationSandboxes}
+                path="sandboxes"
+              /> */}
             <Route
               element={<OrganizationBillingSettingsPage />}
               handle={ROUTE_HANDLES.settingsOrganizationBilling}
@@ -208,7 +208,12 @@ export const APP_ROUTES = createRoutesFromElements(
   </>,
 );
 
-const appRouter = createBrowserRouter(APP_ROUTES);
+let appRouter: ReturnType<typeof createBrowserRouter> | null = null;
+
+function getAppRouter(): ReturnType<typeof createBrowserRouter> {
+  appRouter ??= createBrowserRouter(APP_ROUTES);
+  return appRouter;
+}
 
 function RouteOutlet(): React.JSX.Element {
   return <Outlet />;
