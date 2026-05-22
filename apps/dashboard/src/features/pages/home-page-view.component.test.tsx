@@ -49,10 +49,10 @@ describe("HomePageView", () => {
     expect(navigatedHref).toBe("/integrations");
   });
 
-  it("shows recent sessions and the session creation form after onboarding is complete", () => {
+  it("renders completed home content top-aligned with page-scale section headings", () => {
     let navigatedHref: string | null = null;
 
-    render(
+    const { container } = render(
       <HomePageView
         createSessionForm={<div>Session creation form</div>}
         onboarding={HomePageStoryModels.completed}
@@ -68,7 +68,13 @@ describe("HomePageView", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Recent sessions" })).toBeDefined();
+    expect(container.firstElementChild?.className).toContain("flex w-full flex-col");
+    expect(container.firstElementChild?.className).not.toContain("justify-center");
+    expect(container.firstElementChild?.className).not.toContain("mx-auto");
+    expect(screen.getByRole("heading", { name: "Start new session" }).className).toContain(
+      "text-xl",
+    );
+    expect(screen.getByRole("heading", { name: "Recent sessions" }).className).toContain("text-xl");
     expect(screen.getByText("Investigate failing build")).toBeDefined();
     expect(screen.getByText("Session creation form")).toBeDefined();
 

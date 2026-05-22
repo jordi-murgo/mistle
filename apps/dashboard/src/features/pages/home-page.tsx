@@ -3,8 +3,10 @@ import * as React from "react";
 import { useNavigate } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
+import { useDashboardCapabilitiesQuery } from "../dashboard/dashboard-capabilities-query.js";
 import { useHomeSummary } from "../home/use-home-summary.js";
 import { PageFrame } from "../shared/page-frame.js";
+import { HomePageFrame } from "./home-page-frame.js";
 import { createHomeOnboardingViewModel } from "./home-page-view-model.js";
 import { HomePageView } from "./home-page-view.js";
 import { NewSessionForm } from "./new-session-form.js";
@@ -12,6 +14,7 @@ import { NewSessionForm } from "./new-session-form.js";
 export function HomePage(): React.JSX.Element {
   const navigate = useNavigate();
   const homeSummaryQuery = useHomeSummary();
+  const dashboardCapabilitiesQuery = useDashboardCapabilitiesQuery();
 
   if (homeSummaryQuery.isError) {
     return (
@@ -37,10 +40,9 @@ export function HomePage(): React.JSX.Element {
   const onboarding = createHomeOnboardingViewModel(homeSummaryQuery.data.onboarding);
 
   return (
-    <PageFrame
-      width="normal"
-      {...(onboarding.state === "completed" ? { className: "bg-muted/30" } : {})}
-      {...(onboarding.state === "completed" ? {} : { title: "Get started" })}
+    <HomePageFrame
+      onboardingState={onboarding.state}
+      showMistleCloudBetaNotice={dashboardCapabilitiesQuery.data?.billing?.stripe.enabled === true}
     >
       <HomePageView
         createSessionForm={<NewSessionForm />}
@@ -50,6 +52,6 @@ export function HomePage(): React.JSX.Element {
         }}
         recentSessions={homeSummaryQuery.data.recentSessions}
       />
-    </PageFrame>
+    </HomePageFrame>
   );
 }

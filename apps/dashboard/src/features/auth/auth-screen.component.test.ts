@@ -167,9 +167,14 @@ describe("AuthScreen", () => {
     expect(await screen.findByText(expectedMessage)).toBeTruthy();
   });
 
-  it("shows Google sign-in when the control plane reports Google auth is enabled", async () => {
+  it("keeps the unified auth title when Google auth is enabled", async () => {
     renderAuthScreen({ initialEntry: "/auth/login", googleAuthEnabled: true });
 
+    expect(
+      await screen.findByRole("heading", {
+        name: "Sign in or create an account",
+      }),
+    ).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Continue with Google" })).toBeTruthy();
   });
 
