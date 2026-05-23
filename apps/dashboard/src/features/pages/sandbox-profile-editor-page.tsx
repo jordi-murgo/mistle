@@ -623,6 +623,21 @@ type SandboxProfileEditorShellContext = {
   invalidateVersionSetupScript: (input: { profileId: string; version: number }) => Promise<void>;
 };
 
+export function resolveSandboxProfileEditorRefetchInterval(input: {
+  profileError: unknown;
+  profileVersionsError: unknown;
+  versions: readonly SandboxProfileVersion[] | undefined;
+}): false | number {
+  if (
+    isUnavailableResourceError(input.profileError) ||
+    isUnavailableResourceError(input.profileVersionsError)
+  ) {
+    return false;
+  }
+
+  return shouldPollSandboxProfileSnapshotJobs(input.versions) ? 3_000 : false;
+}
+
 export function SandboxProfileEditorShell(): React.JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -635,18 +650,19 @@ export function SandboxProfileEditorShell(): React.JSX.Element {
 
   const profileDetailKey = sandboxProfileDetailQueryKey(profileId);
   const profileVersionsKey = sandboxProfileVersionsQueryKey(profileId);
-  const shouldPollCachedSnapshotJobs = (): false | number =>
-    shouldPollSandboxProfileSnapshotJobs(
-      queryClient.getQueryData<{ versions: readonly SandboxProfileVersion[] }>(profileVersionsKey)
-        ?.versions,
-    )
-      ? 3_000
-      : false;
+  const resolveEditorRefetchInterval = (): false | number =>
+    resolveSandboxProfileEditorRefetchInterval({
+      profileError: queryClient.getQueryState(profileDetailKey)?.error,
+      profileVersionsError: queryClient.getQueryState(profileVersionsKey)?.error,
+      versions: queryClient.getQueryData<{ versions: readonly SandboxProfileVersion[] }>(
+        profileVersionsKey,
+      )?.versions,
+    });
 
   const profileQuery = useQuery({
     queryKey: profileDetailKey,
     queryFn: async ({ signal }) => getSandboxProfile({ profileId, signal }),
-    refetchInterval: shouldPollCachedSnapshotJobs,
+    refetchInterval: resolveEditorRefetchInterval,
     retry: false,
   });
   const profileVersionsQuery = useQuery({
@@ -656,7 +672,7 @@ export function SandboxProfileEditorShell(): React.JSX.Element {
         profileId,
         signal,
       }),
-    refetchInterval: shouldPollCachedSnapshotJobs,
+    refetchInterval: resolveEditorRefetchInterval,
     retry: false,
   });
 
