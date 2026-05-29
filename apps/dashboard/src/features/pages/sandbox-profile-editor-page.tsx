@@ -238,6 +238,11 @@ type SandboxProfilePersistenceDraftState = {
   buildDraftChanges?: () => SandboxProfileVersion["defaultPersistenceMode"];
 };
 type SandboxProfileRuntimeSettingsDraftState = SandboxProfileRuntimeDraftState;
+type SandboxProfileGitCommitSigningDraftState = {
+  gitCommitSigningIntegrationConnectionId: string | null | undefined;
+  sourceVersionKey: string | undefined;
+  hasUnpersistedChanges: boolean;
+};
 type SetupScriptAssistantControl = {
   disabled: boolean;
   errorMessage: string | null;
@@ -288,6 +293,31 @@ function createIdleSandboxProfileRuntimeDraftState(): SandboxProfileRuntimeSetti
   };
 }
 
+function createIdleSandboxProfileGitCommitSigningDraftState(): SandboxProfileGitCommitSigningDraftState {
+  return {
+    gitCommitSigningIntegrationConnectionId: undefined,
+    sourceVersionKey: undefined,
+    hasUnpersistedChanges: false,
+  };
+}
+
+export function updateSandboxProfileGitCommitSigningDraftState(input: {
+  currentState: SandboxProfileGitCommitSigningDraftState;
+  currentVersion: SandboxProfileVersion | null;
+  connectionId: string | null;
+}): SandboxProfileGitCommitSigningDraftState {
+  return {
+    ...input.currentState,
+    gitCommitSigningIntegrationConnectionId: input.connectionId,
+    sourceVersionKey:
+      input.currentVersion === null
+        ? input.currentState.sourceVersionKey
+        : createRuntimeDraftSourceVersionKey(input.currentVersion),
+    hasUnpersistedChanges:
+      input.currentVersion?.gitCommitSigningIntegrationConnectionId !== input.connectionId,
+  };
+}
+
 export function resolveSelectedSandboxProfileAgentRuntimeId(input: {
   currentVersion: SandboxProfileVersion | null;
   runtimeDraftState: Pick<
@@ -308,6 +338,64 @@ export function resolveSelectedSandboxProfileAgentRuntimeId(input: {
   }
 
   return input.runtimeDraftState.agentRuntimeId ?? currentVersionRuntimeId;
+}
+
+export function resolveSelectedSandboxProfileGitCommitSigningIntegrationConnectionId(input: {
+  currentVersion: SandboxProfileVersion | null;
+  gitCommitSigningDraftState: Pick<
+    SandboxProfileGitCommitSigningDraftState,
+    "gitCommitSigningIntegrationConnectionId" | "sourceVersionKey"
+  >;
+}): string | null {
+  const currentVersionConnectionId =
+    input.currentVersion?.gitCommitSigningIntegrationConnectionId ?? null;
+  if (
+    input.currentVersion === null ||
+    input.gitCommitSigningDraftState.sourceVersionKey === undefined
+  ) {
+    return currentVersionConnectionId;
+  }
+
+  if (
+    input.gitCommitSigningDraftState.sourceVersionKey !==
+    createRuntimeDraftSourceVersionKey(input.currentVersion)
+  ) {
+    return currentVersionConnectionId;
+  }
+
+  return input.gitCommitSigningDraftState.gitCommitSigningIntegrationConnectionId === undefined
+    ? currentVersionConnectionId
+    : input.gitCommitSigningDraftState.gitCommitSigningIntegrationConnectionId;
+}
+
+export function buildSandboxProfileRuntimeDraftChanges(input: {
+  currentVersion: SandboxProfileVersion | null;
+  runtimeDraftState: SandboxProfileRuntimeSettingsDraftState;
+}): SandboxProfileRuntimeDraftChanges {
+  if (input.runtimeDraftState.buildDraftChanges !== undefined) {
+    return input.runtimeDraftState.buildDraftChanges();
+  }
+
+  const currentVersion = input.currentVersion;
+  if (currentVersion === null) {
+    throw new Error("Sandbox profile runtime version is missing.");
+  }
+
+  if (currentVersion.sandboxProvider === null) {
+    throw new Error("Sandbox runtime provider is missing.");
+  }
+
+  return {
+    agentRuntimeId: resolveSelectedSandboxProfileAgentRuntimeId({
+      currentVersion,
+      runtimeDraftState: input.runtimeDraftState,
+    }),
+    mistleMcpEnabled: currentVersion.mistleMcpEnabled,
+    mistleMcpApiKeyId: currentVersion.mistleMcpApiKeyId,
+    sandboxProvider: currentVersion.sandboxProvider,
+    sandboxConnectionId: currentVersion.sandboxConnectionId,
+    sandboxResources: currentVersion.sandboxResources,
+  };
 }
 
 const AgentRuntimeRequiredErrorCode = "AGENT_RUNTIME_REQUIRED";
@@ -1467,6 +1555,9 @@ function ReadySandboxProfileEditorPage(input: {
   const [runtimeDraftState, setRuntimeDraftState] = useState(
     createIdleSandboxProfileRuntimeDraftState,
   );
+  const [gitCommitSigningDraftState, setGitCommitSigningDraftState] = useState(
+    createIdleSandboxProfileGitCommitSigningDraftState,
+  );
   const [publishRequestIsPending, setPublishRequestIsPending] = useState(false);
   const [saveDraftRequestIsPending, setSaveDraftRequestIsPending] = useState(false);
   const [publishFlushError, setPublishFlushError] = useState<string | null>(null);
@@ -1491,6 +1582,14 @@ function ReadySandboxProfileEditorPage(input: {
     refetchIntervalMs: setupAssistantPanelIsOpen ? 2_000 : false,
     version: input.mode.version,
   });
+  useEffect(() => {
+    setGitCommitSigningDraftState(createIdleSandboxProfileGitCommitSigningDraftState());
+  }, [
+    input.currentVersion?.gitCommitSigningIntegrationConnectionId,
+    input.currentVersion?.sandboxProfileId,
+    input.currentVersion?.version,
+    input.draftEditorResetKey,
+  ]);
   const [setupAssistantCloseDialogState, setSetupAssistantCloseDialogState] =
     useState<SetupAssistantCloseDialogState>(null);
   const [setupAssistantStartDialogState, setSetupAssistantStartDialogState] =
@@ -1514,9 +1613,22 @@ function ReadySandboxProfileEditorPage(input: {
     input.mode.kind === "draft" && hasSetupAssistantAgentBinding(setupAssistantIntegrationRows);
   const setupAssistantHasVersionDraftChanges =
     integrationDraftState.hasUnpersistedChanges ||
+    gitCommitSigningDraftState.hasUnpersistedChanges ||
     setupScriptDraftState.hasUnpersistedChanges ||
     persistenceDraftState.hasUnpersistedChanges ||
     runtimeDraftState.hasUnpersistedChanges;
+  const updateGitCommitSigningIntegrationConnectionId = useCallback(
+    (connectionId: string | null) => {
+      setGitCommitSigningDraftState((currentState) =>
+        updateSandboxProfileGitCommitSigningDraftState({
+          connectionId,
+          currentState,
+          currentVersion: input.currentVersion,
+        }),
+      );
+    },
+    [input.currentVersion],
+  );
   const metaState = useEditSandboxProfileMetaState({
     profileId: input.profileId,
     loadedProfile: input.profile,
@@ -1827,12 +1939,14 @@ function ReadySandboxProfileEditorPage(input: {
     setPublishFlushError(null);
     const shouldSavePersistence = persistenceDraftState.hasUnpersistedChanges;
     const shouldSaveRuntime = runtimeDraftState.hasUnpersistedChanges;
+    const shouldSaveGitCommitSigning = gitCommitSigningDraftState.hasUnpersistedChanges;
     const shouldSaveIntegrations = integrationDraftState.hasUnpersistedChanges;
     const shouldSaveSetupScript = setupScriptDraftState.hasUnpersistedChanges;
 
     if (
       !shouldSavePersistence &&
       !shouldSaveRuntime &&
+      !shouldSaveGitCommitSigning &&
       !shouldSaveIntegrations &&
       !shouldSaveSetupScript
     ) {
@@ -1854,7 +1968,16 @@ function ReadySandboxProfileEditorPage(input: {
         ? persistenceDraftState.buildDraftChanges?.()
         : undefined;
       const runtimeChanges: SandboxProfileRuntimeDraftChanges | undefined = shouldSaveRuntime
-        ? runtimeDraftState.buildDraftChanges?.()
+        ? buildSandboxProfileRuntimeDraftChanges({
+            currentVersion: input.currentVersion,
+            runtimeDraftState,
+          })
+        : undefined;
+      const gitCommitSigningIntegrationConnectionId = shouldSaveGitCommitSigning
+        ? resolveSelectedSandboxProfileGitCommitSigningIntegrationConnectionId({
+            currentVersion: input.currentVersion,
+            gitCommitSigningDraftState,
+          })
         : undefined;
 
       const savedDraft = await putSandboxProfileVersionDraft({
@@ -1866,14 +1989,15 @@ function ReadySandboxProfileEditorPage(input: {
           ? {}
           : {
               agentRuntimeId: runtimeChanges.agentRuntimeId,
-              gitCommitSigningIntegrationConnectionId:
-                runtimeChanges.gitCommitSigningIntegrationConnectionId,
               mistleMcpEnabled: runtimeChanges.mistleMcpEnabled,
               mistleMcpApiKeyId: runtimeChanges.mistleMcpApiKeyId,
               sandboxProvider: runtimeChanges.sandboxProvider,
               sandboxConnectionId: runtimeChanges.sandboxConnectionId,
               sandboxResources: runtimeChanges.sandboxResources,
             }),
+        ...(gitCommitSigningIntegrationConnectionId === undefined
+          ? {}
+          : { gitCommitSigningIntegrationConnectionId }),
         ...(shouldSaveIntegrations && integrationBindings !== undefined
           ? { integrationBindings: { bindings: integrationBindings } }
           : {}),
@@ -1904,8 +2028,6 @@ function ReadySandboxProfileEditorPage(input: {
 
         runtimeDraftState.applySavedRuntimeConfig?.({
           agentRuntimeId: savedDraft.agentRuntimeId,
-          gitCommitSigningIntegrationConnectionId:
-            savedDraft.gitCommitSigningIntegrationConnectionId,
           mistleMcpEnabled: savedDraft.mistleMcpEnabled,
           mistleMcpApiKeyId: savedDraft.mistleMcpApiKeyId,
           sandboxProvider: savedDraft.sandboxProvider,
@@ -1913,6 +2035,12 @@ function ReadySandboxProfileEditorPage(input: {
           sandboxResources: savedDraft.sandboxResources,
         });
         await input.invalidateProfileVersions(input.profileId);
+      }
+      if (shouldSaveGitCommitSigning) {
+        setGitCommitSigningDraftState(createIdleSandboxProfileGitCommitSigningDraftState());
+        if (!shouldSaveRuntime) {
+          await input.invalidateProfileVersions(input.profileId);
+        }
       }
 
       return true;
@@ -1973,7 +2101,10 @@ function ReadySandboxProfileEditorPage(input: {
       activeSectionId={activeSectionId}
       hasUnpersistedPersistenceChanges={persistenceDraftState.hasUnpersistedChanges}
       hasUnpersistedRuntimeChanges={runtimeDraftState.hasUnpersistedChanges}
-      hasUnpersistedIntegrationChanges={integrationDraftState.hasUnpersistedChanges}
+      hasUnpersistedIntegrationChanges={
+        integrationDraftState.hasUnpersistedChanges ||
+        gitCommitSigningDraftState.hasUnpersistedChanges
+      }
       hasUnpersistedSetupScriptChanges={setupScriptDraftState.hasUnpersistedChanges}
       isSavingProfileName={metaState.isUpdating}
       mode={input.mode}
@@ -2059,6 +2190,11 @@ function ReadySandboxProfileEditorPage(input: {
           invalidateProfileVersions={input.invalidateProfileVersions}
           mode={input.mode}
           onPersistenceDraftStateChange={setPersistenceDraftState}
+          runtimeDraftState={runtimeDraftState}
+          gitCommitSigningDraftState={gitCommitSigningDraftState}
+          onGitCommitSigningIntegrationConnectionChange={
+            updateGitCommitSigningIntegrationConnectionId
+          }
           onRuntimeDraftStateChange={setRuntimeDraftState}
           onIntegrationDraftStateChange={setIntegrationDraftState}
           onPublishSuccessMessageDismiss={() => {
@@ -2566,6 +2702,9 @@ function SandboxProfileEditorSectionPanels(input: {
   invalidateProfileVersions: (profileId: string) => Promise<void>;
   mode: SandboxProfileEditorVersionMode;
   onPersistenceDraftStateChange: (state: SandboxProfilePersistenceDraftState) => void;
+  runtimeDraftState: SandboxProfileRuntimeSettingsDraftState;
+  gitCommitSigningDraftState: SandboxProfileGitCommitSigningDraftState;
+  onGitCommitSigningIntegrationConnectionChange: (connectionId: string | null) => void;
   onRuntimeDraftStateChange: (state: SandboxProfileRuntimeSettingsDraftState) => void;
   onIntegrationDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
   buildSetupScriptTestRuntimeConfig?: () => SandboxProfileRuntimeDraftChanges;
@@ -2640,6 +2779,15 @@ function SandboxProfileEditorSectionPanels(input: {
         loader={input.integrationsLoader}
         onDraftStateChange={input.onIntegrationDraftStateChange}
         profileId={input.profileId}
+        gitCommitSigningIntegrationConnectionId={resolveSelectedSandboxProfileGitCommitSigningIntegrationConnectionId(
+          {
+            currentVersion: input.currentVersion,
+            gitCommitSigningDraftState: input.gitCommitSigningDraftState,
+          },
+        )}
+        onGitCommitSigningIntegrationConnectionChange={
+          input.onGitCommitSigningIntegrationConnectionChange
+        }
         runtimeSettings={
           input.currentVersion === null ? null : (
             <LoadedSandboxProfileRuntimeSection
@@ -2718,11 +2866,6 @@ function LoadedSandboxProfileRuntimeSection(input: {
     queryFn: async ({ signal }) => listApiKeys({ signal }),
     retry: false,
   });
-  const identityLinkProvidersQuery = useQuery({
-    queryKey: organizationIdentityLinkProvidersQueryKey(activeOrganizationId),
-    queryFn: async ({ signal }) => listOrganizationIdentityLinkProviders({ signal }),
-    retry: false,
-  });
   const createApiKeyMutation = useMutation({
     mutationFn: createApiKey,
     onSuccess: (createdApiKey) => {
@@ -2768,32 +2911,10 @@ function LoadedSandboxProfileRuntimeSection(input: {
         fallbackMessage: "Could not load API keys.",
       })
     : null;
-  const identityLinkProvidersLoadErrorMessage = identityLinkProvidersQuery.isError
-    ? resolveApiErrorMessage({
-        error: identityLinkProvidersQuery.error,
-        fallbackMessage: "Could not load identity-linking providers.",
-      })
-    : null;
   const apiKeys = apiKeysQuery.isSuccess ? apiKeysQuery.data.items : [];
-  const gitHubSigningConnectionOptions =
-    identityLinkProvidersQuery.data
-      ?.find((provider) => provider.providerFamily === "github")
-      ?.configs.filter(
-        (config) =>
-          config.configurationStatus === "active" && config.selectedConnection.status === "active",
-      )
-      .map((config) => ({
-        integrationConnectionId: config.integrationConnectionId,
-        label: config.selectedConnection.displayName,
-      })) ?? [];
 
   return (
     <div className="grid gap-3">
-      {identityLinkProvidersLoadErrorMessage === null ? null : (
-        <Notice title="Could not load GitHub signing connections" variant="alert">
-          {identityLinkProvidersLoadErrorMessage}
-        </Notice>
-      )}
       <SandboxProfileRuntimeSection
         apiKeys={apiKeys}
         apiKeysAreLoading={apiKeysQuery.isPending}
@@ -2801,7 +2922,6 @@ function LoadedSandboxProfileRuntimeSection(input: {
         availableConnections={input.availableConnections}
         availableTargets={input.availableTargets}
         disabled={input.disabled}
-        gitHubSigningConnectionOptions={gitHubSigningConnectionOptions}
         isDraft={input.isDraft}
         onCreateApiKey={(createInput) => createApiKeyMutation.mutateAsync(createInput)}
         onDraftStateChange={input.onDraftStateChange}
@@ -3577,6 +3697,8 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   disabled: boolean;
   readOnly: boolean;
   loader: ReturnType<typeof useSandboxProfileIntegrationsLoader>;
+  gitCommitSigningIntegrationConnectionId: string | null;
+  onGitCommitSigningIntegrationConnectionChange: (connectionId: string | null) => void;
   runtimeSettings: ReactNode | null;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element | null {
@@ -3628,6 +3750,10 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
       availableTargets={input.loader.availableTargets}
       disabled={input.disabled}
       readOnly={input.readOnly}
+      gitCommitSigningIntegrationConnectionId={input.gitCommitSigningIntegrationConnectionId}
+      onGitCommitSigningIntegrationConnectionChange={
+        input.onGitCommitSigningIntegrationConnectionChange
+      }
       integrationDirectoryQuery={input.loader.integrationDirectoryQuery}
       runtimeSettings={input.runtimeSettings}
       {...(input.onDraftStateChange === undefined
@@ -3659,11 +3785,20 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
   disabled: boolean;
   readOnly: boolean;
   runtimeSettings: ReactNode | null;
+  gitCommitSigningIntegrationConnectionId: string | null;
+  onGitCommitSigningIntegrationConnectionChange: (connectionId: string | null) => void;
   integrationDirectoryQuery: ReturnType<
     typeof useSandboxProfileIntegrationsLoader
   >["integrationDirectoryQuery"];
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element {
+  const activeOrganizationId = useRequiredOrganizationId();
+  const identityLinkProvidersQuery = useQuery({
+    enabled: !input.readOnly,
+    queryKey: organizationIdentityLinkProvidersQueryKey(activeOrganizationId),
+    queryFn: async ({ signal }) => listOrganizationIdentityLinkProviders({ signal }),
+    retry: false,
+  });
   const integrationsState = useLoadedSandboxProfileIntegrationsState({
     profileId: input.profileId,
     version: input.version,
@@ -3672,6 +3807,25 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
     availableTargets: input.availableTargets,
   });
   const onDraftStateChange = input.onDraftStateChange;
+  const identityLinkedGitConnectionIds = input.readOnly
+    ? []
+    : identityLinkProvidersQuery.data === undefined
+      ? null
+      : (identityLinkProvidersQuery.data
+          .find((provider) => provider.providerFamily === "github")
+          ?.configs.filter(
+            (config) =>
+              config.configurationStatus === "active" &&
+              config.selectedConnection.status === "active",
+          )
+          .map((config) => config.integrationConnectionId) ?? []);
+  const identityLinkProvidersLoadErrorMessage =
+    !input.readOnly && identityLinkProvidersQuery.isError
+      ? resolveApiErrorMessage({
+          error: identityLinkProvidersQuery.error,
+          fallbackMessage: "Could not load identity-linking providers.",
+        })
+      : null;
 
   useEffect(() => {
     onDraftStateChange?.({
@@ -3697,14 +3851,24 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
         integrationDirectoryQuery={input.integrationDirectoryQuery}
         integrationRows={integrationsState.integrationRows}
         integrationSaveError={integrationsState.integrationSaveError}
+        gitCommitSigningIntegrationConnectionId={input.gitCommitSigningIntegrationConnectionId}
+        identityLinkedGitConnectionIds={identityLinkedGitConnectionIds}
         runtimeSettings={input.runtimeSettings}
         disabled={input.disabled}
         readOnly={input.readOnly}
         onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
+        onGitCommitSigningIntegrationConnectionChange={
+          input.onGitCommitSigningIntegrationConnectionChange
+        }
         onIntegrationBindingRowChange={integrationsState.onIntegrationBindingRowChange}
         onRemoveIntegrationBindingRow={integrationsState.onRemoveIntegrationBindingRow}
         onIntegrationSaveErrorDismiss={integrationsState.onIntegrationSaveErrorDismiss}
       />
+      {identityLinkProvidersLoadErrorMessage === null ? null : (
+        <Notice title="Could not load Git commit signing settings" variant="alert">
+          {identityLinkProvidersLoadErrorMessage}
+        </Notice>
+      )}
     </SandboxProfilePanelSection>
   );
 }

@@ -1,11 +1,10 @@
 import { systemSleeper } from "@mistle/time";
-import { toast } from "@mistle/ui";
+import { toast, Toaster } from "@mistle/ui";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type React from "react";
 import { useState } from "react";
 import { userEvent, within } from "storybook/test";
 
-import { withDashboardPageStory } from "../../storybook/decorators.js";
 import {
   OrganizationIdentityLinkingSettingsPageView,
   type OrganizationIdentityLinkingProviderRow,
@@ -13,25 +12,14 @@ import {
 
 const BaseProviders = [
   {
-    rowKey: "ilp_github",
-    organizationProviderConfigId: "ilp_github",
-    providerFamily: "github",
+    rowKey: "github:conn_github_engineering",
+    canOpenLinkedUsers: true,
     displayName: "GitHub",
     logoKey: "github",
-    connectionOptions: [
-      {
-        id: "conn_github_primary",
-        label: "GitHub Engineering",
-      },
-      {
-        id: "conn_github_platform",
-        label: "GitHub Platform",
-      },
-    ],
-    selectedConnectionId: "conn_github_primary",
-    connectionPending: false,
+    connectionLabel: "GitHub Engineering",
     enablePending: false,
     enabled: true,
+    unavailableMessage: null,
     linkedUsersCount: 12,
     memberLinksErrorMessage: null,
     memberLinks: [
@@ -54,21 +42,27 @@ const BaseProviders = [
     ],
   },
   {
-    rowKey: "ilp_slack",
-    organizationProviderConfigId: "ilp_slack",
-    providerFamily: "slack",
-    displayName: "Slack",
-    logoKey: "slack",
-    connectionOptions: [
-      {
-        id: "conn_slack_workspace",
-        label: "Slack Workspace",
-      },
-    ],
-    selectedConnectionId: "conn_slack_workspace",
-    connectionPending: false,
+    rowKey: "github:conn_github_platform",
+    canOpenLinkedUsers: false,
+    displayName: "GitHub",
+    logoKey: "github",
+    connectionLabel: "GitHub Platform",
     enablePending: false,
     enabled: false,
+    unavailableMessage: null,
+    linkedUsersCount: null,
+    memberLinksErrorMessage: null,
+    memberLinks: [],
+  },
+  {
+    rowKey: "slack:conn_slack_workspace",
+    canOpenLinkedUsers: true,
+    displayName: "Slack",
+    logoKey: "slack",
+    connectionLabel: "Slack Workspace",
+    enablePending: false,
+    enabled: false,
+    unavailableMessage: null,
     linkedUsersCount: 3,
     memberLinksErrorMessage: null,
     memberLinks: [
@@ -82,21 +76,6 @@ const BaseProviders = [
       },
     ],
   },
-  {
-    rowKey: "draft:linear",
-    organizationProviderConfigId: null,
-    providerFamily: "linear",
-    displayName: "Linear",
-    logoKey: "linear",
-    connectionOptions: [],
-    selectedConnectionId: null,
-    connectionPending: false,
-    enablePending: false,
-    enabled: false,
-    linkedUsersCount: 0,
-    memberLinksErrorMessage: null,
-    memberLinks: [],
-  },
 ] as const satisfies readonly OrganizationIdentityLinkingProviderRow[];
 
 function wait(ms: number): Promise<void> {
@@ -106,7 +85,7 @@ function wait(ms: number): Promise<void> {
 function StatefulPrototype(
   args: Omit<
     React.ComponentProps<typeof OrganizationIdentityLinkingSettingsPageView>,
-    "onEnabledChange" | "onProviderConnectionChange"
+    "onEnabledChange"
   >,
 ): React.JSX.Element {
   const [providers, setProviders] = useState(args.providers);
@@ -134,34 +113,10 @@ function StatefulPrototype(
               ? provider
               : {
                   ...provider,
+                  canOpenLinkedUsers: true,
+                  linkedUsersCount: provider.linkedUsersCount ?? 0,
                   enabled,
                   enablePending: false,
-                },
-          ),
-        );
-      }}
-      onProviderConnectionChange={async ({ rowKey, integrationConnectionId }) => {
-        setProviders((currentProviders) =>
-          currentProviders.map((provider) =>
-            provider.rowKey !== rowKey
-              ? provider
-              : {
-                  ...provider,
-                  selectedConnectionId: integrationConnectionId,
-                  connectionPending: true,
-                },
-          ),
-        );
-
-        await wait(500);
-
-        setProviders((currentProviders) =>
-          currentProviders.map((provider) =>
-            provider.rowKey !== rowKey
-              ? provider
-              : {
-                  ...provider,
-                  connectionPending: false,
                 },
           ),
         );
@@ -171,16 +126,28 @@ function StatefulPrototype(
   );
 }
 
-/** Review this Storybook surface as the proposed autosaving list-based replacement for the current provider cards. */
+function withIdentityLinkingSettingsStory(Story: () => React.JSX.Element): React.JSX.Element {
+  return (
+    <div className="flex min-h-screen w-[100vw] min-w-[69rem] flex-col p-4">
+      <div className="mx-auto w-full max-w-5xl">
+        <Story />
+      </div>
+      <Toaster position="top-right" />
+    </div>
+  );
+}
+
 const meta = {
   title: "Dashboard/Settings/OrganizationIdentityLinking/PageView",
   component: OrganizationIdentityLinkingSettingsPageView,
-  decorators: [withDashboardPageStory],
+  decorators: [withIdentityLinkingSettingsStory],
   render: StatefulPrototype,
   args: {
     loadErrorMessage: null,
+    gitCommitSigningImpactConfirmation: null,
+    onCancelGitCommitSigningImpactConfirmation: () => {},
     onEnabledChange: async () => {},
-    onProviderConnectionChange: async () => {},
+    onConfirmGitCommitSigningImpactConfirmation: async () => {},
     providers: BaseProviders,
   },
 } satisfies Meta<typeof OrganizationIdentityLinkingSettingsPageView>;
@@ -206,34 +173,118 @@ export const NoProvidersAvailable: Story = {
   },
 };
 
-export const UnconfiguredProviderWithDisplayedConnection: Story = {
+export const UnconfiguredConnection: Story = {
   args: {
     providers: [
       {
-        rowKey: "ilp_github",
-        organizationProviderConfigId: "ilp_github",
-        providerFamily: "github",
-        displayName: "GitHub",
-        logoKey: "github",
-        connectionOptions: [
-          {
-            id: "conn_github_primary",
-            label: "GitHub Engineering",
-          },
-          {
-            id: "conn_github_platform",
-            label: "GitHub Platform",
-          },
-        ],
-        selectedConnectionId: "conn_github_primary",
-        connectionPending: false,
-        enablePending: false,
-        enabled: false,
-        linkedUsersCount: 0,
-        memberLinksErrorMessage: null,
-        memberLinks: [],
+        ...BaseProviders[1],
       },
     ],
+  },
+};
+
+export const UnavailableConfiguredConnection: Story = {
+  args: {
+    providers: [
+      {
+        ...BaseProviders[0],
+        unavailableMessage:
+          "This connection is no longer active. Disable identity linking or reconnect it.",
+      },
+      BaseProviders[1],
+    ],
+  },
+};
+
+export const GitCommitSigningEnableConfirmation: Story = {
+  args: {
+    gitCommitSigningImpactConfirmation: {
+      action: "enable",
+      connectionLabel: "GitHub Platform",
+      providerDisplayName: "GitHub",
+      updatedProfileCount: 4,
+      invariantViolationCount: 0,
+      pending: false,
+    },
+    providers: [
+      BaseProviders[0],
+      {
+        ...BaseProviders[1],
+        enabled: false,
+      },
+    ],
+  },
+};
+
+export const GitCommitSigningDisableConfirmation: Story = {
+  args: {
+    gitCommitSigningImpactConfirmation: {
+      action: "disable",
+      connectionLabel: "GitHub Engineering",
+      providerDisplayName: "GitHub",
+      updatedProfileCount: 4,
+      invariantViolationCount: 0,
+      pending: false,
+    },
+    providers: [
+      {
+        ...BaseProviders[0],
+        enabled: true,
+      },
+      BaseProviders[1],
+    ],
+  },
+};
+
+export const GitCommitSigningInvariantWarningConfirmation: Story = {
+  args: {
+    gitCommitSigningImpactConfirmation: {
+      action: "enable",
+      connectionLabel: "GitHub Platform",
+      providerDisplayName: "GitHub",
+      updatedProfileCount: 0,
+      invariantViolationCount: 2,
+      pending: false,
+    },
+    providers: [
+      BaseProviders[0],
+      {
+        ...BaseProviders[1],
+        enabled: false,
+      },
+    ],
+  },
+};
+
+export const GitCommitSigningNoImpact: Story = {
+  args: {
+    providers: [
+      BaseProviders[0],
+      {
+        ...BaseProviders[1],
+        enabled: false,
+      },
+    ],
+  },
+};
+
+export const MultipleGitHubConnections: Story = {
+  args: {
+    providers: BaseProviders,
+  },
+};
+
+export const MultipleGitHubConnectionsEnableConfirmation: Story = {
+  args: {
+    gitCommitSigningImpactConfirmation: {
+      action: "enable",
+      connectionLabel: "GitHub Platform",
+      providerDisplayName: "GitHub",
+      updatedProfileCount: 5,
+      invariantViolationCount: 0,
+      pending: false,
+    },
+    providers: BaseProviders,
   },
 };
 
@@ -251,7 +302,11 @@ export const LinkedUsersDialogError: Story = {
   play: async ({ canvasElement }): Promise<void> => {
     const canvas = within(canvasElement);
 
-    await userEvent.click(canvas.getByRole("button", { name: "View GitHub linked users" }));
+    await userEvent.click(
+      canvas.getByRole("button", {
+        name: "View GitHub linked users for GitHub Engineering",
+      }),
+    );
   },
 };
 
@@ -267,7 +322,7 @@ export const LinkedUsersUnknown: Story = {
   },
 };
 
-export const ConnectionSaveErrorToast: Story = {
+export const StatusSaveErrorToast: Story = {
   render: (args) => {
     function FailurePrototype(): React.JSX.Element {
       const [providers, setProviders] = useState(args.providers);
@@ -275,7 +330,7 @@ export const ConnectionSaveErrorToast: Story = {
       return (
         <OrganizationIdentityLinkingSettingsPageView
           {...args}
-          onEnabledChange={async ({ rowKey, enabled }) => {
+          onEnabledChange={async ({ rowKey }) => {
             setProviders((currentProviders) =>
               currentProviders.map((provider) =>
                 provider.rowKey !== rowKey
@@ -296,43 +351,11 @@ export const ConnectionSaveErrorToast: Story = {
                   : {
                       ...provider,
                       enablePending: false,
-                      enabled,
-                    },
-              ),
-            );
-          }}
-          onProviderConnectionChange={async ({ rowKey, integrationConnectionId }) => {
-            const previousSelection =
-              providers.find((provider) => provider.rowKey === rowKey)?.selectedConnectionId ??
-              null;
-
-            setProviders((currentProviders) =>
-              currentProviders.map((provider) =>
-                provider.rowKey !== rowKey
-                  ? provider
-                  : {
-                      ...provider,
-                      selectedConnectionId: integrationConnectionId,
-                      connectionPending: true,
                     },
               ),
             );
 
-            await wait(500);
-
-            setProviders((currentProviders) =>
-              currentProviders.map((provider) =>
-                provider.rowKey !== rowKey
-                  ? provider
-                  : {
-                      ...provider,
-                      selectedConnectionId: previousSelection,
-                      connectionPending: false,
-                    },
-              ),
-            );
-
-            toast.error("Could not save identity-linking provider configuration.");
+            toast.error("Could not update identity-linking provider status.");
           }}
           providers={providers}
         />
@@ -344,7 +367,10 @@ export const ConnectionSaveErrorToast: Story = {
   play: async ({ canvasElement }): Promise<void> => {
     const canvas = within(canvasElement);
 
-    await userEvent.click(canvas.getByRole("combobox", { name: "GitHub connection" }));
-    await userEvent.click(canvas.getByRole("option", { name: "GitHub Platform" }));
+    await userEvent.click(
+      canvas.getByRole("switch", {
+        name: "Enable GitHub identity linking for GitHub Engineering",
+      }),
+    );
   },
 };

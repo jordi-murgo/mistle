@@ -77,6 +77,14 @@ const OrganizationIdentityLinkProviderLinksResponseSchema = z
   })
   .strict();
 
+const OrganizationIdentityLinkGitCommitSigningImpactSchema = z
+  .object({
+    action: z.enum(["enable", "disable"]),
+    updatedProfileCount: z.number().int().min(0),
+    invariantViolationCount: z.number().int().min(0),
+  })
+  .strict();
+
 export type OrganizationIdentityLinkProvider = z.infer<
   typeof OrganizationIdentityLinkProviderSchema
 >;
@@ -85,6 +93,9 @@ export type OrganizationIdentityLinkProviderConfig = z.infer<
 >;
 export type OrganizationIdentityLinkProviderLink = z.infer<
   typeof OrganizationIdentityLinkProviderLinkSchema
+>;
+export type OrganizationIdentityLinkGitCommitSigningImpact = z.infer<
+  typeof OrganizationIdentityLinkGitCommitSigningImpactSchema
 >;
 
 export function organizationIdentityLinkProvidersQueryKey(
@@ -102,6 +113,29 @@ export function organizationIdentityLinkProviderLinksQueryKey(input: {
     "organization-identity-linking-links",
     input.activeOrganizationId,
     input.organizationProviderConfigId,
+  ];
+}
+
+export function organizationIdentityLinkGitCommitSigningImpactQueryKey(input: {
+  activeOrganizationId: string;
+  providerFamily: string;
+  integrationConnectionId: string;
+  action: "enable" | "disable";
+}): readonly [
+  "settings",
+  "organization-identity-linking-git-commit-signing-impact",
+  string,
+  string,
+  string,
+  "enable" | "disable",
+] {
+  return [
+    "settings",
+    "organization-identity-linking-git-commit-signing-impact",
+    input.activeOrganizationId,
+    input.providerFamily,
+    input.integrationConnectionId,
+    input.action,
   ];
 }
 
@@ -218,35 +252,6 @@ export async function createOrganizationIdentityLinkProviderConfig(input: {
   }
 }
 
-export async function updateOrganizationIdentityLinkProviderConfig(input: {
-  organizationProviderConfigId: string;
-  integrationConnectionId: string;
-}): Promise<OrganizationIdentityLinkProviderConfig> {
-  try {
-    const response = await requestControlPlane({
-      operation: "updateOrganizationIdentityLinkProviderConfig",
-      method: "PUT",
-      pathname: `/v1/organization/identity-linking/provider-configs/${encodeURIComponent(input.organizationProviderConfigId)}`,
-      body: {
-        integrationConnectionId: input.integrationConnectionId,
-      },
-      fallbackMessage: "Could not save identity-linking provider configuration.",
-    });
-
-    return readJsonWithSchema({
-      response,
-      schema: OrganizationIdentityLinkProviderConfigSchema,
-      operation: "updateOrganizationIdentityLinkProviderConfig",
-    });
-  } catch (error) {
-    throw wrapOrganizationIdentityLinkingApiError({
-      operation: "updateOrganizationIdentityLinkProviderConfig",
-      error,
-      fallbackMessage: "Could not save identity-linking provider configuration.",
-    });
-  }
-}
-
 export async function listOrganizationIdentityLinkProviderLinks(input: {
   organizationProviderConfigId: string;
   signal?: AbortSignal;
@@ -276,6 +281,39 @@ export async function listOrganizationIdentityLinkProviderLinks(input: {
   }
 }
 
+export async function getOrganizationIdentityLinkGitCommitSigningImpact(input: {
+  providerFamily: string;
+  integrationConnectionId: string;
+  action: "enable" | "disable";
+  signal?: AbortSignal;
+}): Promise<OrganizationIdentityLinkGitCommitSigningImpact> {
+  try {
+    const response = await requestControlPlane({
+      operation: "getOrganizationIdentityLinkGitCommitSigningImpact",
+      method: "GET",
+      pathname: `/v1/organization/identity-linking/providers/${encodeURIComponent(input.providerFamily)}/git-commit-signing-impact`,
+      query: {
+        integrationConnectionId: input.integrationConnectionId,
+        action: input.action,
+      },
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      fallbackMessage: "Could not load commit-signing impact.",
+    });
+
+    return readJsonWithSchema({
+      response,
+      schema: OrganizationIdentityLinkGitCommitSigningImpactSchema,
+      operation: "getOrganizationIdentityLinkGitCommitSigningImpact",
+    });
+  } catch (error) {
+    throw wrapOrganizationIdentityLinkingApiError({
+      operation: "getOrganizationIdentityLinkGitCommitSigningImpact",
+      error,
+      fallbackMessage: "Could not load commit-signing impact.",
+    });
+  }
+}
+
 export async function putOrganizationIdentityLinkProviderStatus(input: {
   organizationProviderConfigId: string;
   status: "active" | "disabled";
@@ -301,31 +339,6 @@ export async function putOrganizationIdentityLinkProviderStatus(input: {
       operation: "putOrganizationIdentityLinkProviderStatus",
       error,
       fallbackMessage: "Could not update identity-linking provider status.",
-    });
-  }
-}
-
-export async function disableOrganizationIdentityLinkProvider(input: {
-  organizationProviderConfigId: string;
-}): Promise<OrganizationIdentityLinkProviderConfig> {
-  try {
-    const response = await requestControlPlane({
-      operation: "disableOrganizationIdentityLinkProvider",
-      method: "DELETE",
-      pathname: `/v1/organization/identity-linking/provider-configs/${encodeURIComponent(input.organizationProviderConfigId)}`,
-      fallbackMessage: "Could not disable identity-linking provider configuration.",
-    });
-
-    return readJsonWithSchema({
-      response,
-      schema: OrganizationIdentityLinkProviderConfigSchema,
-      operation: "disableOrganizationIdentityLinkProvider",
-    });
-  } catch (error) {
-    throw wrapOrganizationIdentityLinkingApiError({
-      operation: "disableOrganizationIdentityLinkProvider",
-      error,
-      fallbackMessage: "Could not disable identity-linking provider configuration.",
     });
   }
 }

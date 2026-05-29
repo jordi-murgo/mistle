@@ -80,24 +80,13 @@ import type { SessionPortAccessState } from "./use-session-port-access.js";
 const IdentityLinkingProviders: OrganizationIdentityLinkingProviderRow[] = [
   {
     rowKey: "ilp_github",
-    organizationProviderConfigId: "ilp_github",
-    providerFamily: "github",
+    canOpenLinkedUsers: true,
     displayName: "GitHub",
     logoKey: "github",
-    connectionOptions: [
-      {
-        id: "conn_github_engineering",
-        label: "GitHub Engineering",
-      },
-      {
-        id: "conn_github_platform",
-        label: "GitHub Platform",
-      },
-    ],
-    selectedConnectionId: "conn_github_engineering",
-    connectionPending: false,
+    connectionLabel: "GitHub Engineering",
     enablePending: false,
     enabled: true,
+    unavailableMessage: null,
     linkedUsersCount: 12,
     memberLinksErrorMessage: null,
     memberLinks: [
@@ -121,20 +110,13 @@ const IdentityLinkingProviders: OrganizationIdentityLinkingProviderRow[] = [
   },
   {
     rowKey: "ilp_slack",
-    organizationProviderConfigId: "ilp_slack",
-    providerFamily: "slack",
+    canOpenLinkedUsers: true,
     displayName: "Slack",
     logoKey: "slack",
-    connectionOptions: [
-      {
-        id: "conn_slack_workspace",
-        label: "Slack Workspace",
-      },
-    ],
-    selectedConnectionId: "conn_slack_workspace",
-    connectionPending: false,
+    connectionLabel: "Slack Workspace",
     enablePending: false,
     enabled: true,
+    unavailableMessage: null,
     linkedUsersCount: 3,
     memberLinksErrorMessage: null,
     memberLinks: [
@@ -483,9 +465,11 @@ function IdentityLinkingOrganizationSettingsStory(): React.JSX.Element {
     <DocsProductScreen>
       <div data-docs-screenshot="identity-linking-organization-settings">
         <OrganizationIdentityLinkingSettingsPageView
+          gitCommitSigningImpactConfirmation={null}
           loadErrorMessage={null}
+          onCancelGitCommitSigningImpactConfirmation={() => {}}
           onEnabledChange={async () => {}}
-          onProviderConnectionChange={async () => {}}
+          onConfirmGitCommitSigningImpactConfirmation={async () => {}}
           providers={IdentityLinkingProviders}
         />
       </div>

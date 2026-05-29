@@ -3,9 +3,12 @@ import {
   type ControlPlaneDatabase,
   getControlPlaneDatabaseSchema,
 } from "@mistle/db/control-plane";
+import { BadRequestError } from "@mistle/http/errors.js";
 import type { IntegrationRegistry } from "@mistle/integrations-core";
 import { sql } from "drizzle-orm";
 
+import { IdentityLinkingBadRequestCodes } from "../constants.js";
+import { GitHubProviderFamily } from "../github-signing.js";
 import { listOrganizationIdentityLinkProviders } from "./list-organization-identity-link-providers.js";
 import {
   resolveExactOneOrganizationIdentityLinkProviderConfigForFamilyOrThrow,
@@ -13,6 +16,7 @@ import {
   resolveOrganizationIdentityLinkProviderConfigByIdOrThrow,
 } from "./resolve-organization-identity-link-provider-config.js";
 import { resolveValidatedProviderConnectionOrThrow } from "./resolve-validated-provider-connection.js";
+import { syncProfileGitCommitSigningForIdentityLinking } from "./sync-profile-git-commit-signing.js";
 
 export async function putOrganizationIdentityLinkProvider(
   ctx: {
@@ -85,48 +89,71 @@ export async function createOrganizationIdentityLinkProviderConfig(
     status: OrganizationIdentityLinkProviderConfigStatus;
   },
 ) {
-  const tables = getControlPlaneDatabaseSchema(ctx.db);
-  const provider = await resolveIdentityLinkProviderMetadataOrThrow(ctx, {
-    providerFamily: input.providerFamily,
-  });
+  return await ctx.db.transaction(async (tx) => {
+    const tables = getControlPlaneDatabaseSchema(tx);
+    const provider = await resolveIdentityLinkProviderMetadataOrThrow(
+      {
+        db: tx,
+        integrationRegistry: ctx.integrationRegistry,
+      },
+      {
+        providerFamily: input.providerFamily,
+      },
+    );
 
-  const connection = await resolveValidatedProviderConnectionOrThrow(
-    {
-      db: ctx.db,
-      integrationRegistry: ctx.integrationRegistry,
-    },
-    {
-      organizationId: input.organizationId,
-      integrationConnectionId: input.integrationConnectionId,
-      provider,
-    },
-  );
-
-  const [config] = await ctx.db
-    .insert(tables.organizationIdentityLinkProviderConfigs)
-    .values({
+    const connection = await resolveValidatedProviderConnectionOrThrow(
+      {
+        db: tx,
+        integrationRegistry: ctx.integrationRegistry,
+      },
+      {
+        organizationId: input.organizationId,
+        integrationConnectionId: input.integrationConnectionId,
+        provider,
+      },
+    );
+    await assertGitHubIdentityLinkingConnectionIsNotConfigured(tx, {
       organizationId: input.organizationId,
       providerFamily: provider.providerFamily,
-      status: input.status,
-      integrationTargetKey: connection.targetKey,
       integrationConnectionId: input.integrationConnectionId,
-      createdByUserId: input.actorUserId,
-      updatedByUserId: input.actorUserId,
-    })
-    .returning({
-      id: tables.organizationIdentityLinkProviderConfigs.id,
-      providerFamily: tables.organizationIdentityLinkProviderConfigs.providerFamily,
-      status: tables.organizationIdentityLinkProviderConfigs.status,
-      integrationTargetKey: tables.organizationIdentityLinkProviderConfigs.integrationTargetKey,
-      integrationConnectionId:
-        tables.organizationIdentityLinkProviderConfigs.integrationConnectionId,
+      organizationProviderConfigId: null,
     });
 
-  if (config === undefined) {
-    throw new Error("Failed to create identity-link provider config.");
-  }
+    const [config] = await tx
+      .insert(tables.organizationIdentityLinkProviderConfigs)
+      .values({
+        organizationId: input.organizationId,
+        providerFamily: provider.providerFamily,
+        status: input.status,
+        integrationTargetKey: connection.targetKey,
+        integrationConnectionId: input.integrationConnectionId,
+        createdByUserId: input.actorUserId,
+        updatedByUserId: input.actorUserId,
+      })
+      .returning({
+        id: tables.organizationIdentityLinkProviderConfigs.id,
+        providerFamily: tables.organizationIdentityLinkProviderConfigs.providerFamily,
+        status: tables.organizationIdentityLinkProviderConfigs.status,
+        integrationTargetKey: tables.organizationIdentityLinkProviderConfigs.integrationTargetKey,
+        integrationConnectionId:
+          tables.organizationIdentityLinkProviderConfigs.integrationConnectionId,
+      });
 
-  return config;
+    if (config === undefined) {
+      throw new Error("Failed to create identity-link provider config.");
+    }
+
+    if (input.status === OrganizationIdentityLinkProviderConfigStatus.ACTIVE) {
+      await syncProfileGitCommitSigningForIdentityLinking(tx, {
+        organizationId: input.organizationId,
+        providerFamily: config.providerFamily,
+        integrationConnectionId: config.integrationConnectionId,
+        action: "enable",
+      });
+    }
+
+    return config;
+  });
 }
 
 export async function updateOrganizationIdentityLinkProviderConfigConnection(
@@ -141,52 +168,119 @@ export async function updateOrganizationIdentityLinkProviderConfigConnection(
     integrationConnectionId: string;
   },
 ) {
-  const tables = getControlPlaneDatabaseSchema(ctx.db);
-  const existingConfig = await resolveOrganizationIdentityLinkProviderConfigByIdOrThrow(
-    {
-      db: ctx.db,
-    },
-    {
+  return await ctx.db.transaction(async (tx) => {
+    const tables = getControlPlaneDatabaseSchema(tx);
+    const existingConfig = await resolveOrganizationIdentityLinkProviderConfigByIdOrThrow(
+      {
+        db: tx,
+      },
+      {
+        organizationId: input.organizationId,
+        organizationProviderConfigId: input.organizationProviderConfigId,
+      },
+    );
+    const provider = await resolveIdentityLinkProviderMetadataOrThrow(
+      {
+        db: tx,
+        integrationRegistry: ctx.integrationRegistry,
+      },
+      {
+        providerFamily: existingConfig.providerFamily,
+      },
+    );
+    const connection = await resolveValidatedProviderConnectionOrThrow(
+      {
+        db: tx,
+        integrationRegistry: ctx.integrationRegistry,
+      },
+      {
+        organizationId: input.organizationId,
+        integrationConnectionId: input.integrationConnectionId,
+        provider,
+      },
+    );
+    await assertGitHubIdentityLinkingConnectionIsNotConfigured(tx, {
       organizationId: input.organizationId,
-      organizationProviderConfigId: input.organizationProviderConfigId,
-    },
-  );
-  const provider = await resolveIdentityLinkProviderMetadataOrThrow(ctx, {
-    providerFamily: existingConfig.providerFamily,
-  });
-  const connection = await resolveValidatedProviderConnectionOrThrow(
-    {
-      db: ctx.db,
-      integrationRegistry: ctx.integrationRegistry,
-    },
-    {
-      organizationId: input.organizationId,
+      providerFamily: provider.providerFamily,
       integrationConnectionId: input.integrationConnectionId,
-      provider,
-    },
-  );
-
-  const [config] = await ctx.db
-    .update(tables.organizationIdentityLinkProviderConfigs)
-    .set({
-      integrationTargetKey: connection.targetKey,
-      integrationConnectionId: input.integrationConnectionId,
-      updatedByUserId: input.actorUserId,
-      updatedAt: sql`now()`,
-    })
-    .where(sql`${tables.organizationIdentityLinkProviderConfigs.id} = ${existingConfig.id}`)
-    .returning({
-      id: tables.organizationIdentityLinkProviderConfigs.id,
-      providerFamily: tables.organizationIdentityLinkProviderConfigs.providerFamily,
-      status: tables.organizationIdentityLinkProviderConfigs.status,
-      integrationTargetKey: tables.organizationIdentityLinkProviderConfigs.integrationTargetKey,
-      integrationConnectionId:
-        tables.organizationIdentityLinkProviderConfigs.integrationConnectionId,
+      organizationProviderConfigId: existingConfig.id,
     });
 
-  if (config === undefined) {
-    throw new Error(`Failed to update identity-link provider config '${existingConfig.id}'.`);
+    const [config] = await tx
+      .update(tables.organizationIdentityLinkProviderConfigs)
+      .set({
+        integrationTargetKey: connection.targetKey,
+        integrationConnectionId: input.integrationConnectionId,
+        updatedByUserId: input.actorUserId,
+        updatedAt: sql`now()`,
+      })
+      .where(sql`${tables.organizationIdentityLinkProviderConfigs.id} = ${existingConfig.id}`)
+      .returning({
+        id: tables.organizationIdentityLinkProviderConfigs.id,
+        providerFamily: tables.organizationIdentityLinkProviderConfigs.providerFamily,
+        status: tables.organizationIdentityLinkProviderConfigs.status,
+        integrationTargetKey: tables.organizationIdentityLinkProviderConfigs.integrationTargetKey,
+        integrationConnectionId:
+          tables.organizationIdentityLinkProviderConfigs.integrationConnectionId,
+      });
+
+    if (config === undefined) {
+      throw new Error(`Failed to update identity-link provider config '${existingConfig.id}'.`);
+    }
+
+    if (
+      existingConfig.status === OrganizationIdentityLinkProviderConfigStatus.ACTIVE &&
+      existingConfig.integrationConnectionId !== config.integrationConnectionId
+    ) {
+      await syncProfileGitCommitSigningForIdentityLinking(tx, {
+        organizationId: input.organizationId,
+        providerFamily: config.providerFamily,
+        integrationConnectionId: existingConfig.integrationConnectionId,
+        action: "disable",
+      });
+      await syncProfileGitCommitSigningForIdentityLinking(tx, {
+        organizationId: input.organizationId,
+        providerFamily: config.providerFamily,
+        integrationConnectionId: config.integrationConnectionId,
+        action: "enable",
+      });
+    }
+
+    return config;
+  });
+}
+
+async function assertGitHubIdentityLinkingConnectionIsNotConfigured(
+  db: ControlPlaneDatabase,
+  input: {
+    organizationId: string;
+    providerFamily: string;
+    integrationConnectionId: string;
+    organizationProviderConfigId: string | null;
+  },
+): Promise<void> {
+  if (input.providerFamily !== GitHubProviderFamily) {
+    return;
   }
 
-  return config;
+  const existingConfig = await db.query.organizationIdentityLinkProviderConfigs.findFirst({
+    columns: {
+      id: true,
+    },
+    where: (table, { and, eq }) =>
+      and(
+        eq(table.organizationId, input.organizationId),
+        eq(table.providerFamily, input.providerFamily),
+        eq(table.integrationConnectionId, input.integrationConnectionId),
+      ),
+  });
+
+  if (existingConfig === undefined || existingConfig.id === input.organizationProviderConfigId) {
+    return;
+  }
+
+  throw new BadRequestError(
+    IdentityLinkingBadRequestCodes.INVALID_PROVIDER_CONFIG_INPUT,
+    `GitHub identity-linking connection '${input.integrationConnectionId}' is already configured.`,
+  );
 }
