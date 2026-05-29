@@ -16,6 +16,7 @@ import { applyActiveOrganizationToSession } from "./services/apply-active-organi
 import { createInitialOrganizationCredentialKey } from "./services/create-initial-organization-credential-key.js";
 import { createSendOrganizationInvitationService } from "./services/create-send-organization-invitation.js";
 import { createSendVerificationOTPService } from "./services/create-send-verification-otp.js";
+import { createSendWelcomeEmailService } from "./services/create-send-welcome-email.js";
 
 export type ControlPlaneAuthConfig = {
   authBaseUrl: string;
@@ -29,6 +30,10 @@ export type ControlPlaneAuthConfig = {
   authGoogleClientId: string | null;
   authGoogleClientSecret: string | null;
   authGoogleProviderOverrides?: Omit<GoogleProviderConfig, "clientId" | "clientSecret">;
+  welcomeEmail: {
+    enabled: boolean;
+    callUrl?: string | undefined;
+  };
   activeMasterEncryptionKeyVersion: number;
   masterEncryptionKeys: Record<string, string>;
   billing: {
@@ -64,6 +69,12 @@ export function createControlPlaneAuth(options: CreateControlPlaneAuthOptions) {
   const sendOrganizationInvitation = createSendOrganizationInvitationService({
     openWorkflow,
     dashboardBaseUrl: config.dashboardBaseUrl,
+  });
+  const sendWelcomeEmail = createSendWelcomeEmailService({
+    openWorkflow,
+    db,
+    tables,
+    config: config.welcomeEmail,
   });
   const googleConfig =
     config.authGoogleClientId === null || config.authGoogleClientSecret === null
@@ -173,7 +184,7 @@ export function createControlPlaneAuth(options: CreateControlPlaneAuthOptions) {
           });
         },
         organizationHooks: {
-          afterCreateOrganization: async ({ organization }) => {
+          afterCreateOrganization: async ({ organization, user }) => {
             try {
               await createInitialOrganizationCredentialKey({
                 db,
@@ -199,6 +210,12 @@ export function createControlPlaneAuth(options: CreateControlPlaneAuthOptions) {
                 cause: error,
               });
             }
+
+            await sendWelcomeEmail({
+              organizationId: organization.id,
+              userId: user.id,
+              email: user.email,
+            });
           },
         },
         teams: {

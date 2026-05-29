@@ -9,15 +9,35 @@ import {
   createIntegrationTest,
   type IntegrationTestEnvironment,
 } from "@mistle/test-harness/integration";
+import {
+  createWelcomeEmailIdempotencyKey,
+  SendWelcomeEmailWorkflowSpec,
+} from "@mistle/workflow-registry/control-plane";
 import { eq } from "drizzle-orm";
 import { describe, expect } from "vitest";
 
 import { readLatestSignInOtp } from "../integration/helpers/sign-in-otp.js";
 import { MembershipCapabilitiesSchema } from "../src/organizations/index.js";
+import {
+  countQueuedControlPlaneWorkflows,
+  waitForQueuedControlPlaneWorkflowRun,
+} from "./helpers/control-plane-workflows.js";
 
 const it = createIntegrationTest({
   services: ["control-plane-api", "control-plane-worker"],
   extraInfra: ["mailpit"],
+});
+const welcomeEmailIt = createIntegrationTest({
+  services: ["control-plane-api", "control-plane-worker"],
+  extraInfra: ["mailpit"],
+  __serviceOptions: {
+    controlPlaneApi: {
+      welcomeEmail: {
+        enabled: true,
+        callUrl: "https://cal.example.com/jonathan/mistle",
+      },
+    },
+  },
 });
 const OtpAllowedAttempts = 3;
 
@@ -273,6 +293,67 @@ describe("auth otp integration", () => {
     await signInAndReadCookie({ env, email });
     await expectNoOrganizationBootstrapRecords({ env, userId: user.id });
   });
+
+  welcomeEmailIt("enqueues the welcome email for the first organization user", async ({ env }) => {
+    const email = `integration-new-auth-otp-welcome-${randomUUID()}@example.com`;
+
+    const cookie = await signInAndReadCookie({ env, email });
+    await expectNoQueuedWelcomeWorkflow({ env, email });
+
+    const organizationId = await createOrganization({
+      env,
+      cookie,
+      name: "Integration Welcome Organization",
+      slug: `integration-welcome-${randomUUID()}`,
+    });
+
+    const workflowRun = await waitForQueuedControlPlaneWorkflowRun({
+      env,
+      workflowName: SendWelcomeEmailWorkflowSpec.name,
+      inputEquals: { email },
+    });
+    expect(workflowRun.input).toEqual({
+      email,
+      callUrl: "https://cal.example.com/jonathan/mistle",
+    });
+    expect(workflowRun.idempotencyKey).toBe(createWelcomeEmailIdempotencyKey(organizationId));
+  });
+
+  welcomeEmailIt(
+    "does not enqueue the welcome email for invited users joining an existing organization",
+    async ({ env }) => {
+      const inviterSession = await env.auth.createSession({
+        email: `integration-new-auth-otp-welcome-inviter-${randomUUID()}@example.com`,
+      });
+      const email = `integration-new-auth-otp-welcome-invitee-${randomUUID()}@example.com`;
+      const invitationId = await inviteMember({
+        env,
+        cookie: inviterSession.cookie,
+        organizationId: inviterSession.organizationId,
+        email,
+      });
+
+      const cookie = await signInAndReadCookie({ env, email });
+      await expectNoQueuedWelcomeWorkflow({ env, email });
+
+      const acceptResponse = await env.controlPlaneApi.http.fetch(
+        "/v1/auth/organization/accept-invitation",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie,
+          },
+          body: JSON.stringify({
+            invitationId,
+          }),
+        },
+      );
+      expect(acceptResponse.status).toBe(200);
+
+      await expectNoQueuedWelcomeWorkflow({ env, email });
+    },
+  );
 });
 
 type AuthOtpEnvironment = IntegrationTestEnvironment;
@@ -371,6 +452,38 @@ async function createOrganization(input: {
   return organizationId;
 }
 
+async function inviteMember(input: {
+  env: AuthOtpEnvironment;
+  cookie: string;
+  organizationId: string;
+  email: string;
+}): Promise<string> {
+  const response = await input.env.controlPlaneApi.http.fetch(
+    "/v1/auth/organization/invite-member",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: input.cookie,
+      },
+      body: JSON.stringify({
+        organizationId: input.organizationId,
+        email: input.email,
+        role: "member",
+      }),
+    },
+  );
+  expect(response.status).toBe(200);
+
+  const payload: unknown = await response.json().catch(() => null);
+  const invitationId = readStringField(payload, "id");
+  if (invitationId === null) {
+    throw new Error("Expected invite-member response to include invitation id.");
+  }
+
+  return invitationId;
+}
+
 async function readUser(input: {
   env: AuthOtpEnvironment;
   email: string;
@@ -404,6 +517,19 @@ async function readLatestSession(input: {
   }
 
   return session;
+}
+
+async function expectNoQueuedWelcomeWorkflow(input: {
+  env: AuthOtpEnvironment;
+  email: string;
+}): Promise<void> {
+  await expect(
+    countQueuedControlPlaneWorkflows({
+      env: input.env,
+      workflowName: SendWelcomeEmailWorkflowSpec.name,
+      inputEquals: { email: input.email },
+    }),
+  ).resolves.toBe(0);
 }
 
 async function expectUserMissing(input: { env: AuthOtpEnvironment; email: string }): Promise<void> {

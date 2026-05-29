@@ -27,6 +27,7 @@ export type IntegrationServiceOptions = {
     allowSignups?: boolean;
     billingStripeEnabled?: boolean;
     googleAuth?: "simulated";
+    welcomeEmail?: IntegrationControlPlaneApiWelcomeEmailOptions;
   };
   dataPlaneGateway?: {
     directEgress?: {
@@ -35,6 +36,11 @@ export type IntegrationServiceOptions = {
     gatewayRelay?: { backend: "memory" } | { backend: "nats"; namePrefix: string };
   };
   sandbox?: IntegrationSandboxOptions;
+};
+
+export type IntegrationControlPlaneApiWelcomeEmailOptions = {
+  enabled: boolean;
+  callUrl?: string;
 };
 
 export type IntegrationDataPlaneGatewayRelayOptions = NonNullable<

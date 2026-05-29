@@ -53,6 +53,14 @@ const ControlPlaneApiAuthGoogleConfigSchema = z
   })
   .strict();
 
+const ControlPlaneApiWelcomeEmailConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    callUrl: z.url().optional(),
+  })
+  .strict()
+  .default({ enabled: false });
+
 export const ControlPlaneApiServerConfigSchema = z
   .object({
     host: z.string().min(1),
@@ -84,6 +92,7 @@ export const ControlPlaneApiAuthConfigSchema = z
     secret: z.string().min(1),
     trustedOrigins: z.array(z.string().min(1)).min(1),
     allowSignups: z.boolean().default(true),
+    welcomeEmail: ControlPlaneApiWelcomeEmailConfigSchema,
     otpLength: z.number().int().min(4).max(12),
     otpExpiresInSeconds: z.number().int().min(30),
     otpAllowedAttempts: z.number().int().min(1).max(10),
