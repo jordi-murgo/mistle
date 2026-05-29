@@ -41,9 +41,15 @@ const MistleManagedProcessCommandPrefixes = [
 
 function shouldShowBindAddressInDashboard(bindAddress: string): boolean {
   // Product decision: the dashboard process menu is for common browser-facing dev servers.
-  // sandboxd may still report IPv6 listeners for lower-level tunnel use, but this surface
-  // intentionally stays focused on localhost IPv4 and all-interface IPv4 binds.
-  return bindAddress === "127.0.0.1" || bindAddress === "0.0.0.0" || bindAddress === "localhost";
+  // Include IPv4 and IPv6 loopback/all-interface binds because common tools can report
+  // localhost listeners as IPv6 wildcard sockets while still serving local browser traffic.
+  return (
+    bindAddress === "127.0.0.1" ||
+    bindAddress === "0.0.0.0" ||
+    bindAddress === "::1" ||
+    bindAddress === "::" ||
+    bindAddress === "localhost"
+  );
 }
 
 function shouldShowProcessInDashboard(process: ProcessEntry): boolean {
@@ -65,6 +71,14 @@ function createDisplayProcessLabel(label: string): string {
 
   const commandName = commandPath.split("/").filter(Boolean).at(-1) ?? commandPath;
   return [commandName, ...args].join(" ");
+}
+
+function createDisplayBindAddress(bindAddress: string): string {
+  if (bindAddress.includes(":")) {
+    return `[${bindAddress}]`;
+  }
+
+  return bindAddress;
 }
 
 function createProcessListenerEntries(processes: ProcessEntry[]): ProcessListenerEntry[] {
@@ -164,7 +178,9 @@ export function SessionPortAccessPopover(input: {
       >
         <PopoverHeader className="border-b px-4 py-3">
           <PopoverTitle>Local Ports</PopoverTitle>
-          <PopoverDescription>Processes listening on 127.0.0.1 and 0.0.0.0.</PopoverDescription>
+          <PopoverDescription>
+            Processes listening on local loopback or all-interface addresses.
+          </PopoverDescription>
         </PopoverHeader>
         <ProcessAccessList listenerEntries={listenerEntries} state={input.state} />
       </PopoverContent>
@@ -182,7 +198,9 @@ export function SessionPortAccessSheet(input: {
       <SheetContent className="!h-[100dvh] max-h-[100dvh] gap-0 p-0" side="bottom">
         <SheetHeader className="shrink-0 border-b px-4 py-3 pr-12 text-left">
           <SheetTitle>Local Ports</SheetTitle>
-          <SheetDescription>Processes listening on 127.0.0.1 and 0.0.0.0.</SheetDescription>
+          <SheetDescription>
+            Processes listening on local loopback or all-interface addresses.
+          </SheetDescription>
         </SheetHeader>
         <ProcessAccessList listenerEntries={listenerEntries} state={input.state} />
       </SheetContent>
@@ -209,7 +227,7 @@ function ProcessAccessList(input: {
       ) : null}
       {!input.state.isLoadingProcesses && input.listenerEntries.length === 0 ? (
         <p className="px-3 py-3 text-sm text-muted-foreground">
-          No loopback-listening processes found.
+          No local listening processes found.
         </p>
       ) : null}
       {input.listenerEntries.map((entry) => {
@@ -231,7 +249,7 @@ function ProcessAccessList(input: {
             }}
             primary={
               <p className="truncate">
-                {entry.bindAddresses.join(", ")}:
+                {entry.bindAddresses.map(createDisplayBindAddress).join(", ")}:
                 <span className="font-semibold text-foreground">
                   {String(primaryListener.port)}
                 </span>
