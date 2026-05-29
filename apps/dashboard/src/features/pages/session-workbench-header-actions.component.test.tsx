@@ -40,6 +40,7 @@ function renderHeaderActions(
         title: "Open changes",
       }}
       status={{
+        indicatorClassName: "border-emerald-700 bg-emerald-600",
         kind: "connected",
         label: "Connected",
       }}
@@ -101,12 +102,30 @@ describe("SessionWorkbenchHeaderActions", () => {
   it("does not render the repository selector when no repository control is provided", () => {
     renderHeaderActions({
       status: {
+        indicatorClassName: "border-muted-foreground/30 bg-muted-foreground/30",
         kind: "not_connected",
         label: "Not connected",
       },
     });
 
     expect(screen.queryByRole("combobox", { name: "Primary repository" })).toBeNull();
+  });
+
+  it("renders the session status as an accessible filled circle without badge text", () => {
+    renderHeaderActions({
+      status: {
+        indicatorClassName: "border-amber-600 bg-amber-500",
+        kind: "not_connected",
+        label: "Starting",
+      },
+    });
+
+    const status = screen.getByRole("status", { name: "Starting" });
+
+    expect(status.textContent).toBe("");
+    expect(status.getAttribute("class")).toContain("size-2.5");
+    expect(status.getAttribute("class")).toContain("rounded-full");
+    expect(status.getAttribute("class")).toContain("bg-amber-500");
   });
 
   it("renders the port access control in the workbench control group", () => {
@@ -175,6 +194,7 @@ describe("SessionWorkbenchHeaderActions", () => {
             title: "Show conversations",
           }}
           status={{
+            indicatorClassName: "border-emerald-700 bg-emerald-600",
             kind: "connected",
             label: "Connected",
           }}

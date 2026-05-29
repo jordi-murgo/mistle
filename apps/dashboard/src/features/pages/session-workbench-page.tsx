@@ -138,8 +138,6 @@ function SessionWorkbenchPageContent(input: {
   const headerStatusKind = workbench.workbenchStatus.kind;
   const headerStatusUi = resolveSandboxStatusBadgeUi(workbench.sandboxLifecycleStatus);
   const headerStatusLabel = headerStatusKind === "error" ? "Error" : headerStatusUi.label;
-  const headerStatusVariant =
-    headerStatusUi.variant === "destructive" ? "outline" : headerStatusUi.variant;
   const primaryRepositoryErrorMessage =
     workbench.primaryRepositoryState.errorMessage ??
     workbench.primaryRepositoryControlState.disabledReason;
@@ -264,13 +262,18 @@ function SessionWorkbenchPageContent(input: {
                   ? "Refreshing repositories from the active sandbox."
                   : "Primary repository"),
         }}
-        status={{
-          ...(headerStatusKind === "error"
-            ? {}
-            : { className: headerStatusUi.className, variant: headerStatusVariant }),
-          kind: headerStatusKind,
-          label: headerStatusLabel,
-        }}
+        status={
+          headerStatusKind === "error"
+            ? {
+                kind: headerStatusKind,
+                label: headerStatusLabel,
+              }
+            : {
+                indicatorClassName: headerStatusUi.indicatorClassName,
+                kind: headerStatusKind,
+                label: headerStatusLabel,
+              }
+        }
         {...(conversationNavigation.runtimeConversationNavigatorProps !== null
           ? {
               conversationControl: {

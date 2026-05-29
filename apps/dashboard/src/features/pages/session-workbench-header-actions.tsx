@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +62,17 @@ type SessionWorkbenchHeaderMobileSurfaceControl = {
   title: string;
 };
 
+type SessionWorkbenchHeaderStatus =
+  | {
+      indicatorClassName: string;
+      kind: "connected" | "not_connected";
+      label: string;
+    }
+  | {
+      kind: "error";
+      label: string;
+    };
+
 export function SessionWorkbenchHeaderActions(input: {
   cliControl: SessionWorkbenchHeaderButtonControl;
   diffControl: SessionWorkbenchHeaderButtonControl;
@@ -70,12 +80,7 @@ export function SessionWorkbenchHeaderActions(input: {
   mobileConversationNavigatorControl?: SessionWorkbenchHeaderMobileSurfaceControl;
   portAccessControl?: React.ReactNode;
   repositoryControl?: SessionWorkbenchHeaderRepositoryControl;
-  status: {
-    className?: string;
-    kind: "connected" | "error" | "not_connected";
-    label: string;
-    variant?: "outline" | "secondary";
-  };
+  status: SessionWorkbenchHeaderStatus;
   conversationControl?: SessionWorkbenchHeaderButtonControl;
   terminalControl: SessionWorkbenchHeaderButtonControl;
 }): React.JSX.Element {
@@ -107,19 +112,22 @@ export function SessionWorkbenchHeaderActions(input: {
   return (
     <div className="flex items-center gap-1.5 sm:gap-2">
       {input.status.kind === "error" ? (
-        <Badge aria-label={input.status.label} title={input.status.label} variant="destructive">
-          {input.status.label}
-        </Badge>
-      ) : (
-        <Badge
+        <span
           aria-label={input.status.label}
-          className={input.status.className}
+          className="inline-block size-2.5 rounded-full border border-destructive bg-destructive"
           role="status"
           title={input.status.label}
-          variant={input.status.variant ?? "outline"}
-        >
-          {input.status.label}
-        </Badge>
+        />
+      ) : (
+        <span
+          aria-label={input.status.label}
+          className={[
+            "inline-block size-2.5 rounded-full border",
+            input.status.indicatorClassName,
+          ].join(" ")}
+          role="status"
+          title={input.status.label}
+        />
       )}
       {repositoryControl === undefined ? null : (
         <>
