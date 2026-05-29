@@ -660,8 +660,8 @@ importers:
         specifier: 4.12.18
         version: 4.12.18
       jose:
-        specifier: ^6.1.0
-        version: 6.2.2
+        specifier: ^6.2.3
+        version: 6.2.3
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -928,14 +928,14 @@ importers:
   packages/gateway-connection-auth:
     dependencies:
       jose:
-        specifier: ^6.2.2
-        version: 6.2.2
+        specifier: ^6.2.3
+        version: 6.2.3
 
   packages/gateway-tunnel-auth:
     dependencies:
       jose:
-        specifier: ^6.2.2
-        version: 6.2.2
+        specifier: ^6.2.3
+        version: 6.2.3
 
   packages/http:
     dependencies:
@@ -1042,8 +1042,8 @@ importers:
   packages/port-access-auth:
     dependencies:
       jose:
-        specifier: ^6.2.2
-        version: 6.2.2
+        specifier: ^6.2.3
+        version: 6.2.3
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1118,8 +1118,8 @@ importers:
   packages/sandbox-signing-auth:
     dependencies:
       jose:
-        specifier: ^6.2.2
-        version: 6.2.2
+        specifier: ^6.2.3
+        version: 6.2.3
 
   packages/sandboxd: {}
 
@@ -8970,9 +8970,6 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
-
-  jose@6.2.2:
-    resolution: {integrity: sha512-d7kPDd34KO/YnzaDOlikGpOurfF0ByC2sEV4cANCtdqLlTfBlw2p14O/5d/zv40gJPbIQxfES3nSx1/oYNyuZQ==}
 
   jose@6.2.3:
     resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
@@ -20822,8 +20819,6 @@ snapshots:
   jiti@2.6.1: {}
 
   jiti@2.7.0: {}
-
-  jose@6.2.2: {}
 
   jose@6.2.3: {}
 
