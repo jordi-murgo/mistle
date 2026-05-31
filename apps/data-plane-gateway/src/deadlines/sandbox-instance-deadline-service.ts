@@ -32,6 +32,14 @@ export class SandboxInstanceDeadlineService {
   }): Promise<void> {
     await this.dataPlaneClient.applySandboxRuntimeLifecycleEvent({
       sandboxInstanceId: input.sandboxInstanceId,
+      kind: "bootstrap_recovered",
+      ownerLeaseId: input.ownerLeaseId,
+      ...(input.testEnvironmentId === undefined
+        ? {}
+        : { testEnvironmentId: input.testEnvironmentId }),
+    });
+    await this.dataPlaneClient.applySandboxRuntimeLifecycleEvent({
+      sandboxInstanceId: input.sandboxInstanceId,
       kind: "runtime_readiness_reported",
       ownerLeaseId: input.ownerLeaseId,
       runtimeReady: false,
@@ -79,6 +87,36 @@ export class SandboxInstanceDeadlineService {
       dueAt: new Date(
         this.clock.nowMs() + this.lifecycleDurations.bootstrapDisconnectGraceMs,
       ).toISOString(),
+      ...(input.testEnvironmentId === undefined
+        ? {}
+        : { testEnvironmentId: input.testEnvironmentId }),
+    });
+  }
+
+  public async handleBootstrapDegraded(input: {
+    sandboxInstanceId: string;
+    ownerLeaseId: string;
+    testEnvironmentId?: string;
+  }): Promise<void> {
+    await this.dataPlaneClient.applySandboxRuntimeLifecycleEvent({
+      sandboxInstanceId: input.sandboxInstanceId,
+      kind: "bootstrap_degraded",
+      ownerLeaseId: input.ownerLeaseId,
+      ...(input.testEnvironmentId === undefined
+        ? {}
+        : { testEnvironmentId: input.testEnvironmentId }),
+    });
+  }
+
+  public async handleBootstrapRecovered(input: {
+    sandboxInstanceId: string;
+    ownerLeaseId: string;
+    testEnvironmentId?: string;
+  }): Promise<void> {
+    await this.dataPlaneClient.applySandboxRuntimeLifecycleEvent({
+      sandboxInstanceId: input.sandboxInstanceId,
+      kind: "bootstrap_recovered",
+      ownerLeaseId: input.ownerLeaseId,
       ...(input.testEnvironmentId === undefined
         ? {}
         : { testEnvironmentId: input.testEnvironmentId }),
