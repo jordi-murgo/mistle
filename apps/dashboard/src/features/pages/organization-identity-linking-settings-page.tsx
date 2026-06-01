@@ -8,7 +8,6 @@ import { useAppPageMeta } from "../navigation/route-meta.js";
 import {
   canManageOrganizationIdentityLinking,
   formatIdentityLinkProviderMemberStatus,
-  formatIdentityLinkProviderPrincipalSummary,
   type IdentityLinkEligibleConnection,
   listEligibleIdentityLinkConnections,
 } from "../settings/identity-linking/organization-identity-linking-model.js";
@@ -478,21 +477,30 @@ export function buildProviderRow(input: {
 }): OrganizationIdentityLinkingProviderRow {
   return {
     rowKey: input.row.rowKey,
-    canOpenLinkedUsers: input.row.config !== null,
+    canOpenMemberLinkStatus: input.row.config !== null,
     displayName: input.row.provider.displayName,
     logoKey: input.row.provider.logoKey,
-    connectionLabel: input.row.connection?.displayName ?? "No eligible active connections",
+    connectionLabel:
+      input.row.connection === null
+        ? "No eligible active connections"
+        : input.row.connection.displayName,
     enablePending:
       input.configuringRowKey === input.row.rowKey ||
       input.statusUpdatingRowKey === input.row.rowKey,
     enabled: input.row.config?.configurationStatus === "active",
     unavailableMessage: resolveUnavailableConnectionMessage(input.row),
-    linkedUsersCount: input.providerLinksQuery?.data?.length ?? null,
+    memberLinkStatusCounts:
+      input.providerLinksQuery?.data === undefined
+        ? null
+        : {
+            linked: input.providerLinksQuery.data.filter((link) => link.linked).length,
+            total: input.providerLinksQuery.data.length,
+          },
     memberLinksErrorMessage:
       input.providerLinksQuery !== null && input.providerLinksQuery.isError
         ? resolveApiErrorMessage({
             error: input.providerLinksQuery.error,
-            fallbackMessage: "Could not load linked-member visibility.",
+            fallbackMessage: "Could not load link status.",
           })
         : null,
     memberLinks:
@@ -500,13 +508,10 @@ export function buildProviderRow(input: {
         userId: link.userId,
         name: link.name,
         email: link.email,
+        linked: link.linked,
         statusLabel: formatIdentityLinkProviderMemberStatus({
           linked: link.linked,
         }),
-        principalSummary: formatIdentityLinkProviderPrincipalSummary({
-          link,
-        }),
-        updatedAt: link.updatedAt,
       })) ?? [],
   };
 }

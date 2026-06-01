@@ -9,72 +9,58 @@ import {
   OrganizationIdentityLinkingSettingsPageView,
   type OrganizationIdentityLinkingProviderRow,
 } from "./organization-identity-linking-settings-page-view.js";
+import {
+  IdentityLinkingStoryMemberLinkStatusCounts,
+  createIdentityLinkingMemberLinks,
+} from "./organization-identity-linking-settings-page-view.story-fixtures.js";
 
 const BaseProviders = [
   {
     rowKey: "github:conn_github_engineering",
-    canOpenLinkedUsers: true,
+    canOpenMemberLinkStatus: true,
     displayName: "GitHub",
     logoKey: "github",
     connectionLabel: "GitHub Engineering",
     enablePending: false,
     enabled: true,
     unavailableMessage: null,
-    linkedUsersCount: 12,
+    memberLinkStatusCounts: IdentityLinkingStoryMemberLinkStatusCounts.GITHUB_ENGINEERING,
     memberLinksErrorMessage: null,
-    memberLinks: [
-      {
-        userId: "usr_owner",
-        name: "Owner User",
-        email: "owner@example.com",
-        statusLabel: "Linked",
-        principalSummary: "owner-github",
-        updatedAt: "2026-04-20T00:00:00.000Z",
-      },
-      {
-        userId: "usr_member",
-        name: "Member User",
-        email: "member@example.com",
-        statusLabel: "Not linked",
-        principalSummary: null,
-        updatedAt: null,
-      },
-    ],
+    memberLinks: createIdentityLinkingMemberLinks({
+      count: IdentityLinkingStoryMemberLinkStatusCounts.GITHUB_ENGINEERING,
+      emailDomain: "example.com",
+      idPrefix: "github_engineering",
+    }),
   },
   {
     rowKey: "github:conn_github_platform",
-    canOpenLinkedUsers: false,
+    canOpenMemberLinkStatus: false,
     displayName: "GitHub",
     logoKey: "github",
     connectionLabel: "GitHub Platform",
     enablePending: false,
     enabled: false,
     unavailableMessage: null,
-    linkedUsersCount: null,
+    memberLinkStatusCounts: null,
     memberLinksErrorMessage: null,
     memberLinks: [],
   },
   {
     rowKey: "slack:conn_slack_workspace",
-    canOpenLinkedUsers: true,
+    canOpenMemberLinkStatus: true,
     displayName: "Slack",
     logoKey: "slack",
     connectionLabel: "Slack Workspace",
     enablePending: false,
     enabled: false,
     unavailableMessage: null,
-    linkedUsersCount: 3,
+    memberLinkStatusCounts: IdentityLinkingStoryMemberLinkStatusCounts.SLACK_WORKSPACE,
     memberLinksErrorMessage: null,
-    memberLinks: [
-      {
-        userId: "usr_slack_admin",
-        name: "Slack Admin",
-        email: "admin@example.com",
-        statusLabel: "Linked",
-        principalSummary: "mistle-workspace",
-        updatedAt: "2026-04-22T09:15:00.000Z",
-      },
-    ],
+    memberLinks: createIdentityLinkingMemberLinks({
+      count: IdentityLinkingStoryMemberLinkStatusCounts.SLACK_WORKSPACE,
+      emailDomain: "example.com",
+      idPrefix: "slack_workspace",
+    }),
   },
 ] as const satisfies readonly OrganizationIdentityLinkingProviderRow[];
 
@@ -113,8 +99,11 @@ function StatefulPrototype(
               ? provider
               : {
                   ...provider,
-                  canOpenLinkedUsers: true,
-                  linkedUsersCount: provider.linkedUsersCount ?? 0,
+                  canOpenMemberLinkStatus: true,
+                  memberLinkStatusCounts: provider.memberLinkStatusCounts ?? {
+                    linked: 0,
+                    total: 0,
+                  },
                   enabled,
                   enablePending: false,
                 },
@@ -288,14 +277,14 @@ export const MultipleGitHubConnectionsEnableConfirmation: Story = {
   },
 };
 
-export const LinkedUsersDialogError: Story = {
+export const MemberLinkStatusSheetError: Story = {
   args: {
     providers: [
       {
         ...BaseProviders[0],
-        memberLinksErrorMessage: "Could not load linked-member visibility.",
+        memberLinksErrorMessage: "Could not load link status.",
         memberLinks: [],
-        linkedUsersCount: 0,
+        memberLinkStatusCounts: { linked: 0, total: 0 },
       },
     ],
   },
@@ -304,18 +293,18 @@ export const LinkedUsersDialogError: Story = {
 
     await userEvent.click(
       canvas.getByRole("button", {
-        name: "View GitHub linked users for GitHub Engineering",
+        name: "View GitHub link status for GitHub Engineering",
       }),
     );
   },
 };
 
-export const LinkedUsersUnknown: Story = {
+export const MemberLinkStatusUnknown: Story = {
   args: {
     providers: [
       {
         ...BaseProviders[0],
-        linkedUsersCount: null,
+        memberLinkStatusCounts: null,
         memberLinks: [],
       },
     ],
