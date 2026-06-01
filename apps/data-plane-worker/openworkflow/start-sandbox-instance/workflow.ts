@@ -1024,27 +1024,11 @@ export const StartSandboxInstanceWorkflow = defineTracedDataPlaneWorkflow(
         );
       });
 
-      if (!waitForPostStartStorageAttach) {
-        await step.run({ name: "wait-for-sandbox-runtime-initialization" }, async () => {
-          logger.info("Waiting for sandbox runtime initialization.");
-          const resolvedRuntime =
-            await ctx.sandboxRuntimeProviderResolver.resolve(sandboxRuntimeInput);
-          await resolvedRuntime.sandboxRuntimeControl.waitInit({
-            id: startedSandbox.providerSandboxId,
-            env: createSandboxRuntimeEnv({
-              config: ctx.config,
-              sandboxInstanceId: workflowInput.sandboxInstanceId,
-              waitForStorageAttach: waitForPostStartStorageAttach,
-            }),
-          });
-        });
-      }
-
       logger.info(
         {
           providerSandboxId: startedSandbox.providerSandboxId,
         },
-        "Initialized sandbox runtime.",
+        "Started sandbox runtime initialization.",
       );
     } catch (error) {
       rethrowDurableStepErrorForRetry(error);
@@ -1205,6 +1189,75 @@ export const StartSandboxInstanceWorkflow = defineTracedDataPlaneWorkflow(
       throw new Error(
         "Sandbox bootstrap attachment timed out. Sandbox was stopped and sandbox instance was marked as failed.",
       );
+    }
+
+    if (!waitForPostStartStorageAttach) {
+      try {
+        await step.run({ name: "wait-for-sandbox-runtime-initialization" }, async () => {
+          logger.info("Waiting for sandbox runtime initialization.");
+          const resolvedRuntime =
+            await ctx.sandboxRuntimeProviderResolver.resolve(sandboxRuntimeInput);
+          await resolvedRuntime.sandboxRuntimeControl.waitInit({
+            id: startedSandbox.providerSandboxId,
+            env: createSandboxRuntimeEnv({
+              config: ctx.config,
+              sandboxInstanceId: workflowInput.sandboxInstanceId,
+              waitForStorageAttach: waitForPostStartStorageAttach,
+            }),
+          });
+        });
+        logger.info(
+          {
+            providerSandboxId: startedSandbox.providerSandboxId,
+          },
+          "Initialized sandbox runtime.",
+        );
+      } catch (error) {
+        rethrowDurableStepErrorForRetry(error);
+        logger.error(
+          {
+            err: error,
+            providerSandboxId: startedSandbox.providerSandboxId,
+          },
+          "Failed to initialize sandbox runtime.",
+        );
+        await emitStartupDiagnostics({
+          providerSandboxId: startedSandbox.providerSandboxId,
+          sandboxInstanceId: startedSandbox.sandboxInstanceId,
+          runtimeProvider: startedSandbox.runtimeProvider,
+          persistenceMode: workflowInput.persistenceMode,
+        });
+        try {
+          await handleFailedStartup({
+            sandboxInstanceId: ensuredSandboxInstance.sandboxInstanceId,
+            persistenceMode: workflowInput.persistenceMode,
+            runtimeProvider: startedSandbox.runtimeProvider,
+            providerSandboxId: startedSandbox.providerSandboxId,
+            failureCode: StartSandboxFailureCodes.SANDBOX_INIT_FAILED,
+            failureMessage: formatPersistedFailureMessage({
+              summary: "Failed to initialize sandbox runtime.",
+              error,
+            }),
+          });
+        } catch (cleanupError) {
+          throw new Error(
+            "Failed to initialize sandbox runtime and failed cleanup after startup failure.",
+            {
+              cause: {
+                startupConfigurationError: error,
+                cleanupError,
+              },
+            },
+          );
+        }
+
+        throw new Error(
+          "Failed to initialize sandbox runtime. Sandbox was stopped and sandbox instance was marked as failed.",
+          {
+            cause: error,
+          },
+        );
+      }
     }
 
     if (waitForPostStartStorageAttach) {
