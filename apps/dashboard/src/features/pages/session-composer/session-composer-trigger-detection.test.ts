@@ -1,7 +1,10 @@
 import type { ComposerCapability } from "@mistle/integrations-core";
 import { describe, expect, it } from "vitest";
 
-import { detectActiveComposerTrigger } from "./session-composer-trigger-detection.js";
+import {
+  detectActiveComposerTrigger,
+  readLeadingSlashCommandName,
+} from "./session-composer-trigger-detection.js";
 
 const ComposerCommandCapabilityFixture: ComposerCapability = {
   kind: "composerCommand",
@@ -30,6 +33,19 @@ const ContextMentionCapabilityFixture: ComposerCapability = {
   source: "workspacePath",
   insertAs: "relativePathText",
   submitAs: "inlineText",
+};
+
+const SkillMentionCapabilityFixture: ComposerCapability = {
+  kind: "skillMention",
+  trigger: "$",
+  source: "runtimeSkill",
+  submitAs: "inlineText",
+  skills: [
+    {
+      name: "grill-with-docs",
+      description: "Stress test a plan against docs",
+    },
+  ],
 };
 
 function detect(input: {
@@ -143,24 +159,48 @@ describe("detectActiveComposerTrigger", () => {
     });
   });
 
-  it("does not treat slash text outside the whole-composer start as a command trigger", () => {
+  it("detects slash command queries away from the composer start", () => {
     expect(
       detect({
         composerText: "look at /review",
       }),
-    ).toBeNull();
+    ).toEqual({
+      capabilityKind: "composerCommand",
+      trigger: "/",
+      query: "review",
+      range: {
+        start: 8,
+        end: 15,
+      },
+    });
 
     expect(
       detect({
         composerText: " /review",
       }),
-    ).toBeNull();
+    ).toEqual({
+      capabilityKind: "composerCommand",
+      trigger: "/",
+      query: "review",
+      range: {
+        start: 1,
+        end: 8,
+      },
+    });
 
     expect(
       detect({
         composerText: "first line\n/review",
       }),
-    ).toBeNull();
+    ).toEqual({
+      capabilityKind: "composerCommand",
+      trigger: "/",
+      query: "review",
+      range: {
+        start: 11,
+        end: 18,
+      },
+    });
   });
 
   it("does not hijack slash-looking paths or urls", () => {
@@ -259,6 +299,23 @@ describe("detectActiveComposerTrigger", () => {
     ).toBeNull();
   });
 
+  it("detects runtime skill mention queries", () => {
+    expect(
+      detect({
+        composerCapabilities: [SkillMentionCapabilityFixture],
+        composerText: "Use $grill",
+      }),
+    ).toEqual({
+      capabilityKind: "skillMention",
+      trigger: "$",
+      query: "grill",
+      range: {
+        start: 4,
+        end: 10,
+      },
+    });
+  });
+
   it("does not detect malformed slash command tokens", () => {
     expect(
       detect({
@@ -288,5 +345,15 @@ describe("detectActiveComposerTrigger", () => {
         selectionStart: 8,
       }),
     ).toBeNull();
+  });
+});
+
+describe("readLeadingSlashCommandName", () => {
+  it("reads slash command names only from the literal composer start", () => {
+    expect(readLeadingSlashCommandName("/review")).toBe("review");
+    expect(readLeadingSlashCommandName("/review check auth")).toBe("review");
+    expect(readLeadingSlashCommandName(" /review")).toBeNull();
+    expect(readLeadingSlashCommandName("\n/review")).toBeNull();
+    expect(readLeadingSlashCommandName("Use /review")).toBeNull();
   });
 });
