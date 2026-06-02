@@ -12,7 +12,7 @@ use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -35,7 +35,7 @@ use crate::control::protocol::ControlResponse;
 pub use crate::control::protocol::ControlSignRequest;
 use crate::control::request::handle_connection;
 use crate::control::state::{
-    ControlServerState, SharedInitThread, close_sandboxd_state, join_init_thread,
+    ControlServerState, InitCompletion, SharedInitThread, close_sandboxd_state, join_init_thread,
     lock_control_state,
 };
 
@@ -257,11 +257,13 @@ where
         shutdown_after_init: false,
     }));
     let init_thread: SharedInitThread = Arc::new(Mutex::new(None));
+    let init_completion: InitCompletion = Arc::new(Condvar::new());
     let (shutdown_sender, shutdown_receiver) = mpsc::channel::<()>();
     let (health_shutdown_sender, health_shutdown_receiver) = mpsc::channel::<()>();
     let sleeper = Arc::new(sleeper);
     let state_for_thread = state.clone();
     let init_thread_for_loop = init_thread.clone();
+    let init_completion_for_loop = init_completion;
     let socket_path_for_thread = socket_path.to_path_buf();
     let sleeper_for_control = sleeper.clone();
     let sleeper_for_health = sleeper;
@@ -271,6 +273,7 @@ where
             listener,
             &state_for_thread,
             &init_thread_for_loop,
+            &init_completion_for_loop,
             &shutdown_receiver,
             sleeper_for_control.as_ref(),
             accept_poll_interval,
@@ -304,6 +307,7 @@ fn run_control_server_loop(
     listener: UnixListener,
     state: &Arc<Mutex<ControlServerState>>,
     init_thread: &SharedInitThread,
+    init_completion: &InitCompletion,
     shutdown_receiver: &mpsc::Receiver<()>,
     sleeper: &impl Sleeper,
     accept_poll_interval: Duration,
@@ -321,7 +325,7 @@ fn run_control_server_loop(
                 stream
                     .set_nonblocking(false)
                     .map_err(ControlError::ConfigureConnection)?;
-                let response = handle_connection(&mut stream, state, init_thread)
+                let response = handle_connection(&mut stream, state, init_thread, init_completion)
                     .unwrap_or_else(|error| ControlResponse::error(error.to_string()));
                 let response_bytes =
                     serde_json::to_vec(&response).map_err(ControlError::SerializeResponse)?;
@@ -382,7 +386,7 @@ mod tests {
         ControlSignRequest, DEFAULT_CONTROL_ACCEPT_POLL_INTERVAL, DEFAULT_HEALTH_ENDPOINT_PATH,
         EGRESS_PROXY_FAULT_KILL_PATH, InitPhase, TEST_FAULTS_ENABLED_ENV,
         start_control_server_with_health_endpoint, submit_init, submit_ready, submit_resume,
-        submit_signing,
+        submit_signing, submit_wait_init,
     };
     use crate::protocol::startup::{
         GitIdentity, GitSigningConfig, StartupExecutionMode, StartupInput, StartupMode,
@@ -431,25 +435,128 @@ mod tests {
     }
 
     #[test]
-    fn rejects_second_init_requests_after_initialization_begins() {
+    fn accepts_second_init_request_after_initialization_completes() {
         let test_dir = create_temp_test_dir("control_second_init");
         let socket_path = test_dir.join("control.sock");
         let gateway = start_bootstrap_gateway();
         let startup_input =
             valid_startup_input(StartupMode::New, "bootstrap-token-value", &gateway.ws_url);
+        let duplicate_startup_input = valid_startup_input(
+            StartupMode::New,
+            "duplicate-bootstrap-token-value",
+            &gateway.ws_url,
+        );
         let server = start_test_control_server(&socket_path, ThreadSleeper);
 
         submit_init(&socket_path, &startup_input, true, false).expect("first init should succeed");
-        let error = submit_init(&socket_path, &startup_input, true, false)
-            .expect_err("second init should fail");
+        submit_init(&socket_path, &duplicate_startup_input, true, false)
+            .expect("second init should be idempotent after initialization completes");
 
+        assert_eq!(server.init_phase(), InitPhase::Initialized);
+        assert_eq!(server.startup_input(), Some(startup_input));
+
+        server.close().expect("control server should stop cleanly");
+        gateway
+            .close()
+            .expect("bootstrap gateway should stop cleanly");
+        std::fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+    }
+
+    #[test]
+    fn accepts_second_init_request_while_initialization_is_running() {
+        let test_dir = create_temp_test_dir("control_second_init_running");
+        let socket_path = test_dir.join("control.sock");
+        let setup_release_path = test_dir.join("release-setup");
+        let setup_runs_path = test_dir.join("setup-runs");
+        let gateway = start_bootstrap_gateway();
+        let server = start_test_control_server(&socket_path, ThreadSleeper);
+        let mut startup_input =
+            valid_startup_input(StartupMode::New, "bootstrap-token-value", &gateway.ws_url);
+        startup_input.runtime_plan["artifacts"] = serde_json::json!([
+            {
+                "artifactKey": "hold_init",
+                "name": "hold init",
+                "lifecycle": {
+                    "install": [
+                        {
+                            "op": "exec",
+                            "command": {
+                                "args": [
+                                    "/bin/sh",
+                                    "-c",
+                                    format!(
+                                        "printf run >> {}; while ! test -f {}; do sleep 0.05; done",
+                                        setup_runs_path.display(),
+                                        setup_release_path.display()
+                                    )
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        ]);
+        let duplicate_startup_input = valid_startup_input(
+            StartupMode::New,
+            "duplicate-bootstrap-token-value",
+            &gateway.ws_url,
+        );
+
+        submit_init(&socket_path, &startup_input, false, false).expect("first init should start");
+        wait_for_init_phase(&server, InitPhase::Initializing);
+        submit_init(&socket_path, &duplicate_startup_input, false, false)
+            .expect("second init should attach to the running initialization");
+        let duplicate_waiter_count = 4;
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (done_sender, done_receiver) = mpsc::channel();
+        let mut duplicate_waiters = Vec::new();
+        for _ in 0..duplicate_waiter_count {
+            let socket_path = socket_path.clone();
+            let duplicate_startup_input = duplicate_startup_input.clone();
+            let started_sender = started_sender.clone();
+            let done_sender = done_sender.clone();
+            duplicate_waiters.push(thread::spawn(move || {
+                started_sender
+                    .send(())
+                    .expect("duplicate waiter should report it started");
+                let result = submit_init(&socket_path, &duplicate_startup_input, true, false)
+                    .map_err(|error| error.to_string());
+                done_sender
+                    .send(result)
+                    .expect("duplicate waiter should report completion");
+            }));
+        }
+        drop(started_sender);
+        drop(done_sender);
+        for _ in 0..duplicate_waiter_count {
+            started_receiver
+                .recv_timeout(Duration::from_secs(2))
+                .expect("duplicate waiter should start before setup is released");
+        }
         assert!(
-            error
-                .to_string()
-                .contains("sandboxd has already completed initialization")
-                || error
-                    .to_string()
-                    .contains("sandboxd is already initializing")
+            done_receiver
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "waiting duplicate init should not complete while original initialization is running"
+        );
+
+        std::fs::write(&setup_release_path, "release").expect("setup script should be released");
+        for _ in 0..duplicate_waiter_count {
+            done_receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("duplicate waiter should complete after setup is released")
+                .expect("waiting duplicate init should observe original initialization success");
+        }
+        for duplicate_waiter in duplicate_waiters {
+            duplicate_waiter
+                .join()
+                .expect("duplicate waiter thread should not panic");
+        }
+        assert_eq!(server.init_phase(), InitPhase::Initialized);
+        assert_eq!(server.startup_input(), Some(startup_input));
+        assert_eq!(
+            std::fs::read_to_string(&setup_runs_path).expect("setup run marker should exist"),
+            "run"
         );
 
         server.close().expect("control server should stop cleanly");
@@ -600,6 +707,27 @@ mod tests {
         assert!(error.to_string().contains(
             "failed to initialize sandboxd state: failed to start bootstrap tunnel session"
         ));
+        let duplicate_error = submit_init(&socket_path, &startup_input, true, false)
+            .expect_err("duplicate init should remain rejected after initialization fails");
+        assert!(
+            duplicate_error
+                .to_string()
+                .contains("sandboxd initialization already failed")
+        );
+        let wait_error = submit_wait_init(&socket_path)
+            .expect_err("wait init should remain rejected after initialization fails");
+        assert!(
+            wait_error
+                .to_string()
+                .contains("sandboxd initialization already failed")
+        );
+        let second_wait_error = submit_wait_init(&socket_path)
+            .expect_err("repeated wait init should remain rejected after initialization fails");
+        assert!(
+            second_wait_error
+                .to_string()
+                .contains("sandboxd initialization already failed")
+        );
         match server.init_phase() {
             InitPhase::Failed(message) => {
                 assert!(message.contains("failed to start bootstrap tunnel session"));
