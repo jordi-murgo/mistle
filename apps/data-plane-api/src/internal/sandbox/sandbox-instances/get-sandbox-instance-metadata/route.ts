@@ -2,25 +2,25 @@ import { createRoute, z } from "@hono/zod-openapi";
 import { UnauthorizedResponseSchema, ValidationErrorResponseSchema } from "@mistle/http/errors.js";
 
 import {
-  DeleteSandboxInstanceQuerySchema,
-  DeleteSandboxInstanceParamsSchema,
-  DeleteSandboxInstanceResponseSchema,
+  GetSandboxInstanceMetadataParamsSchema,
+  GetSandboxInstanceMetadataQuerySchema,
+  GetSandboxInstanceMetadataResponseSchema,
 } from "./schema.js";
 
 export const route = createRoute({
-  method: "delete",
-  path: "/instances/:id",
+  method: "get",
+  path: "/instances/:id/metadata",
   tags: ["Internal"],
   request: {
-    params: DeleteSandboxInstanceParamsSchema,
-    query: DeleteSandboxInstanceQuerySchema,
+    params: GetSandboxInstanceMetadataParamsSchema,
+    query: GetSandboxInstanceMetadataQuerySchema,
   },
   responses: {
     200: {
-      description: "Delete a sandbox instance for internal callers.",
+      description: "Get sandbox instance metadata for internal callers.",
       content: {
         "application/json": {
-          schema: DeleteSandboxInstanceResponseSchema,
+          schema: GetSandboxInstanceMetadataResponseSchema,
         },
       },
     },

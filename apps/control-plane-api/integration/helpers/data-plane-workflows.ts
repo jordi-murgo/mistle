@@ -51,7 +51,9 @@ const StartWorkflowRunInputSchema = z.looseObject({
     })
     .strict(),
   actingUserId: z.string().min(1).optional(),
-  purpose: z.enum(["session", "snapshot", "setup_assistant", "setup_check"]).optional(),
+  purpose: z
+    .enum(["session", "snapshot", "setup_assistant", "setup_check", "skills_discovery"])
+    .optional(),
   image: z
     .object({
       imageId: z.string().min(1),
@@ -252,4 +254,19 @@ export async function waitForQueuedDeleteWorkflowRun(input: {
   throw new Error(
     `Timed out waiting for queued delete workflow for sandbox '${input.sandboxInstanceId}'.`,
   );
+}
+
+export async function countQueuedDeleteWorkflowRuns(input: {
+  env: IntegrationTestEnvironment;
+  sandboxInstanceId: string;
+}): Promise<number> {
+  const result = await input.env.dataPlaneDb.execute(sql<{ count: string }>`
+    select count(*)::text as count
+    from data_plane_openworkflow.workflow_runs
+    where
+      workflow_name = ${DeleteWorkflowName}
+      and input->>'sandboxInstanceId' = ${input.sandboxInstanceId}
+  `);
+
+  return Number(result.rows[0]?.count ?? "0");
 }
