@@ -174,6 +174,10 @@ import {
   type SetupScriptTestButtonProps,
 } from "./sandbox-profile-setup-script-test.js";
 import {
+  SandboxProfileSkillsSection,
+  type SandboxProfileSkillsDraftState,
+} from "./sandbox-profile-skills-section.js";
+import {
   SandboxProfileSnapshotPanel,
   resolveSnapshotPanelState,
   type SnapshotPanelState,
@@ -225,6 +229,7 @@ type SandboxProfileDraftSectionState = {
   integrationRows?: readonly SandboxProfileBindingEditorRow[] | null;
 };
 type SandboxProfileRuntimeSettingsDraftState = SandboxProfileRuntimeDraftState;
+type SandboxProfileSkillsSettingsDraftState = SandboxProfileSkillsDraftState;
 type SandboxProfileGitCommitSigningDraftState = {
   gitCommitSigningIntegrationConnectionId: string | null | undefined;
   sourceVersionKey: string | undefined;
@@ -270,6 +275,15 @@ function createIdleSandboxProfileRuntimeDraftState(): SandboxProfileRuntimeSetti
   return {
     agentRuntimeId: undefined,
     sourceVersionKey: undefined,
+    hasUnpersistedChanges: false,
+  };
+}
+
+function createIdleSandboxProfileSkillsDraftState(): SandboxProfileSkillsSettingsDraftState {
+  return {
+    skillsConfig: undefined,
+    sourceVersionKey: undefined,
+    saveBlockedMessage: null,
     hasUnpersistedChanges: false,
   };
 }
@@ -1533,6 +1547,9 @@ function ReadySandboxProfileEditorPage(input: {
   const [runtimeDraftState, setRuntimeDraftState] = useState(
     createIdleSandboxProfileRuntimeDraftState,
   );
+  const [skillsDraftState, setSkillsDraftState] = useState(
+    createIdleSandboxProfileSkillsDraftState,
+  );
   const [gitCommitSigningDraftState, setGitCommitSigningDraftState] = useState(
     createIdleSandboxProfileGitCommitSigningDraftState,
   );
@@ -1592,6 +1609,7 @@ function ReadySandboxProfileEditorPage(input: {
   const setupAssistantHasVersionDraftChanges =
     integrationDraftState.hasUnpersistedChanges ||
     gitCommitSigningDraftState.hasUnpersistedChanges ||
+    skillsDraftState.hasUnpersistedChanges ||
     setupScriptDraftState.hasUnpersistedChanges ||
     runtimeDraftState.hasUnpersistedChanges;
   const updateGitCommitSigningIntegrationConnectionId = useCallback(
@@ -1915,12 +1933,20 @@ function ReadySandboxProfileEditorPage(input: {
   async function saveDraftChanges(): Promise<boolean> {
     setPublishFlushError(null);
     const shouldSaveRuntime = runtimeDraftState.hasUnpersistedChanges;
+    const shouldSaveSkills = skillsDraftState.hasUnpersistedChanges;
     const shouldSaveGitCommitSigning = gitCommitSigningDraftState.hasUnpersistedChanges;
     const shouldSaveIntegrations = integrationDraftState.hasUnpersistedChanges;
     const shouldSaveSetupScript = setupScriptDraftState.hasUnpersistedChanges;
 
+    if (skillsDraftState.saveBlockedMessage !== null) {
+      skillsDraftState.applyDraftValidationError?.(skillsDraftState.saveBlockedMessage);
+      setPublishFlushError(DraftSaveErrorMessage);
+      return false;
+    }
+
     if (
       !shouldSaveRuntime &&
+      !shouldSaveSkills &&
       !shouldSaveGitCommitSigning &&
       !shouldSaveIntegrations &&
       !shouldSaveSetupScript
@@ -1938,6 +1964,9 @@ function ReadySandboxProfileEditorPage(input: {
       }
       const setupScript = shouldSaveSetupScript
         ? (setupScriptDraftState.buildDraftChanges?.() ?? null)
+        : undefined;
+      const skillsConfig = shouldSaveSkills
+        ? (skillsDraftState.buildDraftChanges?.() ?? null)
         : undefined;
       const runtimeChanges: SandboxProfileRuntimeDraftChanges | undefined = shouldSaveRuntime
         ? buildSandboxProfileRuntimeDraftChanges({
@@ -1969,6 +1998,7 @@ function ReadySandboxProfileEditorPage(input: {
         ...(gitCommitSigningIntegrationConnectionId === undefined
           ? {}
           : { gitCommitSigningIntegrationConnectionId }),
+        ...(skillsConfig === undefined ? {} : { skillsConfig }),
         ...(shouldSaveIntegrations && integrationBindings !== undefined
           ? { integrationBindings: { bindings: integrationBindings } }
           : {}),
@@ -2003,9 +2033,15 @@ function ReadySandboxProfileEditorPage(input: {
         });
         await input.invalidateProfileVersions(input.profileId);
       }
+      if (shouldSaveSkills) {
+        skillsDraftState.applySavedSkillsConfig?.(savedDraft.skillsConfig);
+        if (!shouldSaveRuntime) {
+          await input.invalidateProfileVersions(input.profileId);
+        }
+      }
       if (shouldSaveGitCommitSigning) {
         setGitCommitSigningDraftState(createIdleSandboxProfileGitCommitSigningDraftState());
-        if (!shouldSaveRuntime) {
+        if (!shouldSaveRuntime && !shouldSaveSkills) {
           await input.invalidateProfileVersions(input.profileId);
         }
       }
@@ -2015,6 +2051,7 @@ function ReadySandboxProfileEditorPage(input: {
       integrationDraftState.applyDraftSaveError?.(error);
       setupScriptDraftState.applyDraftSaveError?.(error);
       runtimeDraftState.applyDraftSaveError?.(error);
+      skillsDraftState.applyDraftSaveError?.(error);
       setPublishFlushError(DraftSaveErrorMessage);
       return false;
     }
@@ -2068,7 +2105,8 @@ function ReadySandboxProfileEditorPage(input: {
       hasUnpersistedRuntimeChanges={runtimeDraftState.hasUnpersistedChanges}
       hasUnpersistedIntegrationChanges={
         integrationDraftState.hasUnpersistedChanges ||
-        gitCommitSigningDraftState.hasUnpersistedChanges
+        gitCommitSigningDraftState.hasUnpersistedChanges ||
+        skillsDraftState.hasUnpersistedChanges
       }
       hasUnpersistedSetupScriptChanges={setupScriptDraftState.hasUnpersistedChanges}
       isSavingProfileName={metaState.isUpdating}
@@ -2155,11 +2193,13 @@ function ReadySandboxProfileEditorPage(input: {
           invalidateProfileVersions={input.invalidateProfileVersions}
           mode={input.mode}
           runtimeDraftState={runtimeDraftState}
+          skillsDraftState={skillsDraftState}
           gitCommitSigningDraftState={gitCommitSigningDraftState}
           onGitCommitSigningIntegrationConnectionChange={
             updateGitCommitSigningIntegrationConnectionId
           }
           onRuntimeDraftStateChange={setRuntimeDraftState}
+          onSkillsDraftStateChange={setSkillsDraftState}
           onIntegrationDraftStateChange={setIntegrationDraftState}
           onPublishSuccessMessageDismiss={() => {
             setShowPublishSuccessMessage(false);
@@ -2666,9 +2706,11 @@ function SandboxProfileEditorSectionPanels(input: {
   invalidateProfileVersions: (profileId: string) => Promise<void>;
   mode: SandboxProfileEditorVersionMode;
   runtimeDraftState: SandboxProfileRuntimeSettingsDraftState;
+  skillsDraftState: SandboxProfileSkillsSettingsDraftState;
   gitCommitSigningDraftState: SandboxProfileGitCommitSigningDraftState;
   onGitCommitSigningIntegrationConnectionChange: (connectionId: string | null) => void;
   onRuntimeDraftStateChange: (state: SandboxProfileRuntimeSettingsDraftState) => void;
+  onSkillsDraftStateChange: (state: SandboxProfileSkillsSettingsDraftState) => void;
   onIntegrationDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
   buildSetupScriptTestRuntimeConfig?: () => SandboxProfileRuntimeDraftChanges;
   onPublishSuccessMessageDismiss: () => void;
@@ -2734,6 +2776,11 @@ function SandboxProfileEditorSectionPanels(input: {
     );
   }
 
+  const sandboxProfileIntegrationRows = resolveSandboxProfileSetupScriptIntegrationRows(
+    input.integrationsLoader.initialRows,
+    input.integrationDraftState.integrationRows,
+  );
+
   return (
     <div className="flex w-full flex-col gap-8">
       <LoadedSandboxProfileIntegrationSetupSection
@@ -2768,6 +2815,24 @@ function SandboxProfileEditorSectionPanels(input: {
         readOnly={input.draftFieldsAreReadOnly}
         version={input.mode.version}
       />
+      {input.currentVersion === null || sandboxProfileIntegrationRows === null ? null : (
+        <SandboxProfilePanelSection>
+          <SandboxProfileSkillsSection
+            availableConnections={input.integrationsLoader.availableConnections}
+            availableTargets={input.integrationsLoader.availableTargets}
+            disabled={input.draftFieldsAreReadOnly}
+            integrationRows={sandboxProfileIntegrationRows}
+            integrationRowsHaveUnpersistedChanges={
+              input.integrationDraftState.hasUnpersistedChanges
+            }
+            isDraft={input.mode.kind === "draft"}
+            onDraftStateChange={input.onSkillsDraftStateChange}
+            profileId={input.profileId}
+            readOnly={input.draftFieldsAreReadOnly}
+            version={input.currentVersion}
+          />
+        </SandboxProfilePanelSection>
+      )}
       <SandboxProfilePanelSection>
         <LoadedSandboxProfileSetupScriptSection
           disabled={input.draftFieldsAreReadOnly}
