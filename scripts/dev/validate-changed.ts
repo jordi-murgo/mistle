@@ -45,6 +45,7 @@ const ROOT_REPO_CHECK_STEPS = new Set<Step>(["format", "typecheck"]);
 const AFFECTED_TEST_PACKAGE_NAMES = new Set(["@mistle/dashboard", "@mistle/ui"]);
 const AFFECTED_COMPONENT_TEST_PACKAGE_NAMES = new Set(["@mistle/dashboard"]);
 const AFFECTED_INTEGRATION_TEST_PACKAGE_NAMES = new Set([
+  "@mistle/cache",
   "@mistle/config",
   "@mistle/control-plane-api",
   "@mistle/control-plane-worker",
@@ -55,6 +56,7 @@ const AFFECTED_INTEGRATION_TEST_PACKAGE_NAMES = new Set([
   "@mistle/db",
   "@mistle/emails",
   "@mistle/integrations-core",
+  "@mistle/integrations-definitions",
   "@mistle/object-store",
   "@mistle/sandbox",
   "@mistle/test-harness",
@@ -494,7 +496,7 @@ function selectWorkspacePackages(
       packageReasons,
       selectedPackageNames,
       matchingPackage.name,
-      `changed file in ${matchingPackage.relativePath}`,
+      getChangedFileReason(matchingPackage),
     );
 
     for (const dependentName of collectTransitiveDependents(matchingPackage.name, dependentsMap)) {
@@ -680,6 +682,39 @@ function buildAffectedIntegrationVitestCommand(
   ];
 }
 
+function getChangedExistingIntegrationTestFilesForPackage(
+  workspacePackage: WorkspacePackage,
+  packageChangedFiles: readonly string[],
+): string[] {
+  if (AFFECTED_INTEGRATION_TEST_PACKAGE_NAMES.has(workspacePackage.name) === false) {
+    return [];
+  }
+
+  return packageChangedFiles.filter(
+    (filePath) => isIntegrationTestFilePath(filePath) && existsSync(resolve(REPO_ROOT, filePath)),
+  );
+}
+
+function getChangedFileReason(workspacePackage: WorkspacePackage): string {
+  return `changed file in ${workspacePackage.relativePath}`;
+}
+
+function shouldRunFullPackageTestWithChangedIntegrationFiles(
+  workspacePackage: WorkspacePackage,
+  packageChangedFiles: readonly string[],
+  changedPackageIntegrationTestFiles: readonly string[],
+  reasons: readonly string[],
+): boolean {
+  const hasOtherPackageChangedFiles = packageChangedFiles.some(
+    (filePath) => changedPackageIntegrationTestFiles.includes(filePath) === false,
+  );
+  const hasSelectionReasonOutsidePackageFiles = reasons.some(
+    (reason) => reason !== getChangedFileReason(workspacePackage),
+  );
+
+  return hasOtherPackageChangedFiles || hasSelectionReasonOutsidePackageFiles;
+}
+
 function isRustIntegrationTargetFilePath(
   workspacePackage: WorkspacePackage,
   filePath: string,
@@ -816,7 +851,43 @@ function buildAffectedTestCommands(
       continue;
     }
 
+    const packageChangedFiles = plan.changedFiles.filter((filePath) =>
+      filePath.startsWith(`${workspacePackage.relativePath}/`),
+    );
+    const changedPackageIntegrationTestFiles = getChangedExistingIntegrationTestFilesForPackage(
+      workspacePackage,
+      packageChangedFiles,
+    );
+    if (changedPackageIntegrationTestFiles.length > 0) {
+      affectedCommands.push(
+        buildAffectedIntegrationVitestCommand(workspacePackage, changedPackageIntegrationTestFiles),
+      );
+    }
+
     if (AFFECTED_TEST_PACKAGE_NAMES.has(workspacePackage.name) === false) {
+      if (
+        changedPackageIntegrationTestFiles.length === 0 ||
+        shouldRunFullPackageTestWithChangedIntegrationFiles(
+          workspacePackage,
+          packageChangedFiles,
+          changedPackageIntegrationTestFiles,
+          reasons,
+        )
+      ) {
+        turboPackages.push(workspacePackage);
+      }
+      continue;
+    }
+
+    if (
+      changedPackageIntegrationTestFiles.length > 0 &&
+      shouldRunFullPackageTestWithChangedIntegrationFiles(
+        workspacePackage,
+        packageChangedFiles,
+        changedPackageIntegrationTestFiles,
+        reasons,
+      )
+    ) {
       turboPackages.push(workspacePackage);
       continue;
     }
@@ -844,6 +915,7 @@ function buildAffectedTestCommands(
     const changedExistingTestFiles = changedTestFiles.filter((filePath) =>
       existsSync(resolve(REPO_ROOT, filePath)),
     );
+    const hasDeletedChangedTestFile = changedExistingTestFiles.length !== changedTestFiles.length;
     const changedIntegrationTestFiles = changedExistingTestFiles.filter(
       (filePath) =>
         isIntegrationTestFilePath(filePath) &&
@@ -871,6 +943,11 @@ function buildAffectedTestCommands(
       continue;
     }
 
+    if (hasDeletedChangedTestFile) {
+      turboPackages.push(workspacePackage);
+      continue;
+    }
+
     if (changedUnitTestFiles.length > 0) {
       affectedCommands.push(
         buildAffectedVitestCommand(workspacePackage, "run", changedUnitTestFiles),
@@ -880,12 +957,6 @@ function buildAffectedTestCommands(
     if (changedComponentTestFiles.length > 0) {
       affectedCommands.push(
         buildAffectedComponentVitestCommand(workspacePackage, "run", changedComponentTestFiles),
-      );
-    }
-
-    if (changedIntegrationTestFiles.length > 0) {
-      affectedCommands.push(
-        buildAffectedIntegrationVitestCommand(workspacePackage, changedIntegrationTestFiles),
       );
     }
 
