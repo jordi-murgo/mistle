@@ -2,7 +2,7 @@
 
 Snapshots are prepared sandbox images for published sandbox profile versions.
 
-They make new sessions start from a profile-specific image instead of rebuilding everything from the shared base image every time. A snapshot captures the result of applying a published profile version's runtime plan and setup script to a one-off sandbox, then stores the resulting provider image handle on that profile version.
+They make new sessions start from a profile-specific image instead of rebuilding everything from the shared base image every time. A snapshot captures the result of applying a published profile version's runtime plan and snapshot preparation script to a one-off sandbox, then stores the resulting provider image handle on that profile version. Initial snapshots and setup refreshes use the setup script; maintenance refresh snapshots use the saved snapshot maintenance script when one is configured and a usable current snapshot exists. Scheduled refresh uses setup preparation from the base image when those maintenance prerequisites are not met.
 
 ## What snapshots are for
 
@@ -31,7 +31,7 @@ Control plane creates a snapshot job
 Data plane worker starts a one-off snapshot sandbox
       │
       ▼
-Worker initializes the sandbox in snapshot mode
+Worker activates sandboxd with the snapshot operation kind
       │
       ▼
 Provider captures an image from the sandbox
