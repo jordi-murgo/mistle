@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveCodexConnectionStateTransition,
+  resolveCodexStreamResetRecoveryStrategy,
   selectCodexConnectionThreadStrategy,
 } from "./codex-session-lifecycle-policy.js";
 
@@ -108,6 +109,19 @@ describe("codex session lifecycle policy", () => {
       recoverableDisconnectMessage: null,
       recoverableDisconnectStrategy: null,
     });
+  });
+
+  it("uses full transport reconnect when a bootstrap disconnect resets the stream", () => {
+    expect(
+      resolveCodexStreamResetRecoveryStrategy({
+        code: "bootstrap_disconnected",
+      }),
+    ).toBe("reconnect_transport");
+    expect(
+      resolveCodexStreamResetRecoveryStrategy({
+        code: "target_closed",
+      }),
+    ).toBe("reopen_stream");
   });
 
   it("resumes the oldest created available thread", () => {
