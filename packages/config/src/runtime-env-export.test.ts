@@ -17,6 +17,10 @@ function expectEntry(
   expect(entries).toContainEqual(expected);
 }
 
+function expectNoEntry(entries: readonly RuntimeEnvExportEntry[], name: string): void {
+  expect(entries.some((entry) => entry.name === name)).toBe(false);
+}
+
 describe("exportServiceConfigToEnv", () => {
   it("exports control plane API config to resource env entries", () => {
     const loadedConfig = loadConfig({
@@ -44,6 +48,18 @@ describe("exportServiceConfigToEnv", () => {
     expectEntry(entries, {
       name: "MISTLE_POSTGRES_CONTROL_PLANE_DIRECT_URL",
       value: "postgresql://mistle:replace-with-password@db:5432/mistle",
+    });
+    expectEntry(entries, {
+      name: "MISTLE_KV_CONTROL_PLANE_BACKEND",
+      value: "valkey",
+    });
+    expectEntry(entries, {
+      name: "MISTLE_KV_CONTROL_PLANE_URL",
+      value: "redis://valkey:6379",
+    });
+    expectEntry(entries, {
+      name: "MISTLE_KV_CONTROL_PLANE_KEY_PREFIX",
+      value: "mistle:control",
     });
     expectEntry(entries, {
       name: "MISTLE_OBJECT_STORE_ASSETS_SECRET_ACCESS_KEY",
@@ -101,6 +117,30 @@ describe("exportServiceConfigToEnv", () => {
       name: "MISTLE_SANDBOX_TENSORLAKE_API_KEY",
       value: "replace-with-tensorlake-api-key",
     });
+  });
+
+  it("does not export control plane API KV env entries for the memory cache backend", () => {
+    const loadedConfig = loadConfig({
+      app: AppIds.CONTROL_PLANE_API,
+      configPath: ConfigSamplePath,
+    });
+
+    const entries = exportServiceConfigToEnv({
+      app: AppIds.CONTROL_PLANE_API,
+      config: {
+        ...loadedConfig,
+        app: {
+          ...loadedConfig.app,
+          cache: {
+            backend: "memory",
+          },
+        },
+      },
+    });
+
+    expectNoEntry(entries, "MISTLE_KV_CONTROL_PLANE_BACKEND");
+    expectNoEntry(entries, "MISTLE_KV_CONTROL_PLANE_URL");
+    expectNoEntry(entries, "MISTLE_KV_CONTROL_PLANE_KEY_PREFIX");
   });
 
   it("exports control plane worker config to resource env entries", () => {
