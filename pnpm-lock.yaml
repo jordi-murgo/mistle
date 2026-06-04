@@ -400,13 +400,13 @@ importers:
         version: 1.9.0(@types/react@19.2.15)(posthog-js@1.376.0)(react@19.2.5)
       '@rjsf/core':
         specifier: ~6.5.2
-        version: 6.5.2(@rjsf/utils@6.5.3(react@19.2.5))(react@19.2.5)
+        version: 6.5.2(@rjsf/utils@6.6.1(react@19.2.5))(react@19.2.5)
       '@rjsf/utils':
-        specifier: ~6.5.3
-        version: 6.5.3(react@19.2.5)
+        specifier: ~6.6.1
+        version: 6.6.1(react@19.2.5)
       '@rjsf/validator-ajv8':
         specifier: ~6.5.1
-        version: 6.5.1(@rjsf/utils@6.5.3(react@19.2.5))
+        version: 6.5.1(@rjsf/utils@6.6.1(react@19.2.5))
       '@streamdown/code':
         specifier: ^1.1.1
         version: 1.1.1(react@19.2.5)
@@ -4972,8 +4972,8 @@ packages:
       '@rjsf/utils': ^6.5.x
       react: '>=18'
 
-  '@rjsf/utils@6.5.3':
-    resolution: {integrity: sha512-lrGxVR26xjCjea8OqIDpSXH1FDAfhCON6DHja/PhzJBLJjs45+sdilmJA78c+tL4oN5Jpj2dTOoFMAZ7bIhRvQ==}
+  '@rjsf/utils@6.6.1':
+    resolution: {integrity: sha512-Hwve0OB1pOed1RkbO8qggcmyPQ5nsE+nimESympq/cb2dtBou0nIVlJ+Paa4oO9vARmN5IrVXXZODinIV+ErMw==}
     engines: {node: '>=20'}
     peerDependencies:
       react: '>=18'
@@ -16496,17 +16496,17 @@ snapshots:
       react: 19.2.5
       react-redux: 9.2.0(@types/react@19.2.14)(react@19.2.5)(redux@5.0.1)
 
-  '@rjsf/core@6.5.2(@rjsf/utils@6.5.3(react@19.2.5))(react@19.2.5)':
+  '@rjsf/core@6.5.2(@rjsf/utils@6.6.1(react@19.2.5))(react@19.2.5)':
     dependencies:
-      '@rjsf/utils': 6.5.3(react@19.2.5)
-      '@rjsf/validator-ajv8': 6.5.1(@rjsf/utils@6.5.3(react@19.2.5))
+      '@rjsf/utils': 6.6.1(react@19.2.5)
+      '@rjsf/validator-ajv8': 6.5.1(@rjsf/utils@6.6.1(react@19.2.5))
       lodash: 4.18.0
       lodash-es: 4.18.0
       markdown-to-jsx: 8.0.0(react@19.2.5)
       prop-types: 15.8.1
       react: 19.2.5
 
-  '@rjsf/utils@6.5.3(react@19.2.5)':
+  '@rjsf/utils@6.6.1(react@19.2.5)':
     dependencies:
       '@x0k/json-schema-merge': 1.0.3
       fast-equals: 6.0.0
@@ -16517,9 +16517,9 @@ snapshots:
       react: 19.2.5
       react-is: 18.3.1
 
-  '@rjsf/validator-ajv8@6.5.1(@rjsf/utils@6.5.3(react@19.2.5))':
+  '@rjsf/validator-ajv8@6.5.1(@rjsf/utils@6.6.1(react@19.2.5))':
     dependencies:
-      '@rjsf/utils': 6.5.3(react@19.2.5)
+      '@rjsf/utils': 6.6.1(react@19.2.5)
       ajv: 8.18.0
       ajv-formats: 2.1.1(ajv@8.18.0)
       lodash: 4.18.0
