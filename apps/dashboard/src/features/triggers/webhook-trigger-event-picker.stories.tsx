@@ -1,287 +1,32 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
 
 import { withDashboardPageStory } from "../../storybook/decorators.js";
-import type { IntegrationConnectionResources } from "../integrations/integrations-service.js";
 import { WebhookTriggerEventPicker } from "./webhook-trigger-event-picker.js";
 import type {
   WebhookTriggerEventOption,
   WebhookTriggerEventParameterRuleMap,
 } from "./webhook-trigger-event-types.js";
-import { WebhookTriggerEventParameterRuleOperators } from "./webhook-trigger-event-types.js";
-import { createWebhookTriggerEventId } from "./webhook-trigger-option-builders.js";
-import { createGitHubEventOption } from "./webhook-trigger-test-fixtures.js";
-
-const GitHubConnectionId = "conn_github_prod";
-const GitHubWebhookSourceId = "iws_github_prod";
-const SlackConnectionId = "conn_slack_prod";
-const SlackWebhookSourceId = "iws_slack_prod";
-
-function isRule(value: string) {
-  return {
-    operator: WebhookTriggerEventParameterRuleOperators.IS,
-    value,
-  };
-}
-
-function isNotRule(value: string) {
-  return {
-    operator: WebhookTriggerEventParameterRuleOperators.IS_NOT,
-    value,
-  };
-}
-
-function containsTokenRule(value: string) {
-  return {
-    operator: WebhookTriggerEventParameterRuleOperators.CONTAINS_TOKEN,
-    value,
-  };
-}
-const IssueCommentCreatedTriggerId = createWebhookTriggerEventId({
-  webhookSourceId: GitHubWebhookSourceId,
-  eventType: "github.issue_comment.created",
-});
-const PullRequestOpenedTriggerId = createWebhookTriggerEventId({
-  webhookSourceId: GitHubWebhookSourceId,
-  eventType: "github.pull_request.opened",
-});
-const PullRequestReviewCommentCreatedTriggerId = createWebhookTriggerEventId({
-  webhookSourceId: GitHubWebhookSourceId,
-  eventType: "github.pull_request_review_comment.created",
-});
-const PullRequestReviewSubmittedTriggerId = createWebhookTriggerEventId({
-  webhookSourceId: GitHubWebhookSourceId,
-  eventType: "github.pull_request_review.submitted",
-});
-const PushDeletedTriggerId = createWebhookTriggerEventId({
-  webhookSourceId: GitHubWebhookSourceId,
-  eventType: "github.push.deleted",
-});
-const SlackAppMentionTriggerId = createWebhookTriggerEventId({
-  webhookSourceId: SlackWebhookSourceId,
-  eventType: "slack:app_mention",
-});
-
-const GitHubEventOptions: readonly WebhookTriggerEventOption[] = [
-  createGitHubEventOption({
-    eventType: "github.issue_comment.created",
-    connectionId: GitHubConnectionId,
-    webhookSourceId: GitHubWebhookSourceId,
-    connectionLabel: "GitHub Engineering",
-    categoryPrefix: "GitHub Engineering",
-    overrides: { id: IssueCommentCreatedTriggerId },
-  }),
-  createGitHubEventOption({
-    eventType: "github.issues.opened",
-    connectionId: GitHubConnectionId,
-    webhookSourceId: GitHubWebhookSourceId,
-    connectionLabel: "GitHub Engineering",
-    categoryPrefix: "GitHub Engineering",
-  }),
-  createGitHubEventOption({
-    eventType: "github.pull_request.opened",
-    connectionId: GitHubConnectionId,
-    webhookSourceId: GitHubWebhookSourceId,
-    connectionLabel: "GitHub Engineering",
-    categoryPrefix: "GitHub Engineering",
-    overrides: { id: PullRequestOpenedTriggerId },
-  }),
-  createGitHubEventOption({
-    eventType: "github.pull_request_review.submitted",
-    connectionId: GitHubConnectionId,
-    webhookSourceId: GitHubWebhookSourceId,
-    connectionLabel: "GitHub Engineering",
-    categoryPrefix: "GitHub Engineering",
-    overrides: { id: PullRequestReviewSubmittedTriggerId },
-  }),
-  createGitHubEventOption({
-    eventType: "github.pull_request_review_comment.created",
-    connectionId: GitHubConnectionId,
-    webhookSourceId: GitHubWebhookSourceId,
-    connectionLabel: "GitHub Engineering",
-    categoryPrefix: "GitHub Engineering",
-    overrides: { id: PullRequestReviewCommentCreatedTriggerId },
-  }),
-];
-
-const StoryGithubRepositoryResources: IntegrationConnectionResources = {
-  connectionId: GitHubConnectionId,
-  familyId: "github",
-  kind: "repository",
-  syncState: "ready",
-  lastSyncedAt: "2026-03-17T00:00:00.000Z",
-  items: [
-    {
-      id: "icr_github_repo_1",
-      familyId: "github",
-      kind: "repository",
-      externalId: "repo_1",
-      handle: "mistlehq/platform",
-      displayName: "mistlehq/platform",
-      status: "accessible",
-      metadata: {},
-    },
-    {
-      id: "icr_github_repo_2",
-      familyId: "github",
-      kind: "repository",
-      externalId: "repo_2",
-      handle: "mistlehq/dashboard",
-      displayName: "mistlehq/dashboard",
-      status: "accessible",
-      metadata: {},
-    },
-  ],
-};
-
-const StoryGithubBranchResources: IntegrationConnectionResources = {
-  connectionId: GitHubConnectionId,
-  familyId: "github",
-  kind: "branch",
-  syncState: "ready",
-  lastSyncedAt: "2026-03-17T00:00:00.000Z",
-  items: [
-    {
-      id: "icr_github_branch_1",
-      familyId: "github",
-      kind: "branch",
-      externalId: "repo_1:main",
-      handle: "main",
-      displayName: "main",
-      status: "accessible",
-      metadata: {
-        repositoryFullName: "mistlehq/platform",
-      },
-    },
-    {
-      id: "icr_github_branch_2",
-      familyId: "github",
-      kind: "branch",
-      externalId: "repo_1:release",
-      handle: "release",
-      displayName: "release",
-      status: "accessible",
-      metadata: {
-        repositoryFullName: "mistlehq/platform",
-      },
-    },
-  ],
-};
-
-const StoryGithubUserResources: IntegrationConnectionResources = {
-  connectionId: GitHubConnectionId,
-  familyId: "github",
-  kind: "user",
-  syncState: "ready",
-  lastSyncedAt: "2026-03-17T00:00:00.000Z",
-  items: [
-    {
-      id: "icr_github_user_1",
-      familyId: "github",
-      kind: "user",
-      externalId: "1001",
-      handle: "octocat",
-      displayName: "octocat",
-      status: "accessible",
-      metadata: {},
-    },
-    {
-      id: "icr_github_user_2",
-      familyId: "github",
-      kind: "user",
-      externalId: "1002",
-      handle: "hubot",
-      displayName: "hubot",
-      status: "accessible",
-      metadata: {},
-    },
-  ],
-};
-
-const StorySlackChannelResources: IntegrationConnectionResources = {
-  connectionId: SlackConnectionId,
-  familyId: "slack",
-  kind: "channel",
-  syncState: "ready",
-  lastSyncedAt: "2026-03-17T00:00:00.000Z",
-  items: [
-    {
-      id: "icr_slack_channel_1",
-      familyId: "slack",
-      kind: "channel",
-      externalId: "C_ALERTS_001",
-      handle: "C_ALERTS_001",
-      displayName: "#alerts",
-      status: "accessible",
-      metadata: {},
-    },
-    {
-      id: "icr_slack_channel_2",
-      familyId: "slack",
-      kind: "channel",
-      externalId: "C_ENG_001",
-      handle: "C_ENG_001",
-      displayName: "#engineering",
-      status: "accessible",
-      metadata: {},
-    },
-  ],
-};
-
-const SlackEventOptions: readonly WebhookTriggerEventOption[] = [
-  {
-    id: SlackAppMentionTriggerId,
-    eventType: "slack:app_mention",
-    integrationWebhookSourceId: SlackWebhookSourceId,
-    connectionId: SlackConnectionId,
-    connectionLabel: "Slack Engineering",
-    label: "App mention",
-    category: "Slack Engineering / Messages",
-    logoKey: "slack",
-    parameters: [
-      {
-        id: "channel",
-        label: "channel",
-        kind: "resource-select",
-        resourceKind: "channel",
-        payloadPath: ["event", "channel"],
-        prefix: "in",
-      },
-    ],
-  },
-];
-
-function createWebhookTriggerEventPickerStoryQueryClient(): QueryClient {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        staleTime: Number.POSITIVE_INFINITY,
-      },
-    },
-  });
-
-  queryClient.setQueryData(
-    ["trigger-trigger-parameters", GitHubConnectionId, "repository"],
-    StoryGithubRepositoryResources,
-  );
-  queryClient.setQueryData(
-    ["trigger-trigger-parameters", GitHubConnectionId, "branch"],
-    StoryGithubBranchResources,
-  );
-  queryClient.setQueryData(
-    ["trigger-trigger-parameters", GitHubConnectionId, "user"],
-    StoryGithubUserResources,
-  );
-  queryClient.setQueryData(
-    ["trigger-trigger-parameters", SlackConnectionId, "channel"],
-    StorySlackChannelResources,
-  );
-
-  return queryClient;
-}
+import {
+  containsTokenRule,
+  createWebhookTriggerStoryQueryClient,
+  isNotRule,
+  isRule,
+  StoryGitHubConnectionId,
+  StoryGitHubEventOptions,
+  StoryGitHubTeamResourcesSyncFailed,
+  StoryGitHubWebhookSourceId,
+  StoryIssueCommentCreatedTriggerId,
+  StoryPullRequestOpenedTriggerId,
+  StoryPullRequestReviewCommentCreatedTriggerId,
+  StoryPullRequestReviewRequestedTriggerId,
+  StoryPushDeletedTriggerId,
+  StorySlackAppMentionTriggerId,
+  StorySlackConnectionId,
+  StorySlackEventOptions,
+} from "./webhook-trigger-story-fixtures.js";
 
 function StoryHarness(input: {
   hasConnectedIntegrations: boolean;
@@ -290,8 +35,15 @@ function StoryHarness(input: {
   eventParameterRules?: WebhookTriggerEventParameterRuleMap;
   eventOptions: readonly WebhookTriggerEventOption[];
   error?: string;
+  showGitHubTeamSyncError?: boolean;
 }): React.JSX.Element {
-  const [queryClient] = useState(() => createWebhookTriggerEventPickerStoryQueryClient());
+  const [queryClient] = useState(() =>
+    createWebhookTriggerStoryQueryClient(
+      input.showGitHubTeamSyncError === true
+        ? { githubTeamResources: StoryGitHubTeamResourcesSyncFailed }
+        : undefined,
+    ),
+  );
   const [selectedEventIds, setSelectedEventIds] = useState([...input.selectedEventIds]);
   const [eventParameterRules, setEventParameterRules] = useState(input.eventParameterRules ?? {});
 
@@ -337,42 +89,73 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
-    selectedEventIds: [PullRequestReviewCommentCreatedTriggerId],
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryPullRequestReviewCommentCreatedTriggerId],
     eventParameterRules: {
-      [PullRequestReviewCommentCreatedTriggerId]: {
+      [StoryPullRequestReviewCommentCreatedTriggerId]: {
         invocationToken: containsTokenRule("@mistlebot"),
         commenter: isRule("octocat"),
         baseBranch: isRule("main"),
         repository: isRule("mistlehq/platform"),
       },
     },
-    eventOptions: GitHubEventOptions,
+    eventOptions: StoryGitHubEventOptions,
   },
 };
 
 export const NegativeEqualityParameters: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
-    selectedEventIds: [PullRequestOpenedTriggerId],
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryPullRequestOpenedTriggerId],
     eventParameterRules: {
-      [PullRequestOpenedTriggerId]: {
+      [StoryPullRequestOpenedTriggerId]: {
         author: isNotRule("dependabot"),
         baseBranch: isRule("main"),
         repository: isRule("mistlehq/platform"),
       },
     },
-    eventOptions: GitHubEventOptions,
+    eventOptions: StoryGitHubEventOptions,
+  },
+};
+
+export const GitHubReviewRequestTeamTarget: Story = {
+  name: "GitHub review request team target",
+  args: {
+    hasConnectedIntegrations: true,
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryPullRequestReviewRequestedTriggerId],
+    eventParameterRules: {
+      [StoryPullRequestReviewRequestedTriggerId]: {
+        requestedTeam: isRule("platform"),
+      },
+    },
+    eventOptions: StoryGitHubEventOptions,
+  },
+};
+
+export const GitHubReviewRequestTeamSyncFailed: Story = {
+  name: "GitHub review request team sync failed",
+  args: {
+    hasConnectedIntegrations: true,
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryPullRequestReviewRequestedTriggerId],
+    eventParameterRules: {
+      [StoryPullRequestReviewRequestedTriggerId]: {
+        requestedTeam: isRule("platform"),
+      },
+    },
+    eventOptions: StoryGitHubEventOptions,
+    showGitHubTeamSyncError: true,
   },
 };
 
 export const NoSelection: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
+    selectedConnectionId: StoryGitHubConnectionId,
     selectedEventIds: [],
-    eventOptions: GitHubEventOptions,
+    eventOptions: StoryGitHubEventOptions,
   },
 };
 
@@ -388,7 +171,7 @@ export const NoConnectedIntegrations: Story = {
 export const NoEventsAvailable: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
+    selectedConnectionId: StoryGitHubConnectionId,
     selectedEventIds: [],
     eventOptions: [],
   },
@@ -397,15 +180,15 @@ export const NoEventsAvailable: Story = {
 export const UnavailableSavedEvent: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
-    selectedEventIds: [PushDeletedTriggerId],
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryPushDeletedTriggerId],
     eventOptions: [
-      ...GitHubEventOptions,
+      ...StoryGitHubEventOptions,
       {
-        id: PushDeletedTriggerId,
+        id: StoryPushDeletedTriggerId,
         eventType: "github.push.deleted",
-        integrationWebhookSourceId: GitHubWebhookSourceId,
-        connectionId: GitHubConnectionId,
+        integrationWebhookSourceId: StoryGitHubWebhookSourceId,
+        connectionId: StoryGitHubConnectionId,
         connectionLabel: "GitHub Engineering",
         label: "github.push.deleted",
         description: "No longer available from your connected integrations.",
@@ -420,14 +203,14 @@ export const UnavailableSavedEvent: Story = {
 export const WrongProfileSavedEvent: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
-    selectedEventIds: [IssueCommentCreatedTriggerId],
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryIssueCommentCreatedTriggerId],
     eventOptions: [
       {
-        id: IssueCommentCreatedTriggerId,
+        id: StoryIssueCommentCreatedTriggerId,
         eventType: "github.issue_comment.created",
-        integrationWebhookSourceId: GitHubWebhookSourceId,
-        connectionId: GitHubConnectionId,
+        integrationWebhookSourceId: StoryGitHubWebhookSourceId,
+        connectionId: StoryGitHubConnectionId,
         connectionLabel: "GitHub Engineering",
         label: "Issue comment created",
         category: "GitHub Engineering / Issues",
@@ -442,42 +225,42 @@ export const WrongProfileSavedEvent: Story = {
 export const SlackAppMentionChannelOnly: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: SlackConnectionId,
-    selectedEventIds: [SlackAppMentionTriggerId],
+    selectedConnectionId: StorySlackConnectionId,
+    selectedEventIds: [StorySlackAppMentionTriggerId],
     eventParameterRules: {
-      [SlackAppMentionTriggerId]: {
+      [StorySlackAppMentionTriggerId]: {
         channel: isRule("C_ALERTS_001"),
       },
     },
-    eventOptions: SlackEventOptions,
+    eventOptions: StorySlackEventOptions,
   },
 };
 
 export const SlackUnavailableArchivedChannelSelection: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: SlackConnectionId,
-    selectedEventIds: [SlackAppMentionTriggerId],
+    selectedConnectionId: StorySlackConnectionId,
+    selectedEventIds: [StorySlackAppMentionTriggerId],
     eventParameterRules: {
-      [SlackAppMentionTriggerId]: {
+      [StorySlackAppMentionTriggerId]: {
         channel: isRule("C_ARCHIVED_001"),
       },
     },
-    eventOptions: SlackEventOptions,
+    eventOptions: StorySlackEventOptions,
   },
 };
 
 export const AddSecondEvent: Story = {
   args: {
     hasConnectedIntegrations: true,
-    selectedConnectionId: GitHubConnectionId,
-    selectedEventIds: [IssueCommentCreatedTriggerId],
+    selectedConnectionId: StoryGitHubConnectionId,
+    selectedEventIds: [StoryIssueCommentCreatedTriggerId],
     eventParameterRules: {
-      [IssueCommentCreatedTriggerId]: {
+      [StoryIssueCommentCreatedTriggerId]: {
         invocationToken: containsTokenRule("@mistlebot"),
       },
     },
-    eventOptions: GitHubEventOptions,
+    eventOptions: StoryGitHubEventOptions,
   },
   play: async ({ canvasElement }): Promise<void> => {
     const canvas = within(canvasElement);

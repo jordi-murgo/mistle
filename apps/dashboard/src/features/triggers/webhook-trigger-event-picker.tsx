@@ -24,6 +24,7 @@ import { InfoIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 
+import { resolveApiErrorMessage } from "../api/error-message.js";
 import { SingleSelectStringComboboxField } from "../forms/single-select-string-combobox-field.js";
 import { IntegrationLogo } from "../integrations/integration-logo.js";
 import { listIntegrationConnectionResources } from "../integrations/integrations-service.js";
@@ -195,12 +196,12 @@ function EventParameterFields(input: {
   const shouldRenderReviewTargetControl =
     isGitHubReviewRequestEvent(input.eventOption.eventType) &&
     requestedReviewerParameter?.kind === "resource-select" &&
-    requestedTeamParameter?.kind === "string";
+    requestedTeamParameter?.kind === "resource-select";
 
   if (
     shouldRenderReviewTargetControl &&
     requestedReviewerParameter?.kind === "resource-select" &&
-    requestedTeamParameter?.kind === "string"
+    requestedTeamParameter?.kind === "resource-select"
   ) {
     return (
       <>
@@ -394,12 +395,13 @@ function GitHubRequestedReviewTargetField(input: {
   requestedReviewerRule: WebhookTriggerEventParameterRule | undefined;
   requestedTeamParameter: Extract<
     NonNullable<WebhookTriggerEventOption["parameters"]>[number],
-    { kind: "string" }
+    { kind: "resource-select" }
   >;
   requestedTeamRule: WebhookTriggerEventParameterRule | undefined;
   onRuleChange: (parameterId: string, rule: WebhookTriggerEventParameterRule) => void;
 }): React.JSX.Element {
   const reviewerInputId = useId();
+  const teamInputId = useId();
   const requestedReviewerValue = input.requestedReviewerRule?.value ?? "";
   const requestedTeamValue = input.requestedTeamRule?.value ?? "";
   const initialSelectedKind: RequestedReviewTargetKind =
@@ -426,9 +428,34 @@ function GitHubRequestedReviewTargetField(input: {
     enabled: selectedKind === "reviewer" && input.connectionId.trim().length > 0,
     retry: false,
   });
+  const teamResourceQuery = useQuery({
+    queryKey: [
+      "trigger-trigger-parameters",
+      input.connectionId,
+      input.requestedTeamParameter.resourceKind,
+    ],
+    queryFn: async ({ signal }) =>
+      listIntegrationConnectionResources({
+        connectionId: input.connectionId,
+        kind: input.requestedTeamParameter.resourceKind,
+        signal,
+      }),
+    enabled: selectedKind === "team" && input.connectionId.trim().length > 0,
+    retry: false,
+  });
   const normalizedReviewerResourceOptions = normalizeResourceParameterOptions({
     items: reviewerResourceQuery.data?.items ?? [],
     value: requestedReviewerValue,
+  });
+  const normalizedTeamResourceOptions = normalizeResourceParameterOptions({
+    items: teamResourceQuery.data?.items ?? [],
+    value: requestedTeamValue,
+  });
+  const teamResourceErrorMessage = resolveGitHubTeamResourceErrorMessage({
+    isError: teamResourceQuery.isError,
+    error: teamResourceQuery.error,
+    syncState: teamResourceQuery.data?.syncState,
+    lastErrorMessage: teamResourceQuery.data?.lastErrorMessage,
   });
 
   function clearInactiveRule(kind: RequestedReviewTargetKind): void {
@@ -439,7 +466,7 @@ function GitHubRequestedReviewTargetField(input: {
   }
 
   return (
-    <span className={EventParameterRowClassName}>
+    <div className={EventParameterRowClassName}>
       <Select
         modal={false}
         onValueChange={(value) => {
@@ -497,20 +524,61 @@ function GitHubRequestedReviewTargetField(input: {
           value={requestedReviewerValue.length === 0 ? undefined : requestedReviewerValue}
         />
       ) : (
-        <Input
-          className={EventParameterControlClassName}
-          onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-            input.onRuleChange("requestedTeam", {
-              operator: resolveEqualityOperator(input.requestedTeamRule),
-              value: event.currentTarget.value,
-            });
-          }}
-          placeholder={input.requestedTeamParameter.placeholder ?? "Any GitHub team slug"}
-          value={requestedTeamValue}
-        />
+        <div className={`${EventParameterControlClassName} space-y-1.5`}>
+          <SingleSelectStringComboboxField
+            contentClassName="w-[min(22rem,calc(100vw-2rem))]"
+            inputId={teamInputId}
+            inputLabel={input.requestedTeamParameter.label}
+            inputWrapperClassName="w-full"
+            onChange={(value) => {
+              input.onRuleChange("requestedTeam", {
+                operator: resolveEqualityOperator(input.requestedTeamRule),
+                value: value ?? "",
+              });
+            }}
+            options={normalizedTeamResourceOptions.map((option) => ({
+              value: option.handle,
+              label: option.displayName,
+            }))}
+            placeholder={
+              teamResourceQuery.isPending
+                ? "Loading..."
+                : teamResourceErrorMessage !== null
+                  ? "Could not load GitHub teams"
+                  : normalizedTeamResourceOptions.length === 0
+                    ? "No teams available"
+                    : "Any GitHub team"
+            }
+            emptyMessage={teamResourceErrorMessage ?? "No matching teams."}
+            value={requestedTeamValue.length === 0 ? undefined : requestedTeamValue}
+          />
+          {teamResourceErrorMessage === null ? null : (
+            <Notice variant="alert">{teamResourceErrorMessage}</Notice>
+          )}
+        </div>
       )}
-    </span>
+    </div>
   );
+}
+
+function resolveGitHubTeamResourceErrorMessage(input: {
+  isError: boolean;
+  error: unknown;
+  syncState: string | undefined;
+  lastErrorMessage: string | undefined;
+}): string | null {
+  if (input.isError) {
+    return resolveApiErrorMessage({
+      error: input.error,
+      fallbackMessage: "Could not load GitHub teams for this connection.",
+    });
+  }
+
+  if (input.syncState === "error") {
+    return input.lastErrorMessage ?? "Could not sync GitHub teams for this connection.";
+  }
+
+  return null;
 }
 
 function EventParameterField(input: {
