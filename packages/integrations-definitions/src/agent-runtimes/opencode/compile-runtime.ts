@@ -7,7 +7,10 @@ import type {
   RuntimeClientSetupFile,
 } from "@mistle/integrations-core";
 
-import { renderMistleManagedSandboxContext } from "../shared/managed-instructions.js";
+import {
+  renderMistleManagedSandboxContext,
+  renderMistleManagedSandboxContextBlock,
+} from "../shared/managed-instructions.js";
 import {
   isAnthropicApiRoute,
   isOpenAiApiRoute,
@@ -212,34 +215,38 @@ function renderOpenCodeAuthContent(
   return Object.keys(auth).length === 0 ? undefined : `${JSON.stringify(auth, null, 2)}\n`;
 }
 
-function buildOpenCodeSetupFiles(
-  authContent: string | undefined,
-  mcpServers: ReadonlyArray<ResolvedIntegrationMcpServer>,
-): ReadonlyArray<RuntimeClientSetupFile> {
+function buildOpenCodeSetupFiles(input: {
+  authContent: string | undefined;
+  mcpServers: ReadonlyArray<ResolvedIntegrationMcpServer>;
+  mergeSetupFiles?: boolean;
+}): ReadonlyArray<RuntimeClientSetupFile> {
   const files: RuntimeClientSetupFile[] = [
     {
       fileId: "opencode_config",
       path: OpenCodeConfigPath,
       mode: 384,
-      writeMode: "if-absent",
+      writeMode: input.mergeSetupFiles === true ? "merge" : "if-absent",
       content: renderOpenCodeConfig(),
     },
     {
       fileId: "opencode_global_agents",
       path: OpenCodeGlobalAgentsPath,
       mode: 384,
-      writeMode: "if-absent",
-      content: renderOpenCodeGlobalAgentsMd({ mcpServers }),
+      writeMode: input.mergeSetupFiles === true ? "merge" : "if-absent",
+      content:
+        input.mergeSetupFiles === true
+          ? renderMistleManagedSandboxContextBlock({ mcpServers: input.mcpServers })
+          : renderOpenCodeGlobalAgentsMd({ mcpServers: input.mcpServers }),
     },
   ];
 
-  if (authContent !== undefined) {
+  if (input.authContent !== undefined) {
     files.push({
       fileId: "opencode_auth",
       path: OpenCodeAuthPath,
       mode: 384,
       writeMode: "overwrite",
-      content: authContent,
+      content: input.authContent,
     });
   }
 
@@ -250,6 +257,7 @@ function buildOpenCodeRuntimeClients(input: {
   openCodeCliInstallPath: string;
   authContent?: string;
   enabledProviders?: readonly string[];
+  mergeSetupFiles?: boolean;
   mcpServers: ReadonlyArray<ResolvedIntegrationMcpServer>;
 }): ReadonlyArray<RuntimeClient> {
   return [
@@ -262,7 +270,13 @@ function buildOpenCodeRuntimeClients(input: {
             : {
                 OPENCODE_CONFIG_CONTENT: renderOpenCodeManagedConfigContent(input.enabledProviders),
               },
-        files: buildOpenCodeSetupFiles(input.authContent, input.mcpServers),
+        files: buildOpenCodeSetupFiles({
+          authContent: input.authContent,
+          ...(input.mergeSetupFiles === undefined
+            ? {}
+            : { mergeSetupFiles: input.mergeSetupFiles }),
+          mcpServers: input.mcpServers,
+        }),
       },
       processes: [
         {
@@ -348,6 +362,9 @@ export function compileOpenCodeRuntime(
     ],
     runtimeClients: buildOpenCodeRuntimeClients({
       openCodeCliInstallPath,
+      ...(input.mergeRuntimeSetupFiles === undefined
+        ? {}
+        : { mergeSetupFiles: input.mergeRuntimeSetupFiles }),
       mcpServers: input.mcpServers,
     }),
     renderRuntimeClients: ({ egressRoutes }) => {
@@ -358,6 +375,9 @@ export function compileOpenCodeRuntime(
         openCodeCliInstallPath,
         ...(authContent === undefined ? {} : { authContent }),
         enabledProviders,
+        ...(input.mergeRuntimeSetupFiles === undefined
+          ? {}
+          : { mergeSetupFiles: input.mergeRuntimeSetupFiles }),
         mcpServers: input.mcpServers,
       });
     },

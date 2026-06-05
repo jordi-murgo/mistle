@@ -56,6 +56,7 @@ function createCompiledRoute(input: {
 
 function compileDefaultPiRuntime(input?: {
   enableMcp?: boolean;
+  mergeRuntimeSetupFiles?: boolean;
   mcpServers?: ReadonlyArray<ResolvedIntegrationMcpServer>;
 }): CompileAgentRuntimeResult {
   return compilePiRuntime({
@@ -67,6 +68,9 @@ function compileDefaultPiRuntime(input?: {
       enableMcp: input?.enableMcp ?? true,
     },
     mcpServers: input?.mcpServers ?? [],
+    ...(input?.mergeRuntimeSetupFiles === undefined
+      ? {}
+      : { mergeRuntimeSetupFiles: input.mergeRuntimeSetupFiles }),
     refs: {
       sandboxPaths: {
         userHomeDir: "/root",
@@ -178,6 +182,28 @@ function createMistleMcpServer(): ResolvedIntegrationMcpServer {
       serverName: "mistle",
       transport: "streamable-http",
       url: "https://mcp.example.test/mcp",
+    },
+  };
+}
+
+function createIntegrationMcpServer(): ResolvedIntegrationMcpServer {
+  return {
+    source: {
+      kind: "integration",
+      bindingId: "bind_remote",
+      connectionId: "conn_remote",
+      targetKey: "remote",
+      familyId: "remote",
+      variantId: "remote",
+    },
+    server: {
+      serverId: "remote",
+      serverName: "remote-http",
+      transport: "streamable-http",
+      url: "https://remote-mcp.example.test/mcp",
+      httpHeaders: {
+        Authorization: "Bearer mistle-managed-credential",
+      },
     },
   };
 }
@@ -319,6 +345,41 @@ describe("compilePiRuntime", () => {
     );
   });
 
+  it("uses merge-mode setup files when requested", () => {
+    const runtimeClients = renderRuntimeClients({
+      compiled: compileDefaultPiRuntime({
+        mergeRuntimeSetupFiles: true,
+        mcpServers: [createMistleMcpServer()],
+      }),
+      egressRoutes: [],
+    });
+    const setupFiles = runtimeClients[0]?.setup.files;
+    const settingsFile = setupFiles?.find((file) => file.fileId === "pi_settings");
+    const instructionsFile = setupFiles?.find((file) => file.fileId === "pi_managed_instructions");
+    const mcpConfigFile = setupFiles?.find((file) => file.fileId === "pi_mcp_config");
+    const adapterFile = setupFiles?.find((file) => file.fileId === "pi_mcp_adapter_extension");
+
+    expect(settingsFile).toMatchObject({
+      writeMode: "merge",
+    });
+    expect(JSON.parse(settingsFile?.content ?? "{}")).toEqual({
+      extensions: ["/root/.pi/agent/extensions/pi-mcp-adapter/index.js"],
+    });
+    expect(instructionsFile).toMatchObject({
+      writeMode: "merge",
+    });
+    expect(instructionsFile?.content).toContain(
+      "<!-- MISTLE-MANAGED:START mistle-sandbox-context -->",
+    );
+    expect(instructionsFile?.content).toContain("Mistle MCP tools are available");
+    expect(mcpConfigFile).toMatchObject({
+      writeMode: "merge",
+    });
+    expect(adapterFile).toMatchObject({
+      writeMode: "overwrite",
+    });
+  });
+
   it("fails fast when multiple supported routes map to the same Pi built-in provider id", () => {
     const compiled = compileDefaultPiRuntime();
 
@@ -458,27 +519,7 @@ describe("compilePiRuntime", () => {
   });
 
   it("renders Pi MCP config with headers and the proxy tool when MCP servers are present", () => {
-    const mcpServers: ResolvedIntegrationMcpServer[] = [
-      {
-        source: {
-          kind: "integration",
-          bindingId: "bind_remote",
-          connectionId: "conn_remote",
-          targetKey: "remote",
-          familyId: "remote",
-          variantId: "remote",
-        },
-        server: {
-          serverId: "remote",
-          serverName: "remote-http",
-          transport: "streamable-http",
-          url: "https://mcp.example.test/mcp",
-          httpHeaders: {
-            Authorization: "Bearer mistle-managed-credential",
-          },
-        },
-      },
-    ];
+    const mcpServers: ResolvedIntegrationMcpServer[] = [createIntegrationMcpServer()];
     const runtimeClients = renderRuntimeClients({
       compiled: compileDefaultPiRuntime({ mcpServers }),
       egressRoutes: [],
@@ -499,7 +540,7 @@ describe("compilePiRuntime", () => {
       },
       mcpServers: {
         "remote-http": {
-          url: "https://mcp.example.test/mcp",
+          url: "https://remote-mcp.example.test/mcp",
           headers: {
             Authorization: "Bearer mistle-managed-credential",
           },
@@ -514,24 +555,7 @@ describe("compilePiRuntime", () => {
     const runtimeClients = renderRuntimeClients({
       compiled: compileDefaultPiRuntime({
         enableMcp: false,
-        mcpServers: [
-          {
-            source: {
-              kind: "integration",
-              bindingId: "bind_remote",
-              connectionId: "conn_remote",
-              targetKey: "remote",
-              familyId: "remote",
-              variantId: "remote",
-            },
-            server: {
-              serverId: "remote",
-              serverName: "remote-http",
-              transport: "streamable-http",
-              url: "https://mcp.example.test/mcp",
-            },
-          },
-        ],
+        mcpServers: [createIntegrationMcpServer()],
       }),
       egressRoutes: [],
     });
@@ -547,5 +571,63 @@ describe("compilePiRuntime", () => {
     expect(
       runtimeClients[0]?.setup.files.some((file) => file.fileId === "pi_mcp_adapter_extension"),
     ).toBe(false);
+  });
+
+  it("includes Pi MCP files for merge-mode setup even when runtime MCP capability is disabled", () => {
+    const runtimeClients = renderRuntimeClients({
+      compiled: compileDefaultPiRuntime({
+        enableMcp: false,
+        mergeRuntimeSetupFiles: true,
+        mcpServers: [createMistleMcpServer()],
+      }),
+      egressRoutes: [],
+    });
+
+    expect(runtimeClients[0]?.setup.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fileId: "pi_settings",
+          writeMode: "merge",
+        }),
+        expect.objectContaining({
+          fileId: "pi_mcp_config",
+          writeMode: "merge",
+        }),
+        expect.objectContaining({
+          fileId: "pi_mcp_adapter_extension",
+          writeMode: "overwrite",
+        }),
+      ]),
+    );
+    expect(readSetupFile({ runtimeClients, fileId: "pi_managed_instructions" })).toContain(
+      "Mistle MCP tools are available for interacting with Mistle resources",
+    );
+  });
+
+  it("limits merge-mode Pi MCP files to platform MCP when runtime MCP capability is disabled", () => {
+    const runtimeClients = renderRuntimeClients({
+      compiled: compileDefaultPiRuntime({
+        enableMcp: false,
+        mergeRuntimeSetupFiles: true,
+        mcpServers: [createIntegrationMcpServer(), createMistleMcpServer()],
+      }),
+      egressRoutes: [],
+    });
+
+    expect(JSON.parse(readSetupFile({ runtimeClients, fileId: "pi_mcp_config" }))).toEqual({
+      settings: {
+        disableProxyTool: false,
+      },
+      mcpServers: {
+        mistle: {
+          url: "https://mcp.example.test/mcp",
+          directTools: false,
+          lifecycle: "lazy",
+        },
+      },
+    });
+    expect(readSetupFile({ runtimeClients, fileId: "pi_managed_instructions" })).toContain(
+      "Mistle MCP tools are available for interacting with Mistle resources",
+    );
   });
 });

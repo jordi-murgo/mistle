@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -185,6 +186,273 @@ fn applies_runtime_plan_artifacts_workspace_sources_and_runtime_files() {
             .expect("untracked workspace file should still exist after cold init rerun"),
         "local only\n"
     );
+
+    fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
+}
+
+#[test]
+fn merges_runtime_files_without_replacing_existing_runtime_config() {
+    let test_dir = create_temp_test_dir("runtime_plan_merge_runtime_files");
+    let codex_config_path = test_dir.join("etc").join("codex").join("config.toml");
+    let agents_path = test_dir.join("root").join(".codex").join("AGENTS.md");
+    let json_mcp_config_path = test_dir
+        .join("root")
+        .join(".config")
+        .join("runtime")
+        .join("mcp.json");
+    let opencode_config_path = test_dir
+        .join("root")
+        .join(".config")
+        .join("opencode")
+        .join("opencode.json");
+
+    fs::create_dir_all(
+        codex_config_path
+            .parent()
+            .expect("codex config should have a parent"),
+    )
+    .expect("codex config dir should be creatable");
+    fs::create_dir_all(
+        agents_path
+            .parent()
+            .expect("AGENTS.md should have a parent"),
+    )
+    .expect("codex agents dir should be creatable");
+    fs::create_dir_all(
+        json_mcp_config_path
+            .parent()
+            .expect("JSON MCP config should have a parent"),
+    )
+    .expect("JSON MCP config dir should be creatable");
+    fs::create_dir_all(
+        opencode_config_path
+            .parent()
+            .expect("OpenCode config should have a parent"),
+    )
+    .expect("OpenCode config dir should be creatable");
+    fs::write(
+        &codex_config_path,
+        [
+            r#"model = "gpt-5""#,
+            "",
+            "[features]",
+            "apps = true",
+            "tool_search = false",
+            "",
+            "[mcp_servers.linear]",
+            r#"url = "https://linear.example.test/mcp""#,
+            "",
+            "[mcp_servers.mistle]",
+            r#"url = "https://old-mcp.example.test/mcp""#,
+            "",
+        ]
+        .join("\n"),
+    )
+    .expect("codex config fixture should be writable");
+    fs::set_permissions(&codex_config_path, fs::Permissions::from_mode(0o644))
+        .expect("codex config fixture mode should be settable");
+    fs::write(
+        &agents_path,
+        [
+            "User instruction",
+            "",
+            "<!-- MISTLE-MANAGED:START mistle-sandbox-context -->",
+            "old managed block",
+            "<!-- MISTLE-MANAGED:END mistle-sandbox-context -->",
+            "",
+            "Keep this",
+            "",
+        ]
+        .join("\n"),
+    )
+    .expect("AGENTS.md fixture should be writable");
+    fs::write(
+        &json_mcp_config_path,
+        serde_json::to_string_pretty(&serde_json::json!({
+          "settings": {
+            "disableProxyTool": false,
+            "extensions": [
+              "/root/.pi/agent/extensions/existing/index.js"
+            ]
+          },
+          "mcpServers": {
+            "linear": {
+              "url": "https://linear.example.test/mcp"
+            },
+            "mistle": {
+              "url": "https://old-mcp.example.test/mcp",
+              "headers": {
+                "x-stale": "true"
+              }
+            }
+          }
+        }))
+        .expect("JSON MCP config fixture should serialize"),
+    )
+    .expect("JSON MCP config fixture should be writable");
+    fs::write(
+        &opencode_config_path,
+        serde_json::to_string_pretty(&serde_json::json!({
+          "mcp": {
+            "mistle": {
+              "url": "https://old-mcp.example.test/mcp",
+              "headers": {
+                "x-stale": "true"
+              }
+            }
+          }
+        }))
+        .expect("OpenCode config fixture should serialize"),
+    )
+    .expect("OpenCode config fixture should be writable");
+
+    let codex_config_runtime_content = [
+        "[features]",
+        "tool_search = true",
+        "",
+        "[mcp_servers.mistle]",
+        "url = \"https://current-mcp.example.test/mcp\"",
+        "",
+    ]
+    .join("\n");
+    let json_mcp_runtime_content = serde_json::to_string_pretty(&serde_json::json!({
+      "settings": {
+        "extensions": [
+          "/root/.pi/agent/extensions/pi-mcp-adapter/index.js"
+        ]
+      },
+      "mcpServers": {
+        "mistle": {
+          "url": "https://current-mcp.example.test/mcp"
+        }
+      }
+    }))
+    .expect("JSON MCP runtime content should serialize");
+    let agents_runtime_content = [
+        "<!-- MISTLE-MANAGED:START mistle-sandbox-context -->",
+        "Mistle-managed sandbox context:",
+        "",
+        "- Mistle MCP tools are available.",
+        "<!-- MISTLE-MANAGED:END mistle-sandbox-context -->",
+        "",
+    ]
+    .join("\n");
+    let opencode_runtime_content = serde_json::to_string_pretty(&serde_json::json!({
+      "mcp": {
+        "mistle": {
+          "url": "https://current-mcp.example.test/mcp"
+        }
+      }
+    }))
+    .expect("OpenCode runtime content should serialize");
+
+    let startup_input = SessionRuntimeInput {
+        operation_kind: sandboxd::protocol::startup::ActivationOperationKind::Start,
+        bootstrap_token: "bootstrap-token-value".to_string(),
+        tunnel_exchange_token: "tunnel-exchange-token-value".to_string(),
+        tunnel_gateway_ws_url: "ws://127.0.0.1:5003/tunnel/sandbox".to_string(),
+        acting_user_id: None,
+        runtime_plan: serde_json::json!({
+          "sandboxProfileId": "sbp_123",
+          "version": 1,
+          "image": {
+            "source": "snapshot",
+            "imageRef": "sha256:snapshot"
+          },
+          "egressRoutes": [],
+          "artifacts": [],
+          "runtimeClients": [
+            {
+              "clientId": "codex-cli",
+              "setup": {
+                "env": {},
+                "files": [
+                  {
+                    "fileId": "codex_config",
+                    "path": codex_config_path.display().to_string(),
+                    "mode": 384,
+                    "content": codex_config_runtime_content,
+                    "writeMode": "merge"
+                  },
+                  {
+                    "fileId": "codex_global_agents",
+                    "path": agents_path.display().to_string(),
+                    "mode": 384,
+                    "content": agents_runtime_content,
+                    "writeMode": "merge"
+                  },
+                  {
+                    "fileId": "json_mcp_config",
+                    "path": json_mcp_config_path.display().to_string(),
+                    "mode": 384,
+                    "content": json_mcp_runtime_content,
+                    "writeMode": "merge"
+                  },
+                  {
+                    "fileId": "opencode_config",
+                    "path": opencode_config_path.display().to_string(),
+                    "mode": 384,
+                    "content": opencode_runtime_content,
+                    "writeMode": "merge"
+                  }
+                ]
+              },
+              "processes": [],
+              "endpoints": []
+            }
+          ],
+          "workspaceSources": [],
+          "agentRuntimes": []
+        }),
+        git_identity: None,
+        transparent_proxy: None,
+    };
+
+    runtime::apply_runtime_plan(&startup_input)
+        .expect("runtime plan apply should merge platform MCP config");
+
+    let config = fs::read_to_string(&codex_config_path).expect("codex config should exist");
+    assert!(config.contains(r#"model = "gpt-5""#));
+    assert!(config.contains("apps = true"));
+    assert!(config.contains("tool_search = true"));
+    assert!(config.contains("[mcp_servers.linear]"));
+    assert!(config.contains(r#"url = "https://linear.example.test/mcp""#));
+    assert!(config.contains("[mcp_servers.mistle]"));
+    assert!(config.contains(r#"url = "https://current-mcp.example.test/mcp""#));
+    assert!(!config.contains("old-mcp.example.test"));
+    assert_eq!(
+        fs::metadata(&codex_config_path)
+            .expect("codex config metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600,
+    );
+
+    let agents = fs::read_to_string(&agents_path).expect("AGENTS.md should exist");
+    assert!(agents.contains("User instruction"));
+    assert!(agents.contains("Keep this"));
+    assert!(agents.contains("Mistle MCP tools are available."));
+    assert_eq!(agents.matches("Mistle-managed sandbox context:").count(), 1);
+    assert!(!agents.contains("old managed block"));
+
+    let json_mcp_config =
+        fs::read_to_string(&json_mcp_config_path).expect("JSON MCP config should exist");
+    assert!(json_mcp_config.contains(r#""disableProxyTool": false"#));
+    assert!(json_mcp_config.contains(r#""/root/.pi/agent/extensions/existing/index.js""#));
+    assert!(json_mcp_config.contains(r#""/root/.pi/agent/extensions/pi-mcp-adapter/index.js""#));
+    assert!(json_mcp_config.contains(r#""linear""#));
+    assert!(json_mcp_config.contains(r#""https://linear.example.test/mcp""#));
+    assert!(json_mcp_config.contains(r#""mistle""#));
+    assert!(json_mcp_config.contains(r#""https://current-mcp.example.test/mcp""#));
+    assert!(!json_mcp_config.contains("old-mcp.example.test"));
+    assert!(!json_mcp_config.contains("x-stale"));
+
+    let opencode_config =
+        fs::read_to_string(&opencode_config_path).expect("OpenCode config should exist");
+    assert!(opencode_config.contains(r#""https://current-mcp.example.test/mcp""#));
+    assert!(!opencode_config.contains("old-mcp.example.test"));
+    assert!(!opencode_config.contains("x-stale"));
 
     fs::remove_dir_all(test_dir).expect("temp test dir should be removable");
 }
