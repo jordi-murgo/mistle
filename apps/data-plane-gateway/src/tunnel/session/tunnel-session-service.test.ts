@@ -517,6 +517,7 @@ describe("TunnelSessionService", () => {
         healthy: true,
         lastPongAgeMs: 1_250,
         pingInFlight: false,
+        pingSeq: null,
       },
       socketAgeMs: 1_250,
     });
@@ -693,6 +694,7 @@ describe("TunnelSessionService", () => {
         healthy: true,
         lastPongAgeMs: 375,
         pingInFlight: false,
+        pingSeq: null,
       },
       socketAgeMs: 375,
     });
