@@ -16,6 +16,8 @@ import type {
  * compatible with gateway-to-gateway forwarding.
  */
 export class TunnelSessionRegistry {
+  private readonly bootstrapAvailabilityByKey = new Map<string, () => boolean>();
+
   public constructor(private readonly adapter: TunnelSessionRegistryAdapter) {}
 
   /**
@@ -36,7 +38,34 @@ export class TunnelSessionRegistry {
    * Removes the bootstrap tunnel only if the supplied target still matches the live one.
    */
   public detachBootstrapSession(input: RelayTarget): DetachBootstrapSessionResult | undefined {
-    return this.adapter.detachBootstrapSession(input);
+    const result = this.adapter.detachBootstrapSession(input);
+    if (result !== undefined) {
+      this.clearBootstrapSessionAvailability(input);
+    }
+    return result;
+  }
+
+  /**
+   * Registers a local availability probe for a bootstrap session. The probe stays
+   * outside the adapter because it may close over live websocket state.
+   */
+  public setBootstrapSessionAvailability(input: {
+    sandboxInstanceId: string;
+    sessionId: string;
+    isAvailable: () => boolean;
+  }): void {
+    this.bootstrapAvailabilityByKey.set(createBootstrapAvailabilityKey(input), input.isAvailable);
+  }
+
+  public clearBootstrapSessionAvailability(input: {
+    sandboxInstanceId: string;
+    sessionId: string;
+  }): void {
+    this.bootstrapAvailabilityByKey.delete(createBootstrapAvailabilityKey(input));
+  }
+
+  public isBootstrapSessionAvailable(input: RelayTarget): boolean {
+    return this.bootstrapAvailabilityByKey.get(createBootstrapAvailabilityKey(input))?.() ?? true;
   }
 
   /**
@@ -110,4 +139,11 @@ export class TunnelSessionRegistry {
   }): ClientStreamBinding[] {
     return this.adapter.releaseClientSessionBindings(input);
   }
+}
+
+function createBootstrapAvailabilityKey(input: {
+  sandboxInstanceId: string;
+  sessionId: string;
+}): string {
+  return `${input.sandboxInstanceId}:${input.sessionId}`;
 }
