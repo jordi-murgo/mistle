@@ -1,30 +1,24 @@
+import { BadRequestError } from "@mistle/http/errors.js";
 import type { McpServer, ToolAnnotations } from "@modelcontextprotocol/server";
-import { z } from "zod";
 
 import { OrganizationPermissions } from "../../auth/services/organization-policy.js";
 import { PUBLIC_PORT_ACCESS_LINKS_ROUTE_BASE_PATH } from "../../public-port-access-links/index.js";
 import { SANDBOX_INSTANCE_PORT_ACCESS_LINK_TTL_SECONDS } from "../../sandbox-instances/constants.js";
-import {
-  sandboxInstanceIdParamsSchema,
-  sandboxInstancePortAccessParamsSchema,
-  sandboxInstancePortAccessSchema,
-  sandboxInstanceStatusResponseSchema,
-  sandboxOperationEventsQuerySchema,
-  sandboxOperationEventsResponseSchema,
-} from "../../sandbox-instances/schemas.js";
 import { getInstance } from "../../sandbox-instances/services/get-instance.js";
 import { listOperationEvents } from "../../sandbox-instances/services/list-operation-events.js";
 import { mintPortAccess } from "../../sandbox-instances/services/mint-port-access.js";
-import {
-  sandboxProfileVersionParamsSchema,
-  startSandboxProfileMaintenanceScriptTestRunBodySchema,
-  startSandboxProfileSetupScriptTestRunBodySchema,
-  startSandboxProfileSetupScriptTestRunResponseSchema,
-} from "../../sandbox-profiles/schemas.js";
+import type { SandboxProfileVersionResources } from "../../sandbox-profiles/services/profile-version-runtime-config.js";
 import { startProfileMaintenanceScriptTestRun } from "../../sandbox-profiles/services/start-profile-maintenance-script-test-run.js";
 import { startProfileSetupScriptTestRun } from "../../sandbox-profiles/services/start-profile-setup-script-test-run.js";
 import type { AppOrganizationActor } from "../../types.js";
 import type { MistleMcpServerContext } from "../server.js";
+import {
+  mcpProfileMaintenanceScriptTestStartInputSchema,
+  mcpProfileSetupScriptTestStartInputSchema,
+  mcpSandboxInstanceIdParamsSchema,
+  mcpSandboxInstancePortAccessCreateInputSchema,
+  mcpSandboxOperationEventsListInputSchema,
+} from "../tool-schemas.js";
 import {
   requireMcpSandboxInstanceScope,
   requireMcpSandboxInstanceProfileScope,
@@ -47,20 +41,7 @@ const MutatingToolAnnotations: ToolAnnotations = {
   openWorldHint: false,
 };
 
-const profileSetupScriptTestStartInputSchema =
-  startSandboxProfileSetupScriptTestRunBodySchema.safeExtend(
-    sandboxProfileVersionParamsSchema.shape,
-  );
-
-const profileMaintenanceScriptTestStartInputSchema =
-  startSandboxProfileMaintenanceScriptTestRunBodySchema.safeExtend(
-    sandboxProfileVersionParamsSchema.shape,
-  );
-
-const sandboxOperationEventsListInputSchema = sandboxOperationEventsQuerySchema.safeExtend({
-  ...sandboxInstanceIdParamsSchema.shape,
-  limit: z.coerce.number().int().min(1).max(500).optional().default(20),
-});
+const DefaultSandboxOperationEventsLimit = 20;
 
 export function registerSandboxTools(server: McpServer, context: MistleMcpServerContext): void {
   server.registerTool(
@@ -68,8 +49,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
     {
       title: "Start sandbox profile setup script test",
       description: "Start a sandbox to test a sandbox profile setup script",
-      inputSchema: profileSetupScriptTestStartInputSchema,
-      outputSchema: startSandboxProfileSetupScriptTestRunResponseSchema,
+      inputSchema: mcpProfileSetupScriptTestStartInputSchema,
       annotations: {
         ...MutatingToolAnnotations,
         title: "Start sandbox profile setup script test",
@@ -85,6 +65,12 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
       setupScript,
       version,
     }) => {
+      requireNonBlankMcpScript({ field: "setupScript", value: setupScript });
+      const sandboxRuntimeOverride = resolveMcpSandboxRuntimeOverride({
+        sandboxConnectionId,
+        sandboxResources,
+        sandboxProvider,
+      });
       requireMcpToolPermission(
         context.organizationActor,
         OrganizationPermissions.SANDBOX_PROFILE_UPDATE,
@@ -114,15 +100,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
           profileVersion: version,
           setupScript,
           ...(agentRuntimeId === undefined ? {} : { agentRuntimeId }),
-          ...(sandboxProvider === undefined
-            ? {}
-            : {
-                sandboxRuntimeConfig: {
-                  sandboxProvider,
-                  sandboxConnectionId: sandboxConnectionId ?? null,
-                  sandboxResources: sandboxResources ?? null,
-                },
-              }),
+          ...sandboxRuntimeOverride,
           startedBy: resolveStartedBy(context.organizationActor),
           source: "dashboard",
           ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
@@ -139,8 +117,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
       title: "Start sandbox profile maintenance script test",
       description:
         "Start a sandbox from the current snapshot to test a sandbox profile maintenance script",
-      inputSchema: profileMaintenanceScriptTestStartInputSchema,
-      outputSchema: startSandboxProfileSetupScriptTestRunResponseSchema,
+      inputSchema: mcpProfileMaintenanceScriptTestStartInputSchema,
       annotations: {
         ...MutatingToolAnnotations,
         title: "Start sandbox profile maintenance script test",
@@ -156,6 +133,12 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
       sandboxResources,
       version,
     }) => {
+      requireNonBlankMcpScript({ field: "maintenanceScript", value: maintenanceScript });
+      const sandboxRuntimeOverride = resolveMcpSandboxRuntimeOverride({
+        sandboxConnectionId,
+        sandboxResources,
+        sandboxProvider,
+      });
       requireMcpToolPermission(
         context.organizationActor,
         OrganizationPermissions.SANDBOX_PROFILE_UPDATE,
@@ -185,15 +168,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
           profileVersion: version,
           maintenanceScript,
           ...(agentRuntimeId === undefined ? {} : { agentRuntimeId }),
-          ...(sandboxProvider === undefined
-            ? {}
-            : {
-                sandboxRuntimeConfig: {
-                  sandboxProvider,
-                  sandboxConnectionId: sandboxConnectionId ?? null,
-                  sandboxResources: sandboxResources ?? null,
-                },
-              }),
+          ...sandboxRuntimeOverride,
           startedBy: resolveStartedBy(context.organizationActor),
           source: "dashboard",
           ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
@@ -209,8 +184,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
     {
       title: "Create sandbox Port Access link",
       description: "Create a short-lived public URL for accessing one port on a sandbox instance",
-      inputSchema: sandboxInstancePortAccessParamsSchema,
-      outputSchema: sandboxInstancePortAccessSchema,
+      inputSchema: mcpSandboxInstancePortAccessCreateInputSchema,
       annotations: {
         ...MutatingToolAnnotations,
         title: "Create sandbox Port Access link",
@@ -267,8 +241,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
     {
       title: "Get sandbox instance",
       description: "Get sandbox instance provisioning and runtime status",
-      inputSchema: sandboxInstanceIdParamsSchema,
-      outputSchema: sandboxInstanceStatusResponseSchema,
+      inputSchema: mcpSandboxInstanceIdParamsSchema,
       annotations: {
         ...ReadOnlyToolAnnotations,
         title: "Get sandbox instance",
@@ -304,8 +277,7 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
     {
       title: "List sandbox operation events",
       description: "List lifecycle and transcript events for a sandbox operation",
-      inputSchema: sandboxOperationEventsListInputSchema,
-      outputSchema: sandboxOperationEventsResponseSchema,
+      inputSchema: mcpSandboxOperationEventsListInputSchema,
       annotations: {
         ...ReadOnlyToolAnnotations,
         title: "List sandbox operation events",
@@ -341,13 +313,73 @@ export function registerSandboxTools(server: McpServer, context: MistleMcpServer
           sandboxInstanceId: instanceId,
           operationId,
           ...(afterSequence === undefined ? {} : { afterSequence }),
-          ...(limit === undefined ? {} : { limit }),
+          limit: limit ?? DefaultSandboxOperationEventsLimit,
         },
       );
 
       return structuredResult(operationEvents);
     },
   );
+}
+
+function requireNonBlankMcpScript(input: {
+  field: "setupScript" | "maintenanceScript";
+  value: string;
+}): void {
+  if (input.value.trim().length > 0) {
+    return;
+  }
+
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    input.field === "setupScript"
+      ? "Setup script must not be blank."
+      : "Maintenance script must not be blank.",
+  );
+}
+
+function requireMcpSandboxProviderForRuntimeOverride(input: {
+  sandboxProvider: string | undefined;
+  sandboxConnectionId: string | null | undefined;
+  sandboxResources: object | null | undefined;
+}): void {
+  if (
+    (input.sandboxConnectionId === undefined && input.sandboxResources === undefined) ||
+    input.sandboxProvider !== undefined
+  ) {
+    return;
+  }
+
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    "Sandbox provider is required when sandbox runtime override fields are provided.",
+  );
+}
+
+function resolveMcpSandboxRuntimeOverride(input: {
+  sandboxProvider: string | undefined;
+  sandboxConnectionId: string | null | undefined;
+  sandboxResources: SandboxProfileVersionResources | null | undefined;
+}): {
+  sandboxRuntimeConfig?: {
+    sandboxProvider: string;
+    sandboxConnectionId: string | null;
+    sandboxResources: SandboxProfileVersionResources | null;
+  };
+} {
+  requireMcpSandboxProviderForRuntimeOverride(input);
+
+  if (input.sandboxProvider === undefined) {
+    return {};
+  }
+
+  return {
+    sandboxRuntimeConfig: {
+      sandboxProvider: input.sandboxProvider,
+      sandboxConnectionId: input.sandboxConnectionId ?? null,
+      sandboxResources: input.sandboxResources ?? null,
+    },
+  };
 }
 
 function resolvePortAccessLinkCreatedBy(organizationActor: AppOrganizationActor): {

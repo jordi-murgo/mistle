@@ -72,6 +72,30 @@ const JsonRpcToolResponseSchema = z
   })
   .strict();
 
+const JsonRpcToolsListResponseSchema = z
+  .object({
+    jsonrpc: z.literal("2.0"),
+    id: z.union([z.string(), z.number()]),
+    result: z
+      .object({
+        tools: z.array(
+          z
+            .object({
+              name: z.string().min(1),
+              inputSchema: z
+                .object({
+                  type: z.literal("object"),
+                })
+                .loose(),
+              outputSchema: z.unknown().optional(),
+            })
+            .loose(),
+        ),
+      })
+      .loose(),
+  })
+  .strict();
+
 const DockerSandboxRuntimeColumns = {
   sandboxProvider: "docker",
   sandboxConnectionId: null,
@@ -81,6 +105,41 @@ const DockerSandboxRuntimeColumns = {
 } as const;
 
 describe.concurrent("MCP profile tools integration", () => {
+  it("lists MCP tools with JSON Schema-compatible input schemas", async ({ env }) => {
+    const session = await env.auth.createSession({
+      email: "integration-new-mcp-tools-list@example.com",
+    });
+    const token = await createApiKeyToken({
+      cookie: session.cookie,
+      env,
+      name: "MCP tools lister",
+      permissions: [
+        OrganizationPermissions.SANDBOX_PROFILE_READ,
+        OrganizationPermissions.SANDBOX_PROFILE_UPDATE,
+        OrganizationPermissions.SANDBOX_SESSION_CREATE,
+        OrganizationPermissions.SANDBOX_SESSION_READ,
+        OrganizationPermissions.SANDBOX_SESSION_CONNECT,
+      ],
+    });
+
+    const tools = await listMcpTools({ env, token });
+
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "profile_draft_setup_script_put",
+      "profile_get",
+      "profile_list",
+      "profile_maintenance_script_get",
+      "profile_maintenance_script_put",
+      "profile_maintenance_script_test_start",
+      "profile_setup_script_get",
+      "profile_setup_script_test_start",
+      "sandbox_instance_get",
+      "sandbox_instance_port_access_create",
+      "sandbox_operation_events_list",
+    ]);
+    expect(tools.every((tool) => tool.outputSchema === undefined)).toBe(true);
+  });
+
   it("lists sandbox profiles with the REST response shape scoped to the API key organization", async ({
     env,
   }) => {
@@ -591,7 +650,7 @@ describe.concurrent("MCP profile tools integration", () => {
         message: "",
         payloadBytes: Buffer.from("missing dependency", "utf8"),
       }),
-      ...Array.from({ length: 19 }, (_, index) => {
+      ...Array.from({ length: 20 }, (_, index) => {
         const sequence = index + 3;
         return operationEventRow({
           id: `soe_mcp_feedback_${String(sequence).padStart(3, "0")}`,
@@ -1564,6 +1623,42 @@ async function callMcpTool(input: {
   name: string;
   arguments: Record<string, unknown>;
 }): Promise<z.infer<typeof JsonRpcToolResponseSchema>["result"]> {
+  const message = await callMcpJsonRpc({
+    env: input.env,
+    token: input.token,
+    id: "mcp-test",
+    method: "tools/call",
+    params: {
+      name: input.name,
+      arguments: input.arguments,
+    },
+  });
+
+  return JsonRpcToolResponseSchema.parse(message).result;
+}
+
+async function listMcpTools(input: {
+  env: IntegrationTestEnvironment;
+  token: string;
+}): Promise<z.infer<typeof JsonRpcToolsListResponseSchema>["result"]["tools"]> {
+  const message = await callMcpJsonRpc({
+    env: input.env,
+    token: input.token,
+    id: "mcp-tools-list-test",
+    method: "tools/list",
+    params: {},
+  });
+
+  return JsonRpcToolsListResponseSchema.parse(message).result.tools;
+}
+
+async function callMcpJsonRpc(input: {
+  env: IntegrationTestEnvironment;
+  token: string;
+  id: string;
+  method: "tools/call" | "tools/list";
+  params: Record<string, unknown>;
+}): Promise<unknown> {
   const response = await input.env.controlPlaneApi.http.fetch("/mcp", {
     method: "POST",
     headers: {
@@ -1574,18 +1669,14 @@ async function callMcpTool(input: {
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: "mcp-test",
-      method: "tools/call",
-      params: {
-        name: input.name,
-        arguments: input.arguments,
-      },
+      id: input.id,
+      method: input.method,
+      params: input.params,
     }),
   });
 
   expect(response.status).toBe(200);
-  const message = parseStreamableHttpJsonRpcMessage(await response.text());
-  return JsonRpcToolResponseSchema.parse(message).result;
+  return parseStreamableHttpJsonRpcMessage(await response.text());
 }
 
 function createForwardedHeaderForBaseUrl(baseUrl: string): string {
