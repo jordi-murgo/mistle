@@ -89,12 +89,52 @@ export const MistleMcpEnabled: Story = {
     mistleMcpEnabled: true,
     mistleMcpApiKeyId: StoryMistleApiKey.id,
   },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+
+    await expect(canvas.getByRole("combobox", { name: "Mistle resources" })).toBeVisible();
+    await expect(
+      canvas.getByRole("button", { name: "View allowed Mistle resources: 3 resources" }),
+    ).toBeVisible();
+
+    await userEvent.click(
+      canvas.getByRole("button", { name: "View allowed Mistle resources: 3 resources" }),
+    );
+
+    const dialog = body.getByRole("dialog", { name: "Allowed Mistle resources" });
+    await expect(dialog).toBeVisible();
+    await expect(
+      within(dialog).getByText(
+        "This profile's agent can use Sandbox agent key for these Mistle resources. Access is limited by that API key's permissions.",
+      ),
+    ).toBeVisible();
+    await expect(within(dialog).getByText("Sandbox profiles")).toBeVisible();
+    await expect(within(dialog).getByText("Sessions")).toBeVisible();
+    await expect(within(dialog).getByText("Triggers")).toBeVisible();
+    await expect(within(dialog).getByText("Connect to sessions")).toBeVisible();
+    await expect(within(dialog).getByText("Delete triggers")).toBeVisible();
+  },
 };
 
 export const MistleMcpNoApiKeys: Story = {
   args: {
     apiKeys: [],
     mistleMcpEnabled: true,
+  },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+
+    await expect(canvas.getByRole("button", { name: "Create new API key" })).toBeVisible();
+
+    await userEvent.click(canvas.getByRole("button", { name: "Create new API key" }));
+
+    const dialog = body.getByRole("dialog", { name: "Create new API key" });
+    await expect(dialog).toBeVisible();
+    await expect(within(dialog).getByText("4 selected")).toBeVisible();
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Select all" }));
+    await expect(within(dialog).getByText("12 selected")).toBeVisible();
   },
 };
 
@@ -108,6 +148,22 @@ export const GitCommitSigningEnabled: Story = {
 export const GitCommitSigningUnavailable: Story = {
   args: {
     identityLinkedGitConnectionIds: [],
+  },
+};
+
+export const GitConnectionNone: Story = {
+  args: {
+    initialBindings: StoryBindings.filter((binding) => binding.kind !== "git"),
+    initialGitCommitSigningIntegrationConnectionId: null,
+  },
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+
+    await expect(canvas.getByRole("combobox", { name: "git connection" }).textContent).toContain(
+      "None",
+    );
+    await expect(canvas.queryByRole("switch", { name: "Sign Git commits" })).toBeNull();
+    await expect(canvas.queryByText("Select a Git connection")).toBeNull();
   },
 };
 

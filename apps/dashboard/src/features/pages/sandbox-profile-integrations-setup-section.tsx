@@ -101,6 +101,7 @@ type SandboxProfileIntegrationsSetupSectionProps = {
   runtimeSettings: React.ReactNode | null;
   disabled?: boolean | undefined;
   readOnly?: boolean | undefined;
+  agentRuntimeConnectionErrorMessage?: string | null | undefined;
 };
 
 const NoGitConnectionValue = "none";
@@ -111,18 +112,17 @@ const GitCommitSigningTooltip =
   "Commits made in sandboxes will be signed with the acting user's linked GitHub account when enabled.";
 const GitCommitSigningIdentityLinkingDisabledMessage = "Requires identity linking";
 const OrganizationIdentityLinkingSettingsPath = "/settings/organization/identity-linking";
-
 const SandboxProfileIntegrationConnectionColumns = [
-  { key: "integration", label: "Integration", desktopWidth: "minmax(12rem,0.9fr)" },
+  { key: "integration", label: "Integration", desktopWidth: "minmax(8rem,0.55fr)" },
   {
     key: "proxied-connection",
     label: "Proxied Connection",
-    desktopWidth: "minmax(14rem,1fr)",
+    desktopWidth: "minmax(0,1fr)",
   },
   {
     key: "resources-and-tools",
     label: "Resources & Tools",
-    desktopWidth: "minmax(16rem,1.35fr)",
+    desktopWidth: "minmax(0,1fr)",
     hideMobileLabel: true,
   },
   {
@@ -168,6 +168,8 @@ function ConnectionSelectionCell(input: {
   onConnectionChange: (nextConnectionId: string) => void;
   allowNone?: boolean;
   disabled?: boolean | undefined;
+  errorMessage?: string | null | undefined;
+  invalid?: boolean | undefined;
   readOnly?: boolean | undefined;
 }): React.JSX.Element {
   const selectedConnection = input.availableConnections.find(
@@ -192,36 +194,45 @@ function ConnectionSelectionCell(input: {
   }
 
   return (
-    <Select
-      disabled={input.disabled === true}
-      onValueChange={(nextConnectionId) => {
-        if (nextConnectionId === null) {
-          return;
-        }
-        input.onConnectionChange(nextConnectionId);
-      }}
-      value={input.selectedConnectionId ?? null}
-    >
-      <SelectTrigger aria-label={input.ariaLabel} className="w-full min-w-0">
-        <SelectValue placeholder="Choose a connection">
-          {selectedConnection === undefined ? (
-            "Choose a connection"
-          ) : (
-            <ConnectionNameCell displayName={selectedConnection.displayName} />
-          )}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        {input.allowNone === true ? (
-          <SelectItem value={NoProxiedConnectionValue}>None</SelectItem>
-        ) : null}
-        {input.availableConnections.map((connection) => (
-          <SelectItem key={connection.id} value={connection.id}>
-            {connection.displayName}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="grid gap-1.5">
+      <Select
+        disabled={input.disabled === true}
+        onValueChange={(nextConnectionId) => {
+          if (nextConnectionId === null) {
+            return;
+          }
+          input.onConnectionChange(nextConnectionId);
+        }}
+        value={input.selectedConnectionId ?? null}
+      >
+        <SelectTrigger
+          aria-invalid={input.invalid === true ? true : undefined}
+          aria-label={input.ariaLabel}
+          className="w-full min-w-0"
+        >
+          <SelectValue placeholder="Choose a connection">
+            {selectedConnection === undefined ? (
+              "Choose a connection"
+            ) : (
+              <ConnectionNameCell displayName={selectedConnection.displayName} />
+            )}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {input.allowNone === true ? (
+            <SelectItem value={NoProxiedConnectionValue}>None</SelectItem>
+          ) : null}
+          {input.availableConnections.map((connection) => (
+            <SelectItem key={connection.id} value={connection.id}>
+              {connection.displayName}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {input.invalid === true && input.errorMessage !== null && input.errorMessage !== undefined ? (
+        <p className="text-destructive text-xs">{input.errorMessage}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -849,23 +860,14 @@ export function SandboxProfileIntegrationsSetupSection(
 
   return (
     <div className="flex flex-col gap-4">
-      {input.integrationBindingsQuery.isError ? (
-        <Notice title="Could not load integration bindings" variant="alert">
-          {resolveApiErrorMessage({
-            error: input.integrationBindingsQuery.error,
-            fallbackMessage: "Could not load sandbox profile integration bindings.",
-          })}
-        </Notice>
-      ) : null}
-
-      {input.integrationDirectoryQuery.isError ? (
-        <Notice title="Could not load integration connections" variant="alert">
-          {resolveApiErrorMessage({
-            error: input.integrationDirectoryQuery.error,
-            fallbackMessage: "Could not load integration connections.",
-          })}
-        </Notice>
-      ) : null}
+      <IntegrationLoadErrorNotice
+        integrationBindingsError={
+          input.integrationBindingsQuery.isError ? input.integrationBindingsQuery.error : null
+        }
+        integrationDirectoryError={
+          input.integrationDirectoryQuery.isError ? input.integrationDirectoryQuery.error : null
+        }
+      />
 
       {input.integrationSaveError ? (
         <Notice
@@ -952,20 +954,22 @@ export function SandboxProfileIntegrationsSetupSection(
                   </FieldContent>
                 </Field>
 
-                <GitCommitSigningSwitchField
-                  checked={gitCommitSigningIsChecked}
-                  disabled={gitCommitSigningIsDisabled}
-                  disabledMessage={gitCommitSigningDisabledMessage}
-                  onCheckedChange={(checked) => {
-                    if (gitCommitSigningIsDisabled || gitRow === null) {
-                      return;
-                    }
-                    input.onGitCommitSigningIntegrationConnectionChange(
-                      checked ? gitRow.connectionId : null,
-                    );
-                  }}
-                  readOnly={isReadOnly}
-                />
+                {gitRow === null ? null : (
+                  <GitCommitSigningSwitchField
+                    checked={gitCommitSigningIsChecked}
+                    disabled={gitCommitSigningIsDisabled}
+                    disabledMessage={gitCommitSigningDisabledMessage}
+                    onCheckedChange={(checked) => {
+                      if (gitCommitSigningIsDisabled) {
+                        return;
+                      }
+                      input.onGitCommitSigningIntegrationConnectionChange(
+                        checked ? gitRow.connectionId : null,
+                      );
+                    }}
+                    readOnly={isReadOnly}
+                  />
+                )}
 
                 {gitRow === null ||
                 !hasSandboxProfileBindingResourcesAndToolsCellContent({
@@ -1043,7 +1047,7 @@ export function SandboxProfileIntegrationsSetupSection(
                           <div
                             className={`${SandboxProfileIntegrationCellContentClassName} text-sm font-medium`}
                           >
-                            Agent provider
+                            Agent runtime connection
                           </div>
                         </ResponsiveFieldListCell>
                         <ResponsiveFieldListCell columnKey="proxied-connection">
@@ -1068,7 +1072,7 @@ export function SandboxProfileIntegrationsSetupSection(
                           {isReadOnly ? null : (
                             <RemoveIntegrationBindingButton
                               disabled={controlsAreDisabled}
-                              label="Remove agent provider"
+                              label="Remove agent runtime connection"
                               onRemove={() => {
                                 if (controlsAreDisabled) {
                                   return;
@@ -1121,6 +1125,11 @@ export function SandboxProfileIntegrationsSetupSection(
                             }}
                             selectedConnectionId={agentRow?.connectionId}
                             disabled={controlsAreDisabled}
+                            errorMessage={input.agentRuntimeConnectionErrorMessage}
+                            invalid={
+                              input.agentRuntimeConnectionErrorMessage !== null &&
+                              input.agentRuntimeConnectionErrorMessage !== undefined
+                            }
                             readOnly={isReadOnly}
                           />
                         </ResponsiveFieldListCell>
@@ -1291,22 +1300,59 @@ export function SandboxProfileIntegrationsSetupUnavailableState(input: {
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-4">
-      {input.integrationBindingsError !== null ? (
-        <Notice title="Could not load integration bindings" variant="alert">
-          {resolveApiErrorMessage({
-            error: input.integrationBindingsError,
-            fallbackMessage: "Could not load sandbox profile integration bindings.",
-          })}
-        </Notice>
-      ) : null}
-      {input.integrationDirectoryError !== null ? (
-        <Notice title="Could not load integration connections" variant="alert">
-          {resolveApiErrorMessage({
-            error: input.integrationDirectoryError,
-            fallbackMessage: "Could not load integration connections.",
-          })}
-        </Notice>
-      ) : null}
+      <IntegrationLoadErrorNotice
+        integrationBindingsError={input.integrationBindingsError}
+        integrationDirectoryError={input.integrationDirectoryError}
+      />
     </div>
   );
+}
+
+function IntegrationLoadErrorNotice(input: {
+  integrationBindingsError: unknown;
+  integrationDirectoryError: unknown;
+}): React.JSX.Element | null {
+  const bindingsMessage =
+    input.integrationBindingsError === null
+      ? null
+      : resolveApiErrorMessage({
+          error: input.integrationBindingsError,
+          fallbackMessage: "Could not load sandbox profile integration bindings.",
+        });
+  const directoryMessage =
+    input.integrationDirectoryError === null
+      ? null
+      : resolveApiErrorMessage({
+          error: input.integrationDirectoryError,
+          fallbackMessage: "Could not load integration connections.",
+        });
+
+  if (bindingsMessage !== null && directoryMessage !== null) {
+    return (
+      <Notice title="Could not load runtime and connections" variant="alert">
+        <div className="space-y-1">
+          <p>{bindingsMessage}</p>
+          <p>{directoryMessage}</p>
+        </div>
+      </Notice>
+    );
+  }
+
+  if (bindingsMessage !== null) {
+    return (
+      <Notice title="Could not load integration bindings" variant="alert">
+        {bindingsMessage}
+      </Notice>
+    );
+  }
+
+  if (directoryMessage !== null) {
+    return (
+      <Notice title="Could not load integration connections" variant="alert">
+        {directoryMessage}
+      </Notice>
+    );
+  }
+
+  return null;
 }

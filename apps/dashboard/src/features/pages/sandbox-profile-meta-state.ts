@@ -6,6 +6,7 @@ import {
   createSandboxProfile,
   updateSandboxProfile,
 } from "../sandbox-profiles/sandbox-profiles-service.js";
+import type { CreateSandboxProfileDefaultRuntimeConfig } from "./sandbox-profile-runtime-defaults.js";
 
 type SandboxProfileEditorFormState = {
   displayName: string;
@@ -16,6 +17,10 @@ type CommonInput = {
   invalidateSandboxProfiles: () => Promise<void>;
 };
 
+type CreateInput = CommonInput & {
+  defaultRuntimeConfig: CreateSandboxProfileDefaultRuntimeConfig | undefined;
+};
+
 type EditInput = CommonInput & {
   profileId: string;
   loadedProfile: {
@@ -24,7 +29,7 @@ type EditInput = CommonInput & {
   invalidateProfileDetail: (profileId: string) => Promise<void>;
 };
 
-export function useCreateSandboxProfileMetaState(input: CommonInput): {
+export function useCreateSandboxProfileMetaState(input: CreateInput): {
   formState: SandboxProfileEditorFormState;
   saveError: string | null;
   pageTitle: string;
@@ -38,10 +43,16 @@ export function useCreateSandboxProfileMetaState(input: CommonInput): {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: async (createInput: SandboxProfileEditorFormState) =>
+    mutationFn: async (
+      createInput: SandboxProfileEditorFormState & {
+        defaultRuntimeConfig: CreateSandboxProfileDefaultRuntimeConfig;
+      },
+    ) =>
       createSandboxProfile({
         payload: {
           displayName: createInput.displayName,
+          sandboxProvider: createInput.defaultRuntimeConfig.sandboxProvider,
+          sandboxResources: createInput.defaultRuntimeConfig.sandboxResources,
         },
       }),
     onSuccess: async (createdProfile) => {
@@ -66,8 +77,14 @@ export function useCreateSandboxProfileMetaState(input: CommonInput): {
       return;
     }
 
+    if (input.defaultRuntimeConfig === undefined) {
+      setSaveError("Could not determine the Mistle sandbox provider for new profiles.");
+      return;
+    }
+
     createMutation.mutate({
       displayName: trimmedDisplayName,
+      defaultRuntimeConfig: input.defaultRuntimeConfig,
     });
   }
 

@@ -1,3 +1,7 @@
+import {
+  agentDefinitionAllowsRuntime,
+  createBrowserDefinitionsBundle,
+} from "@mistle/integrations-definitions/browser";
 import { systemScheduler, type TimerHandle } from "@mistle/time";
 import {
   Accordion,
@@ -157,6 +161,7 @@ import {
   useCreateSandboxProfileMetaState,
   useEditSandboxProfileMetaState,
 } from "./sandbox-profile-meta-state.js";
+import { createDefaultMistleSandboxRuntimeConfig } from "./sandbox-profile-runtime-defaults.js";
 import {
   createRuntimeDraftSourceVersionKey,
   SandboxProfileRuntimeSection,
@@ -183,7 +188,6 @@ import {
   type SnapshotPanelState,
 } from "./sandbox-profile-snapshot-panel.js";
 import { SandboxProfileTriggersSection } from "./sandbox-profile-triggers-section.js";
-import { SessionCliPanel } from "./session-cli-panel.js";
 import { createComposerDraft } from "./session-composer/session-composer-draft.js";
 import {
   SessionConversationBottomPanelController,
@@ -256,6 +260,7 @@ type SetupAssistantStartupOperation = {
 } | null;
 
 type SetupAssistantCloseDialogState = {
+  navigationSectionId: SandboxProfileEditorSectionId | null;
   sandboxInstanceId: string | null;
 } | null;
 type SetupAssistantStartDialogState = {
@@ -393,17 +398,113 @@ export function buildSandboxProfileRuntimeDraftChanges(input: {
 }
 
 const AgentRuntimeRequiredErrorCode = "AGENT_RUNTIME_REQUIRED";
+const AgentRuntimeConnectionRequiredErrorCode = "AGENT_RUNTIME_CONNECTION_REQUIRED";
 const SetupAssistantAgentRuntimeRequiredMessage =
-  "Add an agent integration before using Setup Assistant.";
+  "Select and save an agent runtime connection before using Setup Assistant.";
+const SaveDraftAgentRuntimeConnectionRequiredMessage = "Select an agent runtime connection.";
+const DraftSaveWorkflowErrorMessage =
+  "Saving draft failed. Fix the highlighted profile settings below and try again.";
 
-function hasSetupAssistantAgentBinding(
-  integrationRows: readonly SandboxProfileBindingEditorRow[] | null,
-): boolean {
-  if (integrationRows === null) {
+const IntegrationDraftSaveErrorCodes = new Set([
+  "CONNECTION_MISMATCH",
+  "CONNECTION_NOT_ACTIVE",
+  "INVALID_BINDING_CONFIG",
+  "INVALID_BINDING_CONNECTION_REFERENCE",
+  "INVALID_CONNECTION_TARGET_REFERENCE",
+  "INVALID_TARGET_CONFIG",
+  "INVALID_TARGET_SECRETS",
+  "KIND_MISMATCH",
+  "TARGET_DISABLED",
+]);
+const RuntimeDraftSaveErrorCodes = new Set([
+  "INVALID_MISTLE_MCP_CONFIG",
+  "INVALID_SANDBOX_PROVIDER",
+  "INVALID_SANDBOX_RUNTIME_CONFIG",
+  "SANDBOX_PROVIDER_REQUIRED",
+]);
+const SkillsDraftSaveErrorCodes = new Set([
+  "SELECTED_SKILLS_NOT_FOUND",
+  "SKILLS_SOURCE_NOT_BOUND",
+  "SKILLS_SOURCE_NOT_LOADED",
+]);
+const SetupScriptDraftSaveErrorCodes = new Set(["INVALID_SETUP_SCRIPT"]);
+
+type DraftSaveErrorOwner =
+  | "agent-runtime-connection"
+  | "generic"
+  | "integrations"
+  | "runtime"
+  | "setup-script"
+  | "skills";
+
+const Definitions = createBrowserDefinitionsBundle();
+const IntegrationRegistry = Definitions.integrationRegistry;
+
+function hasSetupAssistantAgentRuntimeConnection(input: {
+  integrationRows: readonly SandboxProfileBindingEditorRow[] | null;
+  agentRuntimeId: SandboxProfileVersion["agentRuntimeId"];
+  availableConnections: readonly IntegrationConnectionSummary[];
+  availableTargets: readonly IntegrationTargetSummary[];
+}): boolean {
+  if (input.integrationRows === null) {
     return false;
   }
 
-  return integrationRows.some((row) => row.kind === "agent");
+  return input.integrationRows.some((row) => {
+    if (row.kind !== "agent") {
+      return false;
+    }
+
+    const connection = input.availableConnections.find(
+      (candidate) => candidate.id === row.connectionId,
+    );
+    if (connection === undefined) {
+      return false;
+    }
+
+    const target = input.availableTargets.find(
+      (candidate) => candidate.targetKey === connection.targetKey,
+    );
+    if (target === undefined) {
+      return false;
+    }
+
+    return agentDefinitionAllowsRuntime({
+      definition: IntegrationRegistry.getDefinition({
+        familyId: target.familyId,
+        variantId: target.variantId,
+      }),
+      runtimeId: input.agentRuntimeId,
+    });
+  });
+}
+
+export function resolveDraftSaveErrorOwner(error: unknown): DraftSaveErrorOwner {
+  if (!(error instanceof SandboxProfilesApiError) || error.code === null) {
+    return "generic";
+  }
+
+  if (error.code === AgentRuntimeConnectionRequiredErrorCode) {
+    return "agent-runtime-connection";
+  }
+
+  if (IntegrationDraftSaveErrorCodes.has(error.code)) {
+    return "integrations";
+  }
+
+  if (RuntimeDraftSaveErrorCodes.has(error.code)) {
+    return "runtime";
+  }
+
+  if (SkillsDraftSaveErrorCodes.has(error.code)) {
+    return "skills";
+  }
+
+  if (SetupScriptDraftSaveErrorCodes.has(error.code)) {
+    return "setup-script";
+  }
+
+  return "generic";
 }
 
 const SetupScriptPlaceholder = `#!/usr/bin/env bash
@@ -627,14 +728,28 @@ function CreateSandboxProfileEditorPage(): React.JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { title, description } = resolvePageFrameText(pageMeta, "Create");
+  const sandboxProvidersQuery = useQuery({
+    queryKey: sandboxProvidersQueryKey(),
+    queryFn: async ({ signal }) => listSandboxProviders({ signal }),
+  });
+  const defaultRuntimeConfig =
+    sandboxProvidersQuery.data === undefined
+      ? undefined
+      : createDefaultMistleSandboxRuntimeConfig(sandboxProvidersQuery.data.items);
   const metaState = useCreateSandboxProfileMetaState({
     navigate,
+    defaultRuntimeConfig,
     invalidateSandboxProfiles: async () => {
       await queryClient.invalidateQueries({
         queryKey: ["sandbox-profiles"],
       });
     },
   });
+  const createIsDisabled =
+    metaState.isDisplayNameInvalid ||
+    metaState.isCreating ||
+    defaultRuntimeConfig === undefined ||
+    sandboxProvidersQuery.isError;
 
   function handleCreateProfileSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -647,6 +762,19 @@ function CreateSandboxProfileEditorPage(): React.JSX.Element {
         {metaState.saveError ? (
           <Notice title="Create failed" variant="alert">
             {metaState.saveError}
+          </Notice>
+        ) : null}
+        {sandboxProvidersQuery.isError ? (
+          <Notice title="Could not load sandbox providers" variant="alert">
+            {resolveApiErrorMessage({
+              error: sandboxProvidersQuery.error,
+              fallbackMessage: "Could not load sandbox providers.",
+            })}
+          </Notice>
+        ) : null}
+        {sandboxProvidersQuery.isSuccess && defaultRuntimeConfig === undefined ? (
+          <Notice title="Mistle sandbox provider unavailable" variant="alert">
+            No managed sandbox provider is configured for this deployment.
           </Notice>
         ) : null}
 
@@ -675,10 +803,7 @@ function CreateSandboxProfileEditorPage(): React.JSX.Element {
               </Field>
 
               <div className="gap-2 flex">
-                <Button
-                  disabled={metaState.isDisplayNameInvalid || metaState.isCreating}
-                  type="submit"
-                >
+                <Button disabled={createIsDisabled} type="submit">
                   {metaState.isCreating ? "Creating..." : "Create profile"}
                 </Button>
                 <Button onClick={metaState.onCancelCreate} type="button" variant="outline">
@@ -1560,6 +1685,13 @@ function ReadySandboxProfileEditorPage(input: {
   >(null);
   const [draftTriggerImpactError, setDraftTriggerImpactError] = useState<string | null>(null);
   const [setupAssistantError, setSetupAssistantError] = useState<string | null>(null);
+  const [
+    showSetupAssistantAgentRuntimeConnectionError,
+    setShowSetupAssistantAgentRuntimeConnectionError,
+  ] = useState(false);
+  const [saveDraftAgentRuntimeConnectionError, setSaveDraftAgentRuntimeConnectionError] = useState<
+    string | null
+  >(null);
   const [publishSuccessNoticeKey, setPublishSuccessNoticeKey] = useState(0);
   const [showPublishSuccessMessage, setShowPublishSuccessMessage] = useState(
     input.publishSuccessMessage,
@@ -1596,21 +1728,54 @@ function ReadySandboxProfileEditorPage(input: {
     snapshotVersion,
     input.profile.activeVersion,
   );
+  const setupAssistantOwningSectionId =
+    setupAssistantPanelState?.isOpen === true
+      ? setupAssistantPanelState.scriptKind === "maintenance"
+        ? SandboxProfileEditorSectionIds.SNAPSHOT
+        : SandboxProfileEditorSectionIds.SANDBOX_PROFILE
+      : null;
   const editorSections = SandboxProfileEditorTabs;
   const setupAssistantIntegrationRows = resolveSandboxProfileSetupScriptIntegrationRows(
     integrationsLoader.initialRows,
     integrationDraftState.integrationRows,
   );
+  const setupAssistantSelectedAgentRuntimeId = resolveSelectedSandboxProfileAgentRuntimeId({
+    currentVersion: input.currentVersion,
+    runtimeDraftState,
+  });
   const setupAssistantLatestSavedDraftHasAgentRuntime =
-    input.mode.kind === "draft" && hasSetupAssistantAgentBinding(integrationsLoader.initialRows);
+    input.mode.kind === "draft" &&
+    hasSetupAssistantAgentRuntimeConnection({
+      integrationRows: integrationsLoader.initialRows,
+      agentRuntimeId: input.currentVersion?.agentRuntimeId ?? setupAssistantSelectedAgentRuntimeId,
+      availableConnections: integrationsLoader.availableConnections,
+      availableTargets: integrationsLoader.availableTargets,
+    });
   const setupAssistantLocalDraftHasAgentRuntime =
-    input.mode.kind === "draft" && hasSetupAssistantAgentBinding(setupAssistantIntegrationRows);
+    input.mode.kind === "draft" &&
+    hasSetupAssistantAgentRuntimeConnection({
+      integrationRows: setupAssistantIntegrationRows,
+      agentRuntimeId: setupAssistantSelectedAgentRuntimeId,
+      availableConnections: integrationsLoader.availableConnections,
+      availableTargets: integrationsLoader.availableTargets,
+    });
   const setupAssistantHasVersionDraftChanges =
     integrationDraftState.hasUnpersistedChanges ||
     gitCommitSigningDraftState.hasUnpersistedChanges ||
     skillsDraftState.hasUnpersistedChanges ||
     setupScriptDraftState.hasUnpersistedChanges ||
     runtimeDraftState.hasUnpersistedChanges;
+  useEffect(() => {
+    if (setupAssistantLocalDraftHasAgentRuntime) {
+      setShowSetupAssistantAgentRuntimeConnectionError(false);
+      setSaveDraftAgentRuntimeConnectionError(null);
+    }
+  }, [setupAssistantLocalDraftHasAgentRuntime]);
+  const agentRuntimeConnectionErrorMessage =
+    saveDraftAgentRuntimeConnectionError ??
+    (showSetupAssistantAgentRuntimeConnectionError
+      ? SetupAssistantAgentRuntimeRequiredMessage
+      : null);
   const updateGitCommitSigningIntegrationConnectionId = useCallback(
     (connectionId: string | null) => {
       setGitCommitSigningDraftState((currentState) =>
@@ -1695,17 +1860,53 @@ function ReadySandboxProfileEditorPage(input: {
             },
       );
       setSetupAssistantError(
-        error instanceof SandboxProfilesApiError && error.code === AgentRuntimeRequiredErrorCode
+        error instanceof SandboxProfilesApiError &&
+          (error.code === AgentRuntimeRequiredErrorCode ||
+            error.code === AgentRuntimeConnectionRequiredErrorCode)
           ? SetupAssistantAgentRuntimeRequiredMessage
           : resolveApiErrorMessage({
               error,
               fallbackMessage: "Could not start Setup Assistant.",
             }),
       );
+      if (
+        error instanceof SandboxProfilesApiError &&
+        error.code === AgentRuntimeConnectionRequiredErrorCode
+      ) {
+        setShowSetupAssistantAgentRuntimeConnectionError(true);
+      }
     },
   });
+  function navigateToEditorSection(sectionId: SandboxProfileEditorSectionId): void {
+    if (
+      sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE &&
+      input.explicitRouteView === undefined
+    ) {
+      void input.navigate(createSandboxProfileEditorPath({ profileId: input.profileId }));
+      return;
+    }
+
+    const view =
+      sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE
+        ? input.explicitRouteView
+        : input.routeView;
+
+    if (view === undefined) {
+      throw new Error("Sandbox profile tab navigation view could not be resolved.");
+    }
+
+    void input.navigate(
+      createSandboxProfileTabPath({
+        profileId: input.profileId,
+        sectionId,
+        view,
+      }),
+    );
+  }
+
   function requestSetupAssistantPanelClose(): void {
     setSetupAssistantCloseDialogState({
+      navigationSectionId: null,
       sandboxInstanceId: setupAssistantPanelState?.sandboxInstanceId ?? null,
     });
   }
@@ -1719,12 +1920,16 @@ function ReadySandboxProfileEditorPage(input: {
       return;
     }
 
+    const navigationSectionId = setupAssistantCloseDialogState.navigationSectionId;
     const sandboxInstanceId = resolveSetupAssistantCloseSandboxInstanceId({
       currentPanelSandboxInstanceId: setupAssistantPanelState?.sandboxInstanceId ?? null,
       dialogSandboxInstanceId: setupAssistantCloseDialogState.sandboxInstanceId,
     });
     setSetupAssistantCloseDialogState(null);
     setSetupAssistantPanelState(null);
+    if (navigationSectionId !== null) {
+      navigateToEditorSection(navigationSectionId);
+    }
     if (sandboxInstanceId === null) {
       setupAssistantClosedDuringStartupRef.current = startSetupAssistantMutation.isPending;
       return;
@@ -1834,12 +2039,23 @@ function ReadySandboxProfileEditorPage(input: {
     resolveVersion: () => number | null;
     scriptKind: SetupAssistantScriptKind;
   }): SetupScriptAssistantControl {
+    const agentRuntimeConnectionIsRequired =
+      inputValue.scriptKind === "setup" &&
+      inputValue.disabledReason === SetupAssistantAgentRuntimeRequiredMessage;
     return {
-      disabled: setupAssistantPanelIsOpen || inputValue.disabledReason !== null,
+      disabled:
+        setupAssistantPanelIsOpen ||
+        (inputValue.disabledReason !== null && !agentRuntimeConnectionIsRequired),
       errorMessage: setupAssistantError,
       isStarting: !setupAssistantPanelIsOpen && startSetupAssistantMutation.isPending,
       onToggle: () => {
         if (setupAssistantPanelState?.isOpen === true) {
+          return;
+        }
+
+        if (agentRuntimeConnectionIsRequired) {
+          setSetupAssistantError(SetupAssistantAgentRuntimeRequiredMessage);
+          setShowSetupAssistantAgentRuntimeConnectionError(true);
           return;
         }
 
@@ -1933,6 +2149,7 @@ function ReadySandboxProfileEditorPage(input: {
 
   async function saveDraftChanges(): Promise<boolean> {
     setPublishFlushError(null);
+    setSaveDraftAgentRuntimeConnectionError(null);
     const shouldSaveRuntime = runtimeDraftState.hasUnpersistedChanges;
     const shouldSaveSkills = skillsDraftState.hasUnpersistedChanges;
     const shouldSaveGitCommitSigning = gitCommitSigningDraftState.hasUnpersistedChanges;
@@ -1941,7 +2158,7 @@ function ReadySandboxProfileEditorPage(input: {
 
     if (skillsDraftState.saveBlockedMessage !== null) {
       skillsDraftState.applyDraftValidationError?.(skillsDraftState.saveBlockedMessage);
-      setPublishFlushError(DraftSaveErrorMessage);
+      setPublishFlushError(DraftSaveWorkflowErrorMessage);
       return false;
     }
 
@@ -1960,7 +2177,7 @@ function ReadySandboxProfileEditorPage(input: {
         ? integrationDraftState.buildIntegrationBindingChanges?.()
         : undefined;
       if (integrationBindings === null) {
-        setPublishFlushError(DraftSaveErrorMessage);
+        setPublishFlushError(DraftSaveWorkflowErrorMessage);
         return false;
       }
       const setupScript = shouldSaveSetupScript
@@ -2049,11 +2266,19 @@ function ReadySandboxProfileEditorPage(input: {
 
       return true;
     } catch (error: unknown) {
-      integrationDraftState.applyDraftSaveError?.(error);
-      setupScriptDraftState.applyDraftSaveError?.(error);
-      runtimeDraftState.applyDraftSaveError?.(error);
-      skillsDraftState.applyDraftSaveError?.(error);
-      setPublishFlushError(DraftSaveErrorMessage);
+      const errorOwner = resolveDraftSaveErrorOwner(error);
+      if (errorOwner === "agent-runtime-connection") {
+        setSaveDraftAgentRuntimeConnectionError(SaveDraftAgentRuntimeConnectionRequiredMessage);
+      } else if (errorOwner === "integrations") {
+        integrationDraftState.applyDraftSaveError?.(error);
+      } else if (errorOwner === "runtime") {
+        runtimeDraftState.applyDraftSaveError?.(error);
+      } else if (errorOwner === "setup-script") {
+        setupScriptDraftState.applyDraftSaveError?.(error);
+      } else if (errorOwner === "skills") {
+        skillsDraftState.applyDraftSaveError?.(error);
+      }
+      setPublishFlushError(DraftSaveWorkflowErrorMessage);
       return false;
     }
   }
@@ -2141,30 +2366,15 @@ function ReadySandboxProfileEditorPage(input: {
         void handleSaveDraft();
       }}
       onActiveSectionIdChange={(sectionId) => {
-        if (
-          sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE &&
-          input.explicitRouteView === undefined
-        ) {
-          void input.navigate(createSandboxProfileEditorPath({ profileId: input.profileId }));
+        if (setupAssistantOwningSectionId !== null && sectionId !== setupAssistantOwningSectionId) {
+          setSetupAssistantCloseDialogState({
+            navigationSectionId: sectionId,
+            sandboxInstanceId: setupAssistantPanelState?.sandboxInstanceId ?? null,
+          });
           return;
         }
 
-        const view =
-          sectionId === SandboxProfileEditorSectionIds.SANDBOX_PROFILE
-            ? input.explicitRouteView
-            : input.routeView;
-
-        if (view === undefined) {
-          throw new Error("Sandbox profile tab navigation view could not be resolved.");
-        }
-
-        void input.navigate(
-          createSandboxProfileTabPath({
-            profileId: input.profileId,
-            sectionId,
-            view,
-          }),
-        );
+        navigateToEditorSection(sectionId);
       }}
       onSaveProfileName={metaState.onProfileNameSave}
       onViewActive={input.onViewActive}
@@ -2209,6 +2419,7 @@ function ReadySandboxProfileEditorPage(input: {
           onRetryPublishSnapshot={input.onRetryPublishSnapshot}
           onSetupScriptDraftStateChange={setSetupScriptDraftState}
           setupAssistantControl={setupAssistantControl}
+          agentRuntimeConnectionErrorMessage={agentRuntimeConnectionErrorMessage}
           maintenanceAssistantControl={maintenanceAssistantControl}
           onSaveDraftBeforeSkillsReload={saveDraftBeforeSkillsReload}
           profileId={input.profileId}
@@ -2308,6 +2519,9 @@ function ReadySandboxProfileEditorPage(input: {
         isOpen={setupAssistantCloseDialogState !== null}
         onCancel={cancelSetupAssistantPanelClose}
         onConfirm={confirmSetupAssistantPanelClose}
+        reason={
+          setupAssistantCloseDialogState?.navigationSectionId === null ? "close" : "switch-tabs"
+        }
       />
       {setupAssistantStartDialog}
     </div>
@@ -2338,8 +2552,8 @@ export function SetupAssistantStartDialog(input: {
             {input.variant === "choice"
               ? "Setup Assistant uses the latest saved draft. Save your current changes before opening it, or open it with the latest saved draft instead. Your unsaved editor changes will stay in the editor."
               : isUseSavedRequired
-                ? "Setup Assistant needs a saved draft with an agent integration. Your current changes remove the saved agent integration, so open it with the latest saved draft instead. Your unsaved editor changes will stay in the editor."
-                : "Setup Assistant needs a saved draft with an agent integration. Save your current changes before opening it."}
+                ? "Setup Assistant needs a saved draft with an agent runtime connection. Your current changes remove the saved agent runtime connection, so open it with the latest saved draft instead. Your unsaved editor changes will stay in the editor."
+                : "Setup Assistant needs a saved draft with an agent runtime connection. Save your current changes before opening it."}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -2368,7 +2582,10 @@ export function SetupAssistantCloseDialog(input: {
   isOpen: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  reason?: "close" | "switch-tabs";
 }): React.JSX.Element {
+  const reason = input.reason ?? "close";
+
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -2380,10 +2597,15 @@ export function SetupAssistantCloseDialog(input: {
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Stop Setup Assistant?</DialogTitle>
+          <DialogTitle>
+            {reason === "switch-tabs"
+              ? "Switch tabs and close Setup Assistant?"
+              : "Stop Setup Assistant?"}
+          </DialogTitle>
           <DialogDescription>
-            Closing the Setup Assistant stops its temporary sandbox. The setup script draft stays in
-            the editor.
+            {reason === "switch-tabs"
+              ? "Switching tabs closes the Setup Assistant and stops its temporary sandbox. Unsaved script edits stay only while this profile editor remains open; save them before leaving or reloading."
+              : "Closing the Setup Assistant stops its temporary sandbox. Unsaved script edits stay only while this profile editor remains open; save them before leaving or reloading."}
           </DialogDescription>
         </DialogHeader>
 
@@ -2392,7 +2614,7 @@ export function SetupAssistantCloseDialog(input: {
             Cancel
           </Button>
           <Button onClick={input.onConfirm} type="button">
-            Stop and close
+            {reason === "switch-tabs" ? "Switch tabs and close" : "Stop and close"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2419,9 +2641,6 @@ function SetupScriptAssistantPanel(input: {
   const terminalPanelKey = input.sandboxInstanceId ?? "setup-assistant-missing-sandbox";
   const isTerminalOpenDisabled =
     !workbench.terminalPanelState.isVisible && !workbench.connectionReadiness.canConnect;
-  const cliButtonTitle = workbench.primaryPanelState.isCliToggleActive
-    ? "Return to chat"
-    : (workbench.primaryPanelState.disabledReason ?? "Open Setup Assistant TUI");
   const terminalButtonTitle = isTerminalOpenDisabled
     ? (workbench.stoppedSessionMessage ?? "Terminal is available after the Setup Assistant starts.")
     : workbench.terminalPanelState.isVisible
@@ -2478,33 +2697,6 @@ function SetupScriptAssistantPanel(input: {
           />
           <span aria-hidden className="h-5 w-px bg-border" />
           <Button
-            aria-label="TUI"
-            aria-pressed={workbench.primaryPanelState.isCliToggleActive}
-            className={
-              workbench.primaryPanelState.isCliToggleActive
-                ? "bg-muted text-foreground shadow-none hover:bg-muted/80"
-                : "bg-transparent text-foreground shadow-none hover:bg-muted/60"
-            }
-            disabled={
-              !workbench.primaryPanelState.canEnterCli &&
-              !workbench.primaryPanelState.isCliToggleActive
-            }
-            onClick={() => {
-              if (workbench.primaryPanelState.isCliToggleActive) {
-                void workbench.primaryPanelState.exitCliMode();
-                return;
-              }
-
-              void workbench.primaryPanelState.enterCliMode();
-            }}
-            size="sm"
-            title={cliButtonTitle}
-            type="button"
-            variant="ghost"
-          >
-            TUI
-          </Button>
-          <Button
             aria-label={workbench.terminalPanelState.isVisible ? "Terminal" : "Open terminal"}
             aria-pressed={workbench.terminalPanelState.isVisible}
             className={
@@ -2559,12 +2751,6 @@ function SetupScriptAssistantPanel(input: {
                   scrollContainerRef: conversationScrollContainerRef,
                   serverRequestPanelEntries: unmatchedServerRequests,
                 },
-                cli: {
-                  ptyState: workbench.cliPtyState,
-                  refitKey: workbench.terminalPanelState.isVisible
-                    ? "setup-assistant-cli:terminal-open"
-                    : "setup-assistant-cli:terminal-closed",
-                },
                 initialEntryStartupState: workbench.initialEntryStartupState,
                 sandboxInstanceId: input.sandboxInstanceId,
                 startupOperation:
@@ -2572,11 +2758,9 @@ function SetupScriptAssistantPanel(input: {
                     ? null
                     : workbench.sandboxStatusQuery.data.startupOperation,
                 startupOperationId: input.startupOperationId,
-                transitionState: workbench.primaryPanelState.transitionState,
               })}
             </div>
-            {workbench.primaryPanelState.showsChatComposer &&
-            workbench.initialEntryStartupState === null ? (
+            {workbench.initialEntryStartupState === null ? (
               <div className="shrink-0 bg-background px-5 py-4">
                 <SessionConversationBottomPanelController
                   chatEntries={conversationPane.chatState.entries}
@@ -2642,15 +2826,11 @@ type SetupAssistantConversationContent = React.ComponentProps<
 >;
 
 function renderSetupAssistantMainContent(input: {
-  cli: React.ComponentProps<typeof SessionCliPanel>;
   conversation: SetupAssistantConversationContent;
   initialEntryStartupState: SessionStartupState | null;
   sandboxInstanceId: string | null;
   startupOperation: SetupAssistantStartupOperation;
   startupOperationId: string | null;
-  transitionState: ReturnType<
-    typeof useSessionWorkbenchController
-  >["workbench"]["primaryPanelState"]["transitionState"];
 }): React.JSX.Element {
   if (input.initialEntryStartupState !== null) {
     return (
@@ -2663,15 +2843,7 @@ function renderSetupAssistantMainContent(input: {
     );
   }
 
-  switch (input.transitionState) {
-    case "switching_to_cli":
-    case "restoring_chat":
-      return <></>;
-    case "stable_cli":
-      return <SessionCliPanel {...input.cli} />;
-    case "stable_chat":
-      return <SessionConversationMainContent {...input.conversation} />;
-  }
+  return <SessionConversationMainContent {...input.conversation} />;
 }
 
 export function SetupAssistantStartupProgress(input: {
@@ -2718,6 +2890,7 @@ function SandboxProfileEditorSectionPanels(input: {
   onRetryPublishSnapshot: (version: number) => void;
   onSetupScriptDraftStateChange: (state: SandboxProfileDraftSectionState) => void;
   setupAssistantControl: SetupScriptAssistantControl;
+  agentRuntimeConnectionErrorMessage: string | null;
   maintenanceAssistantControl: SetupScriptAssistantControl;
   profileId: string;
   publishSuccessMessage: boolean;
@@ -2813,6 +2986,7 @@ function SandboxProfileEditorSectionPanels(input: {
         }
         disabled={input.draftFieldsAreReadOnly}
         readOnly={input.draftFieldsAreReadOnly}
+        agentRuntimeConnectionErrorMessage={input.agentRuntimeConnectionErrorMessage}
         version={input.mode.version}
       />
       {input.currentVersion === null || sandboxProfileIntegrationRows === null ? null : (
@@ -2964,7 +3138,6 @@ const SandboxProfileEditorTabs = [
   },
 ] as const satisfies readonly SandboxProfileEditorSection<SandboxProfileEditorSectionId>[];
 
-const DraftSaveErrorMessage = "Saving draft failed. Please try again later.";
 const DraftTriggerImpactCheckFailedMessage =
   "Couldn't check whether this draft affects related triggers.";
 
@@ -3016,9 +3189,9 @@ function formatDraftTriggerImpactIssueMessage(
     case "AGENT_BINDING_REQUIRED":
       return "This draft does not have an agent binding.";
     case "AGENT_BINDING_PRIMARY_REQUIRED":
-      return "This draft does not have the agent provider required by the selected runtime.";
+      return "This draft does not have the agent runtime connection required by the selected runtime.";
     case "AGENT_BINDING_AMBIGUOUS":
-      return "This draft has duplicate agent provider bindings.";
+      return "This draft has duplicate agent runtime connection bindings.";
     case "AGENT_BINDING_RUNTIME_INCOMPATIBLE":
       return "The draft agent binding is not compatible with the selected agent runtime.";
     case "INVALID_BINDING_CONNECTION_REFERENCE":
@@ -3267,6 +3440,7 @@ export function SandboxProfileEditorView(input: {
     | readonly SandboxProfileVersionDraftTriggerImpactTrigger[]
     | null;
   draftTriggerImpactError: string | null;
+  draftTriggerImpactErrorAutoHideAfterMs?: number | null;
   onDraftTriggerImpactErrorDismiss: () => void;
   publishRequestIsPending?: boolean;
   saveDraftRequestIsPending?: boolean;
@@ -3445,7 +3619,12 @@ export function SandboxProfileEditorView(input: {
                 )}
                 {input.draftTriggerImpactError === null ? null : (
                   <Notice
-                    autoHideAfterMs={NoticeAutoHideDurationsMs.LONG}
+                    autoHideAfterMs={
+                      input.draftTriggerImpactErrorAutoHideAfterMs === null
+                        ? undefined
+                        : (input.draftTriggerImpactErrorAutoHideAfterMs ??
+                          NoticeAutoHideDurationsMs.LONG)
+                    }
                     dismissible
                     onDismiss={input.onDraftTriggerImpactErrorDismiss}
                     title="Trigger checks failed"
@@ -3609,6 +3788,7 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
   gitCommitSigningIntegrationConnectionId: string | null;
   onGitCommitSigningIntegrationConnectionChange: (connectionId: string | null) => void;
   runtimeSettings: ReactNode | null;
+  agentRuntimeConnectionErrorMessage: string | null;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element | null {
   const showBindingsUnavailableNotice = input.loader.integrationBindingsQuery.isError;
@@ -3665,6 +3845,7 @@ function LoadedSandboxProfileIntegrationSetupSection(input: {
       }
       integrationDirectoryQuery={input.loader.integrationDirectoryQuery}
       runtimeSettings={input.runtimeSettings}
+      agentRuntimeConnectionErrorMessage={input.agentRuntimeConnectionErrorMessage}
       {...(input.onDraftStateChange === undefined
         ? {}
         : { onDraftStateChange: input.onDraftStateChange })}
@@ -3699,6 +3880,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
   integrationDirectoryQuery: ReturnType<
     typeof useSandboxProfileIntegrationsLoader
   >["integrationDirectoryQuery"];
+  agentRuntimeConnectionErrorMessage: string | null;
   onDraftStateChange?: (state: SandboxProfileDraftSectionState) => void;
 }): React.JSX.Element {
   const activeOrganizationId = useRequiredOrganizationId();
@@ -3763,6 +3945,7 @@ function ReadySandboxProfileIntegrationSetupSection(input: {
         gitCommitSigningIntegrationConnectionId={input.gitCommitSigningIntegrationConnectionId}
         identityLinkedGitConnectionIds={identityLinkedGitConnectionIds}
         runtimeSettings={input.runtimeSettings}
+        agentRuntimeConnectionErrorMessage={input.agentRuntimeConnectionErrorMessage}
         disabled={input.disabled}
         readOnly={input.readOnly}
         onAddIntegrationBindingRow={integrationsState.onAddIntegrationBindingRow}
@@ -3911,6 +4094,7 @@ function ReadySandboxProfileSetupScriptSection(input: {
         testPanel={<SandboxProfileSetupScriptTestPanel {...setupScriptTest.panelProps} />}
         value={setupScriptState.draftValue}
         disabled={input.disabled}
+        readOnly={!input.isDraft}
         repositoryHandles={resolveSandboxBaseRepositoryHandles(input.integrationRows)}
       />
     </div>
@@ -3949,6 +4133,7 @@ export function SandboxProfileSetupScriptPanel(input: {
   errorMessage?: string | null;
   notice?: ReactNode;
   onChange?: (nextValue: string) => void;
+  readOnly?: boolean;
   repositoryHandles?: readonly string[];
   setupAssistant?: {
     disabled: boolean;
@@ -3973,6 +4158,7 @@ export function SandboxProfileSetupScriptPanel(input: {
       notice={input.notice}
       onChange={input.onChange}
       placeholderText={SetupScriptPlaceholder}
+      readOnly={input.readOnly}
       setupAssistant={input.setupAssistant}
       testButtonProps={input.testButtonProps}
       testControl={input.testControl}

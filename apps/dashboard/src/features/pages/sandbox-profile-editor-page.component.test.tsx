@@ -26,6 +26,7 @@ import type {
   IntegrationTarget,
   IntegrationWebhookSource,
 } from "../integrations/integrations-service.js";
+import { SandboxProfilesApiError } from "../sandbox-profiles/sandbox-profiles-api-errors.js";
 import {
   sandboxProfileDetailQueryKey,
   sandboxProfileIntegrationDirectoryQueryKey,
@@ -73,6 +74,7 @@ import {
   SandboxProfileEditorView,
   SandboxProfileSetupScriptPanel,
   buildSandboxProfileRuntimeDraftChanges,
+  resolveDraftSaveErrorOwner,
   resolveSandboxProfileEditorRefetchInterval,
   resolveSelectedSandboxProfileGitCommitSigningIntegrationConnectionId,
   resolveSelectedSandboxProfileAgentRuntimeId,
@@ -907,6 +909,24 @@ function getAutomaticSnapshotRefreshSection(): HTMLElement {
   return section;
 }
 
+function getReadOnlyScriptBlock(container: ParentNode): HTMLElement {
+  const scriptBlock = container.querySelector<HTMLElement>(
+    "[data-slot='sandbox-profile-read-only-script-block']",
+  );
+  if (scriptBlock === null) {
+    throw new Error("Read-only script block not found.");
+  }
+  return scriptBlock;
+}
+
+function expectReadOnlyScriptBlockToUseEditorScrollBounds(scriptBlock: HTMLElement): void {
+  const scriptBlockStyles = getComputedStyle(scriptBlock);
+
+  expect(scriptBlockStyles.overflow).toBe("auto");
+  expect(scriptBlockStyles.minHeight).toBe("calc(var(--spacing) * 28)");
+  expect(scriptBlockStyles.maxHeight).toBe("calc((1.5rem * 28) + (var(--spacing) * 4))");
+}
+
 function ProfileActionsDialogHarness(input: {
   initialOpenDialog: "delete" | "duplicate";
   triggerUsages?: readonly TriggerSandboxProfileUsage[];
@@ -1123,6 +1143,20 @@ function getSetupScriptEditorView(editor: HTMLElement): EditorView {
 }
 
 describe("SandboxProfileEditorPage", () => {
+  it("routes Mistle resource access draft save errors to runtime settings", () => {
+    const owner = resolveDraftSaveErrorOwner(
+      new SandboxProfilesApiError({
+        operation: "putSandboxProfileVersionDraft",
+        status: 400,
+        body: null,
+        code: "INVALID_MISTLE_MCP_CONFIG",
+        message: "Select an API key before allowing the agent to interact with Mistle resources.",
+      }),
+    );
+
+    expect(owner).toBe("runtime");
+  });
+
   it("shows setup script test output before the setup script input", () => {
     render(
       <SandboxProfileSetupScriptPanel
@@ -1664,7 +1698,7 @@ describe("SandboxProfileEditorPage", () => {
   });
 
   it("keeps automatic snapshot refresh editing open when maintenance Setup Assistant opens", async () => {
-    renderSandboxProfileEditor({
+    const { router } = renderSandboxProfileEditor({
       maintenanceScript: "echo maintain",
       routeSection: "snapshot",
       versionState: "published",
@@ -1710,6 +1744,31 @@ describe("SandboxProfileEditorPage", () => {
         screen.getByRole("textbox", { name: "Snapshot maintenance script" }),
       ),
     ).toBe("pnpm update\npnpm test");
+    const sandboxProfileTab = screen.getByRole("tab", { name: "Sandbox Profile" });
+    expect(sandboxProfileTab.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(sandboxProfileTab);
+
+    expect(screen.getByText("Switch tabs and close Setup Assistant?")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Switching tabs closes the Setup Assistant and stops its temporary sandbox. Unsaved script edits stay only while this profile editor remains open; save them before leaving or reloading.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(router.state.location.pathname).toBe("/sandbox-profiles/sbp_test/snapshots");
+    expect(screen.getByRole("tab", { name: "Snapshots" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+
+    fireEvent.click(sandboxProfileTab);
+    fireEvent.click(screen.getByRole("button", { name: "Switch tabs and close" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/sandbox-profiles/sbp_test/sandbox-profile");
+      expect(screen.queryByRole("button", { name: "Close Setup Assistant panel" })).toBeNull();
+    });
   }, 15_000);
 
   it("applies externally updated maintenance scripts while the maintenance assistant is open", async () => {
@@ -1889,6 +1948,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByRole("menuitem", { name: "Refresh snapshot (setup script)" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDefined();
     expect(screen.getByText("echo maintain")).toBeDefined();
+    expectReadOnlyScriptBlockToUseEditorScrollBounds(getReadOnlyScriptBlock(refreshSection));
   });
 
   it("marks an existing automatic snapshot refresh schedule for removal when disabled", () => {
@@ -2982,13 +3042,12 @@ describe("SandboxProfileEditorPage", () => {
       name: "Sandbox Profile",
       hidden: false,
     });
-    const editor = within(configurationsPanel).getByRole("textbox", {
-      name: "Setup script",
-    });
+    const setupScriptBlock = getReadOnlyScriptBlock(configurationsPanel);
 
     expect(screen.getByText("Viewing: Published (v3)")).toBeDefined();
-    expect(editor.textContent).toContain("pnpm install");
-    expect(editor.textContent).toContain("pnpm test:setup");
+    expect(setupScriptBlock.textContent).toContain("pnpm install");
+    expect(setupScriptBlock.textContent).toContain("pnpm test:setup");
+    expectReadOnlyScriptBlockToUseEditorScrollBounds(setupScriptBlock);
   });
 
   it("shows selected repository locations in the setup script context", () => {
@@ -3074,8 +3133,30 @@ describe("SandboxProfileEditorPage", () => {
           config: {},
         },
       ],
+      connections: [
+        {
+          id: "connection-agent",
+          displayName: "OpenAI connection",
+          targetKey: "openai-default",
+          status: "active",
+        },
+      ],
       routeSection: "sandbox-profile",
       setupScript: "pnpm install\npnpm dev:bootstrap",
+      targets: [
+        {
+          targetKey: "openai-default",
+          displayName: "OpenAI",
+          familyId: "openai",
+          variantId: "openai-default",
+          config: {
+            api_base_url: "https://api.openai.com",
+          },
+          targetHealth: {
+            configStatus: "valid",
+          },
+        },
+      ],
       versionState: "draft",
     });
 
@@ -3091,7 +3172,7 @@ describe("SandboxProfileEditorPage", () => {
   });
 
   it("opens the Setup Assistant panel from the setup script action", async () => {
-    renderSandboxProfileEditor({
+    const { router } = renderSandboxProfileEditor({
       bindings: [
         {
           id: "binding-agent",
@@ -3100,8 +3181,30 @@ describe("SandboxProfileEditorPage", () => {
           config: {},
         },
       ],
+      connections: [
+        {
+          id: "connection-agent",
+          displayName: "OpenAI connection",
+          targetKey: "openai-default",
+          status: "active",
+        },
+      ],
       routeSection: "sandbox-profile",
       setupScript: "pnpm install\npnpm dev:bootstrap",
+      targets: [
+        {
+          targetKey: "openai-default",
+          displayName: "OpenAI",
+          familyId: "openai",
+          variantId: "openai-default",
+          config: {
+            api_base_url: "https://api.openai.com",
+          },
+          targetHealth: {
+            configStatus: "valid",
+          },
+        },
+      ],
       versionState: "draft",
     });
 
@@ -3116,6 +3219,33 @@ describe("SandboxProfileEditorPage", () => {
         name: "Close Setup Assistant panel",
       }),
     ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "TUI" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open terminal" })).toBeTruthy();
+    const snapshotsTab = screen.getByRole("tab", { name: "Snapshots" });
+    expect(snapshotsTab.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(snapshotsTab);
+
+    expect(screen.getByText("Switch tabs and close Setup Assistant?")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Switching tabs closes the Setup Assistant and stops its temporary sandbox. Unsaved script edits stay only while this profile editor remains open; save them before leaving or reloading.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(router.state.location.pathname).toBe("/sandbox-profiles/sbp_test/sandbox-profile/draft");
+    expect(screen.getByRole("tab", { name: "Sandbox Profile" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+
+    fireEvent.click(snapshotsTab);
+    fireEvent.click(screen.getByRole("button", { name: "Switch tabs and close" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/sandbox-profiles/sbp_test/snapshots");
+      expect(screen.queryByRole("button", { name: "Close Setup Assistant panel" })).toBeNull();
+    });
   });
 
   it("closes the Setup Assistant panel immediately after stop confirmation during startup", async () => {
@@ -3128,8 +3258,30 @@ describe("SandboxProfileEditorPage", () => {
           config: {},
         },
       ],
+      connections: [
+        {
+          id: "connection-agent",
+          displayName: "OpenAI connection",
+          targetKey: "openai-default",
+          status: "active",
+        },
+      ],
       routeSection: "sandbox-profile",
       setupScript: "pnpm install\npnpm dev:bootstrap",
+      targets: [
+        {
+          targetKey: "openai-default",
+          displayName: "OpenAI",
+          familyId: "openai",
+          variantId: "openai-default",
+          config: {
+            api_base_url: "https://api.openai.com",
+          },
+          targetHealth: {
+            configStatus: "valid",
+          },
+        },
+      ],
       versionState: "draft",
     });
 
@@ -3165,8 +3317,30 @@ describe("SandboxProfileEditorPage", () => {
           config: {},
         },
       ],
+      connections: [
+        {
+          id: "connection-agent",
+          displayName: "OpenAI connection",
+          targetKey: "openai-default",
+          status: "active",
+        },
+      ],
       routeSection: "sandbox-profile",
       setupScript: "pnpm install\npnpm dev:bootstrap",
+      targets: [
+        {
+          targetKey: "openai-default",
+          displayName: "OpenAI",
+          familyId: "openai",
+          variantId: "openai-default",
+          config: {
+            api_base_url: "https://api.openai.com",
+          },
+          targetHealth: {
+            configStatus: "valid",
+          },
+        },
+      ],
       versionState: "draft",
     });
 
@@ -3219,36 +3393,13 @@ describe("SandboxProfileEditorPage", () => {
     ).toBe("sbi_start_completed_after_close_request");
   });
 
-  it("uses the latest saved draft when local changes remove the saved agent", () => {
-    renderSandboxProfileEditor({
-      bindings: [
-        {
-          id: "binding-agent",
-          connectionId: "missing-agent-connection",
-          kind: "agent",
-          config: {},
-        },
-      ],
-      routeSection: "sandbox-profile",
-      setupScript: "pnpm install\npnpm dev:bootstrap",
-      versionState: "draft",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove agent provider" }));
-
-    const setupAssistantButton = screen.getByRole("button", {
-      name: "Setup Assistant",
-    });
-    expect(setupAssistantButton.getAttribute("title")).toBe(
-      "Choose whether to save changes before opening Setup Assistant.",
-    );
-
-    fireEvent.click(setupAssistantButton);
-
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByText("Unsaved changes")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Use latest saved draft" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Save and open" })).toBeNull();
+  it("resolves the latest-saved-draft-only Setup Assistant dialog when local changes remove the saved agent", () => {
+    expect(
+      resolveSetupAssistantStartDialogVariant({
+        latestSavedDraftHasAgentRuntime: true,
+        localDraftHasAgentRuntime: false,
+      }),
+    ).toBe("use-saved-required");
   });
 
   it("renders the save-required Setup Assistant dialog without the saved-draft action", () => {
@@ -3274,7 +3425,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByText("Save draft to use Setup Assistant")).toBeTruthy();
     expect(
       screen.getByText(
-        "Setup Assistant needs a saved draft with an agent integration. Save your current changes before opening it.",
+        "Setup Assistant needs a saved draft with an agent runtime connection. Save your current changes before opening it.",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Use latest saved draft" })).toBeNull();
@@ -3308,7 +3459,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
     expect(
       screen.getByText(
-        "Setup Assistant needs a saved draft with an agent integration. Your current changes remove the saved agent integration, so open it with the latest saved draft instead. Your unsaved editor changes will stay in the editor.",
+        "Setup Assistant needs a saved draft with an agent runtime connection. Your current changes remove the saved agent runtime connection, so open it with the latest saved draft instead. Your unsaved editor changes will stay in the editor.",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save and open" })).toBeNull();
@@ -3357,7 +3508,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByText("Stop Setup Assistant?")).toBeTruthy();
     expect(
       screen.getByText(
-        "Closing the Setup Assistant stops its temporary sandbox. The setup script draft stays in the editor.",
+        "Closing the Setup Assistant stops its temporary sandbox. Unsaved script edits stay only while this profile editor remains open; save them before leaving or reloading.",
       ),
     ).toBeTruthy();
 
@@ -3369,7 +3520,7 @@ describe("SandboxProfileEditorPage", () => {
     expect(confirmed).toBe(true);
   });
 
-  it("disables setup script testing for empty and published scripts", () => {
+  it("disables setup script testing for empty scripts and hides editor actions for published scripts", () => {
     renderSandboxProfileEditor({
       bindings: [
         {
@@ -3402,20 +3553,12 @@ describe("SandboxProfileEditorPage", () => {
       versionState: "published",
     });
 
-    const publishedTestButton = screen.getByRole("button", {
-      name: "Test",
-    });
-    const publishedWriteButton = screen.getByRole("button", {
-      name: "Setup Assistant",
-    });
-    expect(publishedTestButton.hasAttribute("disabled")).toBe(true);
-    expect(publishedTestButton.getAttribute("title")).toBe(
-      "Setup script testing is only available while editing a draft.",
-    );
-    expect(publishedWriteButton.hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Test" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Setup Assistant" })).toBeNull();
+    expect(getReadOnlyScriptBlock(document.body).textContent).toBe("pnpm install");
   });
 
-  it("disables Setup Assistant when no agent runtime is configured", () => {
+  it("highlights the agent runtime connection field after Setup Assistant is requested without one", () => {
     renderSandboxProfileEditor({
       bindings: [
         {
@@ -3425,8 +3568,30 @@ describe("SandboxProfileEditorPage", () => {
           config: {},
         },
       ],
+      connections: [
+        {
+          id: "connection-agent",
+          displayName: "OpenAI connection",
+          targetKey: "openai-default",
+          status: "active",
+        },
+      ],
       routeSection: "sandbox-profile",
       setupScript: "pnpm install",
+      targets: [
+        {
+          targetKey: "openai-default",
+          displayName: "OpenAI",
+          familyId: "openai",
+          variantId: "openai-default",
+          config: {
+            api_base_url: "https://api.openai.com",
+          },
+          targetHealth: {
+            configStatus: "valid",
+          },
+        },
+      ],
       versionState: "draft",
     });
 
@@ -3434,10 +3599,21 @@ describe("SandboxProfileEditorPage", () => {
       name: "Setup Assistant",
     });
 
-    expect(setupAssistantButton.hasAttribute("disabled")).toBe(true);
+    expect(setupAssistantButton.hasAttribute("disabled")).toBe(false);
     expect(setupAssistantButton.getAttribute("title")).toBe(
-      "Add an agent integration before using Setup Assistant.",
+      "Select and save an agent runtime connection before using Setup Assistant.",
     );
+
+    fireEvent.click(setupAssistantButton);
+
+    expect(
+      screen.getAllByText(
+        "Select and save an agent runtime connection before using Setup Assistant.",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("combobox", { name: "OpenAI connection" }).getAttribute("aria-invalid"),
+    ).toBe("true");
   });
 
   it("renders published profiles as read-only", () => {
@@ -3481,6 +3657,17 @@ describe("SandboxProfileEditorPage", () => {
     expect(screen.getByText("Codex connection")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Setup script behavior" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Environment and installed tools" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Setup script" })).toBeNull();
+
+    const setupScriptSection = screen
+      .getByRole("heading", { name: "Setup Script" })
+      .closest("section");
+    if (setupScriptSection === null) {
+      throw new Error("Setup script section not found.");
+    }
+    const setupScriptBlock = getReadOnlyScriptBlock(setupScriptSection);
+    expect(setupScriptBlock.textContent).toBe("pnpm install\npnpm dev:bootstrap");
+    expectReadOnlyScriptBlockToUseEditorScrollBounds(setupScriptBlock);
   });
 
   it("renders published profiles with existing drafts as resumable", () => {
@@ -3575,11 +3762,16 @@ describe("SandboxProfileEditorPage", () => {
 
   it("surfaces draft save failures inside the sandbox profile tab", () => {
     renderDraftActionsHarness({
-      draftSaveError: "Saving draft failed. Please try again later.",
+      draftSaveError:
+        "Saving draft failed. Fix the highlighted profile settings below and try again.",
     });
 
     expect(screen.queryByText("Profile version action failed")).toBeNull();
-    expect(screen.getByText("Saving draft failed. Please try again later.")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Saving draft failed. Fix the highlighted profile settings below and try again.",
+      ),
+    ).toBeDefined();
   });
 
   it("surfaces saved draft trigger impact warnings", () => {

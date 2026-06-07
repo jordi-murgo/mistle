@@ -7,6 +7,17 @@ import {
   SandboxProfileEditorPageStory,
 } from "./sandbox-profile-editor-story-support.js";
 
+const LongMaintenanceScript = [
+  "#!/usr/bin/env bash",
+  "set -euo pipefail",
+  "",
+  ...Array.from(
+    { length: 80 },
+    (_unused, index) =>
+      `printf 'Refreshing snapshot maintenance step ${String(index + 1).padStart(2, "0")}\\n'`,
+  ),
+].join("\n");
+
 const meta = {
   title: "Dashboard/SandboxProfiles/Editor/Snapshots",
   component: SandboxProfileEditorPageStory,
@@ -126,6 +137,41 @@ set -euo pipefail
 
 pnpm install --frozen-lockfile
 pnpm db:migrate`,
+    snapshotRefreshScheduleState: "existing",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const MaintenanceAssistantPanelReady: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    setupAssistantPanelState: "ready",
+    snapshotMaintenanceScript: `#!/usr/bin/env bash
+set -euo pipefail
+
+pnpm install --frozen-lockfile
+pnpm db:migrate`,
+    snapshotRefreshScheduleState: "existing",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const LongSnapshotMaintenanceScriptEditor: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotMaintenanceScript: LongMaintenanceScript,
+    snapshotRefreshScheduleState: "existing-editing",
+    snapshotState: "snapshot-ready",
+  },
+};
+
+export const LongSnapshotMaintenanceScriptReadOnly: Story = {
+  args: {
+    initialSectionId: "snapshot",
+    lifecycleState: "published",
+    snapshotMaintenanceScript: LongMaintenanceScript,
     snapshotRefreshScheduleState: "existing",
     snapshotState: "snapshot-ready",
   },

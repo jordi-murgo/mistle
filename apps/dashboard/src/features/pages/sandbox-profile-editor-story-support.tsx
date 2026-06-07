@@ -107,7 +107,12 @@ export type SandboxProfileEditorPageStoryArgs = {
     | "snapshot-ready"
     | "snapshot-failed"
     | "refresh-failed";
-  snapshotRefreshScheduleState?: "none" | "existing" | "invalid-preview" | "save-failure";
+  snapshotRefreshScheduleState?:
+    | "none"
+    | "existing"
+    | "existing-editing"
+    | "invalid-preview"
+    | "save-failure";
   snapshotMaintenanceScript?: string | null;
   integrationsSectionState?: {
     bindingsErrorMessage?: string;
@@ -115,6 +120,7 @@ export type SandboxProfileEditorPageStoryArgs = {
     kind: "error";
   };
   draftSaveErrorMessage?: string;
+  agentRuntimeConnectionErrorMessage?: string;
   draftTriggerImpactError?: string;
   draftTriggerImpactAffectedTriggers?: readonly SandboxProfileVersionDraftTriggerImpactTrigger[];
   duplicateProfileAvailability?: "available" | "unavailable";
@@ -387,7 +393,20 @@ export const StoryMistleApiKey = {
   id: "apk_story_mistle_agent",
   name: "Sandbox agent key",
   secretPrefix: "mstl_apk_story",
-  permissions: ["sandboxProfile:read", "sandboxProfile:update", "sandboxSession:read"],
+  permissions: [
+    "sandboxProfile:read",
+    "sandboxProfile:create",
+    "sandboxProfile:update",
+    "sandboxProfile:delete",
+    "sandboxSession:create",
+    "sandboxSession:read",
+    "sandboxSession:resume",
+    "sandboxSession:connect",
+    "triggerWebhook:read",
+    "triggerWebhook:create",
+    "triggerWebhook:update",
+    "triggerWebhook:delete",
+  ],
   expiresAt: null,
   lastUsedAt: "2026-05-13T10:00:00.000Z",
   createdAt: "2026-05-01T10:00:00.000Z",
@@ -626,7 +645,7 @@ function createSnapshotPanelState(status: SnapshotStoryStatus): SnapshotPanelSta
 function createSnapshotRefreshSchedule(
   state: SnapshotRefreshScheduleStoryState,
 ): SnapshotRefreshSchedule {
-  return state === "existing"
+  return state === "existing" || state === "existing-editing"
     ? {
         cronExpression: "0 9 * * 1",
         enabled: true,
@@ -641,6 +660,13 @@ function createSnapshotRefreshSchedule(
 function createSnapshotRefreshScheduleInitialDraft(
   state: SnapshotRefreshScheduleStoryState,
 ): { cronExpression: string; timezone: string } | null {
+  if (state === "existing-editing") {
+    return {
+      cronExpression: "0 9 * * 1",
+      timezone: "Asia/Singapore",
+    };
+  }
+
   if (state === "invalid-preview") {
     return {
       cronExpression: "not a cron expression",
@@ -781,23 +807,6 @@ function SetupAssistantPanel(input: {
             title={statusLabel}
           />
           <span aria-hidden className="h-5 w-px bg-border" />
-          <Button
-            aria-label="TUI"
-            aria-pressed={false}
-            className={controlClassName}
-            disabled={controlsAreDisabled}
-            onClick={() => {}}
-            size="sm"
-            title={
-              controlsAreDisabled
-                ? "Setup Assistant TUI is unavailable."
-                : "Open Setup Assistant TUI"
-            }
-            type="button"
-            variant="ghost"
-          >
-            TUI
-          </Button>
           <Button
             aria-label="Open terminal"
             aria-pressed={false}
@@ -1043,6 +1052,8 @@ function SandboxProfileEditorPageStoryView(
     input.setupAssistantStartDialogState !== undefined,
   );
   const [setupAssistantCloseDialogOpen, setSetupAssistantCloseDialogOpen] = useState(false);
+  const [setupAssistantCloseNavigationSectionId, setSetupAssistantCloseNavigationSectionId] =
+    useState<StorySectionId | null>(null);
   const [duplicateProfileDialogOpen, setDuplicateProfileDialogOpen] = useState(
     input.duplicateProfileDialogState === "open" || input.duplicateProfileDialogState === "error",
   );
@@ -1139,6 +1150,10 @@ function SandboxProfileEditorPageStoryView(
   function handleConfirmSetupAssistantClose(): void {
     setSetupAssistantCloseDialogOpen(false);
     setSetupAssistantPanelOpen(false);
+    if (setupAssistantCloseNavigationSectionId !== null) {
+      setActiveSectionId(setupAssistantCloseNavigationSectionId);
+      setSetupAssistantCloseNavigationSectionId(null);
+    }
   }
 
   async function handleCreateApiKey(createInput: {
@@ -1204,6 +1219,9 @@ function SandboxProfileEditorPageStoryView(
       }
       duplicateProfileTriggerUsagesIsPending={duplicateProfileTriggerState === "loading"}
       draftTriggerImpactError={input.draftTriggerImpactError ?? null}
+      {...(input.draftTriggerImpactError === undefined
+        ? {}
+        : { draftTriggerImpactErrorAutoHideAfterMs: null })}
       draftTriggerImpactAffectedTriggers={input.draftTriggerImpactAffectedTriggers ?? null}
       onDraftTriggerImpactErrorDismiss={() => {}}
       hasUnpersistedSetupScriptChanges={setupScriptDraft !== persistedSetupScript}
@@ -1221,7 +1239,15 @@ function SandboxProfileEditorPageStoryView(
         setPersistedSetupScript(setupScriptDraft);
       }}
       onSaveProfileName={handleProfileNameSave}
-      onActiveSectionIdChange={setActiveSectionId}
+      onActiveSectionIdChange={(sectionId) => {
+        if (setupAssistantPanelOpen && sectionId !== activeSectionId) {
+          setSetupAssistantCloseNavigationSectionId(sectionId);
+          setSetupAssistantCloseDialogOpen(true);
+          return;
+        }
+
+        setActiveSectionId(sectionId);
+      }}
       onViewActive={() => {}}
       onViewDraft={() => {}}
       profileName={profileName}
@@ -1251,6 +1277,9 @@ function SandboxProfileEditorPageStoryView(
                     }}
                     integrationRows={integrationRows}
                     integrationSaveError={null}
+                    agentRuntimeConnectionErrorMessage={
+                      input.agentRuntimeConnectionErrorMessage ?? null
+                    }
                     gitCommitSigningIntegrationConnectionId={
                       gitCommitSigningIntegrationConnectionId
                     }
@@ -1336,6 +1365,7 @@ function SandboxProfileEditorPageStoryView(
                   <SandboxProfileSetupScriptPanel
                     onChange={setSetupScriptDraft}
                     disabled={!isEditable}
+                    readOnly={!isEditable}
                     repositoryHandles={resolveSandboxBaseRepositoryHandles(integrationRows)}
                     testControl={
                       <SetupScriptStoryControls
@@ -1471,8 +1501,10 @@ function SandboxProfileEditorPageStoryView(
             isOpen={setupAssistantCloseDialogOpen}
             onCancel={() => {
               setSetupAssistantCloseDialogOpen(false);
+              setSetupAssistantCloseNavigationSectionId(null);
             }}
             onConfirm={handleConfirmSetupAssistantClose}
+            reason={setupAssistantCloseNavigationSectionId === null ? "close" : "switch-tabs"}
           />
         </div>
       )}

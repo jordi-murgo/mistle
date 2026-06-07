@@ -17,11 +17,12 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
   Spinner,
 } from "@mistle/ui";
-import { ArrowClockwiseIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, PlusIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -390,7 +391,7 @@ export function SandboxProfileSkillsSection(input: {
     const publicSourceOption = createPublicGitHubSkillsSourceOption(publicSourceUrl);
     if (publicSourceOption === null) {
       setPublicSourceErrorMessage(
-        "Enter a public GitHub repository URL like https://github.com/owner/repo.",
+        "Enter a public GitHub repository URL like https://github.com/mistlehq/skills",
       );
       return;
     }
@@ -644,11 +645,6 @@ export function SandboxProfileSkillsSection(input: {
               source.
             </Notice>
           ) : null}
-          {selectableSourceOptions.length === 0 && selectedOriginUrl === null ? (
-            <Notice title="Skills source required">
-              Add a Git repository binding or a public GitHub repository before configuring skills.
-            </Notice>
-          ) : null}
           {unavailableSelectedSkillsMessage === null ? null : (
             <Notice title="Selected skills no longer found" variant="alert">
               {unavailableSelectedSkillsMessage}
@@ -674,9 +670,6 @@ export function SandboxProfileSkillsSection(input: {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NoSkillsSourceValue}>None</SelectItem>
-                    <SelectItem value={AddPublicGitHubSourceValue}>
-                      Add public GitHub repo
-                    </SelectItem>
                     {sourceIsUnavailable && draftConfig !== null ? (
                       <SelectItem disabled value={draftConfig.originUrl}>
                         Unavailable repository
@@ -687,6 +680,17 @@ export function SandboxProfileSkillsSection(input: {
                         {sourceOption.label}
                       </SelectItem>
                     ))}
+                    <SelectSeparator />
+                    <SelectItem
+                      className="text-primary focus:text-primary"
+                      onClick={openPublicSourceDialog}
+                      value={AddPublicGitHubSourceValue}
+                    >
+                      <span className="flex items-center gap-2">
+                        <PlusIcon aria-hidden className="size-4" />
+                        Add public GitHub repo
+                      </span>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 {reloadButtonIsVisible ? (
@@ -731,9 +735,6 @@ export function SandboxProfileSkillsSection(input: {
           >
             <DialogHeader>
               <DialogTitle>Add public GitHub repo</DialogTitle>
-              <DialogDescription>
-                Use a public GitHub repository that contains Mistle skills.
-              </DialogDescription>
             </DialogHeader>
             <Field contentWidth="fill">
               <FieldHeader>
@@ -748,7 +749,7 @@ export function SandboxProfileSkillsSection(input: {
                     setPublicSourceUrl(event.target.value);
                     setPublicSourceErrorMessage(null);
                   }}
-                  placeholder="https://github.com/owner/repo"
+                  placeholder="e.g. https://github.com/mistlehq/skills"
                   value={publicSourceUrl}
                 />
               </FieldContent>

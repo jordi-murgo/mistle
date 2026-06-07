@@ -9407,6 +9407,12 @@ export interface paths {
         content: {
           "application/json": {
             displayName: string;
+            sandboxProvider?: string;
+            sandboxResources?: {
+              diskMb?: number;
+              memoryMb: number;
+              vcpuCount: number;
+            } | null;
           };
         };
       };
@@ -9435,11 +9441,17 @@ export interface paths {
             [name: string]: unknown;
           };
           content: {
-            "application/json": {
-              /** @enum {string} */
-              code: "VALIDATION_ERROR";
-              message: string;
-            };
+            "application/json":
+              | {
+                  /** @enum {string} */
+                  code: "VALIDATION_ERROR";
+                  message: string;
+                }
+              | {
+                  /** @enum {string} */
+                  code: "INVALID_SANDBOX_RUNTIME_CONFIG";
+                  message: string;
+                };
           };
         };
         /** @description Authentication is required. */
@@ -12303,6 +12315,11 @@ export interface paths {
               | {
                   /** @enum {string} */
                   code: "VALIDATION_ERROR";
+                  message: string;
+                }
+              | {
+                  /** @enum {string} */
+                  code: "AGENT_RUNTIME_CONNECTION_REQUIRED";
                   message: string;
                 };
           };
