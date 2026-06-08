@@ -2,6 +2,7 @@ import type { PortsTargetAuthorizeResult, ProcessEntry } from "@mistle/sandbox-s
 import { systemScheduler, type TimerHandle } from "@mistle/time";
 import { useCallback, useMemo, useState } from "react";
 
+import { generateUUID } from "../../lib/uuid.js";
 import { HttpApiError } from "../api/http-api-error.js";
 import { createSandboxInstancePortAccess } from "../sessions/sessions-service.js";
 import { openDeferredExternalWindow } from "../shared/external-window.js";
@@ -27,7 +28,7 @@ function createPortsAuthorizeRequest(port: number): {
   requestId: string;
   payload: string;
 } {
-  const requestId = crypto.randomUUID();
+  const requestId = generateUUID();
   return {
     requestId,
     payload: JSON.stringify({

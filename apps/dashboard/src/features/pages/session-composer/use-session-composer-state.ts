@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ChatAttachment } from "../../chat/chat-types.js";
 import type { ChatComposerViewModel } from "../../chat/components/chat-composer.js";
+import { generateUUID } from "../../../lib/uuid.js";
 import {
   buildSessionComposerPrompt,
   buildPendingSessionDiffCommentSummaryLabel,
@@ -295,7 +296,7 @@ export function useSessionComposerState(input: {
   const addPendingComposerFiles = useCallback(
     (files: readonly File[]): void => {
       const nextAttachments = files.map((file) => ({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         file,
         name: file.name,
       }));
@@ -512,7 +513,7 @@ export function useSessionComposerState(input: {
     setQueuedPrompts((currentQueuedPrompts) => [
       ...currentQueuedPrompts,
       {
-        id: `queued-prompt-${crypto.randomUUID()}`,
+        id: `queued-prompt-${generateUUID()}`,
         text: trimmedComposerText,
         attachments: pendingComposerAttachments,
         pendingDiffComments: draftState.pendingDiffComments,

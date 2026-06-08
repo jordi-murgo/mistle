@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useEffect, useRef, useState } from "react";
 
 import type { ChatEntry } from "../chat/chat-types.js";
+import { generateUUID } from "../../lib/uuid.js";
 import { ChatUserMessage } from "../chat/components/chat-user-message.js";
 import { CodexFixtureSessionModelOptions } from "../session-agents/codex/fixtures/session-fixtures.js";
 import { SessionComposerFixtureProps } from "../session-agents/codex/fixtures/session-fixtures.js";
@@ -200,7 +201,7 @@ function appendAssistantTextAfterLatestTurnEntry(input: {
   return [
     ...input.currentEntries,
     {
-      id: `${input.activeTurnId}:assistant-followup:${crypto.randomUUID()}`,
+      id: `${input.activeTurnId}:assistant-followup:${generateUUID()}`,
       turnId: input.activeTurnId,
       kind: "assistant-message",
       phase: null,
@@ -284,7 +285,7 @@ function SessionConversationWorkbenchHarness(input: {
       return;
     }
 
-    const steerEntryId = `steer-user-${crypto.randomUUID()}`;
+    const steerEntryId = `steer-user-${generateUUID()}`;
 
     setEntries((currentEntries) => [
       ...currentEntries,
@@ -327,7 +328,7 @@ function SessionConversationWorkbenchHarness(input: {
     setQueuedPrompts((currentQueuedPrompts) => [
       ...currentQueuedPrompts,
       {
-        id: `queued-prompt-${crypto.randomUUID()}`,
+        id: `queued-prompt-${generateUUID()}`,
         text: queuedText,
       },
     ]);

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 
 import { isUnavailableResourceError } from "../api/http-api-error.js";
+import { generateUUID } from "../../lib/uuid.js";
 import type { ChatComposerViewModel } from "../chat/components/chat-composer.js";
 import {
   RuntimeConversationNavigatorPanel,
@@ -91,7 +92,7 @@ function SessionWorkbenchPageContent(input: {
         ...currentComments,
         {
           ...comment,
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           status: comment.status ?? {
             kind: "current",
           },

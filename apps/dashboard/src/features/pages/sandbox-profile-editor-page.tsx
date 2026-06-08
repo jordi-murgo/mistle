@@ -38,6 +38,8 @@ import {
 } from "@mistle/ui";
 import { SidebarSimpleIcon, TerminalIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+
+import { generateUUID } from "../../lib/uuid.js";
 import {
   useCallback,
   useEffect,
@@ -1810,7 +1812,7 @@ function ReadySandboxProfileEditorPage(input: {
     mutationFn: async (sandboxInstanceId: string) =>
       stopSandboxInstance({
         instanceId: sandboxInstanceId,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: generateUUID(),
       }),
     onError: (error: unknown) => {
       console.error(
@@ -1825,7 +1827,7 @@ function ReadySandboxProfileEditorPage(input: {
     meta: NoLoadingIndicatorMeta,
     mutationFn: async (request: { scriptKind: SetupAssistantScriptKind; version: number }) =>
       startSandboxProfileSetupAssistant({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: generateUUID(),
         profileId: input.profileId,
         scriptKind: request.scriptKind,
         version: request.version,

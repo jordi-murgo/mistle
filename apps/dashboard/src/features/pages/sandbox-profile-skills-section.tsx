@@ -29,6 +29,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
+import { generateUUID } from "../../lib/uuid.js";
 import { sandboxProfileVersionSkillsSourceReposQueryKey } from "../sandbox-profiles/sandbox-profiles-query-keys.js";
 import {
   listSandboxProfileVersionSkillsSourceRepos,
@@ -195,7 +196,7 @@ export function SandboxProfileSkillsSection(input: {
         profileId: input.profileId,
         version: input.version.version,
         originUrl,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: generateUUID(),
       }),
     onSuccess: (result) => {
       setSaveErrorMessage(null);

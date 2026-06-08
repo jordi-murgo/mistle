@@ -1,3 +1,5 @@
+import { generateUUID } from "../../lib/uuid.js";
+
 export type OrganizationOnboardingValidation = {
   nameError: string | null;
 };
@@ -28,5 +30,5 @@ export function resolveOrganizationOnboardingValidation(input: {
 }
 
 export function createOrganizationCreateSlug(): string {
-  return `org-${globalThis.crypto.randomUUID()}`;
+  return `org-${generateUUID()}`;
 }

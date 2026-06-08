@@ -1,3 +1,4 @@
+import { generateUUID } from "../../../../lib/uuid.js";
 import type { SelectedSkillMention, SkillMentionDescriptor } from "@mistle/integrations-core";
 import {
   buildCodexTurnInputItems,
@@ -23,7 +24,7 @@ import {
 import { readCodexThreadState } from "./codex-thread-read-state.js";
 
 function createSteerEntryId(): string {
-  return `steer:${crypto.randomUUID()}`;
+  return `steer:${generateUUID()}`;
 }
 
 type QueuedSteerRequest = {

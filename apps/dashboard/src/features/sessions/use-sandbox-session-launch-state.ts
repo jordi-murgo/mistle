@@ -1,3 +1,4 @@
+import { generateUUID } from "../../lib/uuid.js";
 import { systemScheduler } from "@mistle/time";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -114,7 +115,7 @@ export function useSandboxSessionLaunchState(): UseSandboxSessionLaunchStateResu
           profileId: input.profileId,
           profileVersion: input.profileVersion,
           primaryRepositoryId: null,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: generateUUID(),
         });
       } catch (error) {
         throw describeStepError("Starting sandbox instance", error);

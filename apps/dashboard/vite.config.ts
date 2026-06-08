@@ -23,6 +23,11 @@ export default defineConfig({
   server: {
     strictPort: true,
   },
+  define: {
+    // Prevent Rolldown from resolving the bare `crypto` identifier to
+    // node:crypto. Force it to use the browser's globalThis.crypto.
+    "crypto.randomUUID": "globalThis.crypto.randomUUID",
+  },
   resolve: {
     conditions: ["workspace-src", "module", "browser", "development|production"],
     alias: [

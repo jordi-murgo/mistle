@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
+import { generateUUID } from "../../lib/uuid.js";
 import { SingleSelectStringComboboxField } from "../forms/single-select-string-combobox-field.js";
 import { formatCompactSandboxProfileVersion } from "../sandbox-profiles/sandbox-profile-version-labels.js";
 import type { LaunchableSandboxProfile } from "../sandbox-profiles/sandbox-profiles-types.js";
@@ -98,7 +99,7 @@ export function NewSessionForm(input?: { initialSelectedProfileId?: string }): R
           profileId: input.profile.id,
           profileVersion: input.profileVersion,
           primaryRepositoryId: input.primaryRepositoryId,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: generateUUID(),
         });
       } catch (error) {
         if (error instanceof Error && error.message.trim().length > 0) {

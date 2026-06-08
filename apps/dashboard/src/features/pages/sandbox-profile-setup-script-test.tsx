@@ -12,6 +12,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { resolveApiErrorMessage } from "../api/error-message.js";
+import { generateUUID } from "../../lib/uuid.js";
 import {
   startSandboxProfileMaintenanceScriptTestRun,
   startSandboxProfileSetupScriptTestRun,
@@ -473,7 +474,7 @@ function useSandboxProfileScriptTestRun(input: {
     meta: NoLoadingIndicatorMeta,
     mutationFn: async (request: SetupScriptTestRunRequest) =>
       startTestRun({
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: generateUUID(),
         ...request,
       }),
     onSuccess: (result, request) => {
