@@ -582,9 +582,13 @@ async function connectOpenCodeSessionForTest(input: {
   });
 
   const messagesRequest = await input.server.nextRequest();
+  const messagesPath =
+    input.initialCwd === undefined
+      ? `/session/${input.sessionId}/message`
+      : `/session/${input.sessionId}/message?directory=${encodeURIComponent(input.initialCwd)}`;
   expect(messagesRequest.request).toMatchObject({
     method: "GET",
-    path: `/session/${input.sessionId}/message`,
+    path: messagesPath,
   });
   input.server.sendJsonResponse({
     request: messagesRequest,
@@ -1104,6 +1108,7 @@ describe("useOpenCodeSessionState", () => {
     );
 
     const permissionsRequest = await connectOpenCodeSessionForTest({
+      initialCwd: "/workspace/repo",
       result,
       sandboxInstanceId: "sbi_123",
       server,
@@ -1217,6 +1222,190 @@ describe("useOpenCodeSessionState", () => {
 
     await expect(resumePromise).resolves.toBe("ses_newer");
     expect(result.current.sessions.originalSessionId).toBe("ses_original");
+  });
+
+  it("hydrates resumed OpenCode messages from the active repository directory", async () => {
+    const server = await startOpenCodeProxyTransportServer();
+    const transport = await connectTransport(server);
+    const { result } = renderHook(() =>
+      useOpenCodeSessionState({
+        ensureTransportConnected: async () => {
+          return {
+            sandboxInstanceId: "sbi_123",
+            transport,
+          };
+        },
+      }),
+    );
+
+    const permissionsRequest = await connectOpenCodeSessionForTest({
+      initialCwd: "/workspace/repo",
+      result,
+      sandboxInstanceId: "sbi_123",
+      server,
+      sessionId: "ses_current",
+    });
+    server.sendJsonResponse({
+      request: permissionsRequest,
+      body: [],
+    });
+
+    await waitFor(() => {
+      expect(result.current.lifecycle.sessionConnectionState).toBe("connected");
+    });
+
+    let resumePromise: Promise<string> | undefined;
+    act(() => {
+      resumePromise = result.current.sessions.resumeSession("ses_next");
+    });
+
+    const getSessionRequest = await server.nextRequest();
+    expect(getSessionRequest.request).toMatchObject({
+      method: "GET",
+      path: "/session/ses_next?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: getSessionRequest,
+      body: createSessionResponse("ses_next", {
+        directory: "/workspace/repo",
+      }),
+    });
+
+    const messagesRequest = await server.nextRequest();
+    expect(messagesRequest.request).toMatchObject({
+      method: "GET",
+      path: "/session/ses_next/message?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: messagesRequest,
+      body: [],
+    });
+
+    const permissionsAfterResumeRequest = await server.nextRequest();
+    expect(permissionsAfterResumeRequest.request).toMatchObject({
+      method: "GET",
+      path: "/permission?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: permissionsAfterResumeRequest,
+      body: [],
+    });
+
+    const commandsAfterResumeRequest = await server.nextRequest();
+    expect(commandsAfterResumeRequest.request).toMatchObject({
+      method: "GET",
+      path: "/command?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: commandsAfterResumeRequest,
+      body: [],
+    });
+
+    await expect(resumePromise).resolves.toBe("ses_next");
+  });
+
+  it("hydrates new OpenCode session messages from the active repository directory", async () => {
+    const server = await startOpenCodeProxyTransportServer();
+    const transport = await connectTransport(server);
+    const { result } = renderHook(() =>
+      useOpenCodeSessionState({
+        ensureTransportConnected: async () => {
+          return {
+            sandboxInstanceId: "sbi_123",
+            transport,
+          };
+        },
+      }),
+    );
+
+    const permissionsRequest = await connectOpenCodeSessionForTest({
+      initialCwd: "/workspace/repo",
+      result,
+      sandboxInstanceId: "sbi_123",
+      server,
+      sessionId: "ses_current",
+    });
+    server.sendJsonResponse({
+      request: permissionsRequest,
+      body: [],
+    });
+
+    await waitFor(() => {
+      expect(result.current.lifecycle.sessionConnectionState).toBe("connected");
+    });
+
+    let startPromise: Promise<string> | undefined;
+    act(() => {
+      startPromise = result.current.sessions.startNewSession();
+    });
+
+    const providersRequest = await server.nextRequest();
+    expect(providersRequest.request).toMatchObject({
+      method: "GET",
+      path: "/config/providers?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: providersRequest,
+      body: createOpenCodeProviderCatalogResponse(),
+    });
+
+    const commandsRequest = await server.nextRequest();
+    expect(commandsRequest.request).toMatchObject({
+      method: "GET",
+      path: "/command?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: commandsRequest,
+      body: [],
+    });
+
+    const createSessionRequest = await server.nextRequest();
+    expect(createSessionRequest.request).toMatchObject({
+      method: "POST",
+      path: "/session?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: createSessionRequest,
+      body: createSessionResponse("ses_new", {
+        directory: "/workspace/repo",
+      }),
+    });
+
+    const messagesRequest = await server.nextRequest();
+    expect(messagesRequest.request).toMatchObject({
+      method: "GET",
+      path: "/session/ses_new/message?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: messagesRequest,
+      body: [],
+    });
+
+    const permissionsAfterStartRequest = await server.nextRequest();
+    expect(permissionsAfterStartRequest.request).toMatchObject({
+      method: "GET",
+      path: "/permission?directory=%2Fworkspace%2Frepo",
+    });
+    server.sendJsonResponse({
+      request: permissionsAfterStartRequest,
+      body: [],
+    });
+
+    const sessionListRequest = await server.nextRequest();
+    expect(sessionListRequest.request).toMatchObject({
+      method: "GET",
+      path: "/session?directory=%2Fworkspace%2Frepo&limit=21",
+    });
+    server.sendJsonResponse({
+      request: sessionListRequest,
+      body: [
+        createSessionResponse("ses_new", {
+          directory: "/workspace/repo",
+        }),
+      ],
+    });
+
+    await expect(startPromise).resolves.toBe("ses_new");
   });
 
   it("uses the provider OpenCode session as original when the sandbox supplies one", async () => {
@@ -1596,6 +1785,7 @@ describe("useOpenCodeSessionState", () => {
     );
 
     const permissionsRequest = await connectOpenCodeSessionForTest({
+      initialCwd: "/workspace/repo",
       result,
       sandboxInstanceId: "sbi_123",
       server,
@@ -1621,7 +1811,7 @@ describe("useOpenCodeSessionState", () => {
     const messagesRequest = await server.nextRequest();
     expect(messagesRequest.request).toMatchObject({
       method: "GET",
-      path: "/session/ses_test/message",
+      path: "/session/ses_test/message?directory=%2Fworkspace%2Frepo",
     });
     server.sendJsonError({
       request: messagesRequest,
@@ -1662,6 +1852,7 @@ describe("useOpenCodeSessionState", () => {
     };
 
     const permissionsRequest = await connectOpenCodeSessionForTest({
+      initialCwd: "/workspace/repo",
       result,
       sandboxInstanceId: "sbi_123",
       server,
@@ -1687,7 +1878,7 @@ describe("useOpenCodeSessionState", () => {
     const messagesRequest = await server.nextRequest();
     expect(messagesRequest.request).toMatchObject({
       method: "GET",
-      path: "/session/ses_test/message",
+      path: "/session/ses_test/message?directory=%2Fworkspace%2Frepo",
     });
     server.sendJsonResponse({
       request: messagesRequest,
@@ -1697,7 +1888,7 @@ describe("useOpenCodeSessionState", () => {
     const strictPermissionsRequest = await server.nextRequest();
     expect(strictPermissionsRequest.request).toMatchObject({
       method: "GET",
-      path: "/permission",
+      path: "/permission?directory=%2Fworkspace%2Frepo",
     });
     server.sendJsonResponse({
       request: strictPermissionsRequest,
@@ -1891,7 +2082,7 @@ describe("useOpenCodeSessionState", () => {
     const messagesRequest = await server.nextRequest();
     expect(messagesRequest.request).toMatchObject({
       method: "GET",
-      path: "/session/ses_test/message",
+      path: "/session/ses_test/message?directory=%2Fworkspace%2Frepo",
     });
     server.sendJsonResponse({
       request: messagesRequest,
